@@ -15,6 +15,7 @@ export default function Workspace() {
   const [jobId, setJobId] = useState<string | null>(params.get('job'));
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [jobStatus, setJobStatus] = useState<string>('queued');
+  const [jobStep, setJobStep] = useState<string>('');
   const [versionId, setVersionId] = useState<string | null>(null);
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
@@ -57,7 +58,7 @@ export default function Workspace() {
         const j = await api.job(jobId, since);
         if (stop) return;
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
-        setJobStatus(j.status);
+        setJobStatus(j.status); setJobStep(j.step);
         if (j.events.some((e) => e.type === 'version' || e.type === 'done')) await refresh();
         if (j.status === 'queued' || j.status === 'running') setTimeout(tick, 700);
         else await refresh();
@@ -147,6 +148,7 @@ export default function Workspace() {
         </div>
       </div>
       {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
+      {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'The versions recorded so far are shown below; use “Request change” or Remix to continue from them.' : 'Nothing was recorded; start a new build.'}</div>}
 
       <div className="flex gap-1 border-b border-slate-200 bg-white px-2 py-1 md:hidden">
         {(['canvas', 'tree', 'agent'] as const).map((p) => <button key={p} onClick={() => setMobilePane(p)} className={`rounded-full px-3 py-1 text-sm capitalize ${mobilePane === p ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>{p === 'canvas' ? '3D' : p === 'tree' ? 'Parts' : 'Agent'}</button>)}
@@ -201,7 +203,7 @@ export default function Workspace() {
             {(['activity', 'spec', 'tests'] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-t-md px-3 py-1.5 text-xs font-medium capitalize ${tab === t ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>{t}</button>)}
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            {tab === 'activity' && <ActivityPanel events={events} running={running} versions={detail?.versions ?? []} currentVersionId={versionId} onPickVersion={setVersionId} />}
+            {tab === 'activity' && <ActivityPanel events={events} running={running} versions={detail?.versions ?? []} currentVersionId={versionId} onPickVersion={setVersionId} status={jobStatus} />}
             {tab === 'spec' && <div className="overflow-auto p-3">{version ? <SpecPanel spec={version.spec} /> : <p className="text-xs text-slate-400">No spec yet.</p>}</div>}
             {tab === 'tests' && (
               <div className="overflow-auto p-3 space-y-3">
