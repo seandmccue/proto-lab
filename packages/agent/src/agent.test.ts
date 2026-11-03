@@ -169,8 +169,21 @@ test('define_test accepts its test object sent as a JSON string', async () => {
   const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
   await rt.call('assemble', { rationale: 'tower + rotor', ops: [
     { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0.25, 0], anchored: true },
-    { op: 'mount', id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+    { op: 'mount', id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'shaft', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
   ] });
+  assert.equal(rt.assembly.instances.length, 2, 'tower and rotor assembled');
   const r = await rt.call('define_test', { test: JSON.stringify({ kind: 'motion', id: 'spin_test', duration_s: 6, measure: { joints: ['spin'], base: 'tower' }, criteria: { minRevolutions: 1, torqueWithinRating: true } }) }) as { error?: string };
   assert.ok(!r.error, r.error);
+});
+
+test('assemble treats an op that names only an instance, or says delete, as remove', async () => {
+  const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'tower + rotor', ops: [
+    { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0.25, 0], anchored: true },
+    { op: 'mount', id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'shaft', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ] });
+  const r1 = await rt.call('assemble', { rationale: 'take the rotor off', ops: [{ id: 'rotor' }] }) as { error?: string };
+  assert.ok(!r1.error, r1.error); assert.ok(!rt.assembly.instances.some((i) => i.id === 'rotor'), 'rotor removed');
+  const r2 = await rt.call('assemble', { rationale: 'and the tower', ops: [{ op: 'delete', id: 'tower' }] }) as { error?: string };
+  assert.ok(!r2.error, r2.error); assert.equal(rt.assembly.instances.length, 0);
 });

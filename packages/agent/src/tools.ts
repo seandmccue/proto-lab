@@ -50,9 +50,10 @@ function normaliseOp(o: unknown): unknown {
   const alias = (from: string, to: string) => { if (x[to] === undefined && x[from] !== undefined) { x[to] = x[from]; } if (from !== to) delete x[from]; };
   if (typeof x.type === 'string' && x.op === undefined) { x.op = x.type; delete x.type; }
   // No op at all: infer it from the fields present.
-  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; }
+  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; else if (typeof x.id === 'string' && Object.keys(x).every((k) => k === 'id' || k === 'rationale' || k === 'reason')) x.op = 'remove'; } // an op that names only an instance can only mean remove
   if (typeof x.action === 'string' && x.op === undefined) { x.op = x.action; delete x.action; }
   if (x.op === 'add' || x.op === 'create' || x.op === 'spawn') x.op = 'place';
+  if (x.op === 'delete' || x.op === 'drop' || x.op === 'detach' || x.op === 'unmount') x.op = 'remove';
   if (x.op === 'attach' || x.op === 'join') x.op = x.onto || x.parent ? 'mount' : 'connect';
   alias('partId', 'part'); alias('part_id', 'part'); alias('instance', 'id'); alias('instanceId', 'id'); alias('name', 'id'); alias('instance_id', 'id');
   alias('at', 'position'); alias('pos', 'position'); alias('translation', 'position'); alias('rotation', 'rotation_deg'); alias('rotation_euler_deg', 'rotation_deg'); alias('euler_deg', 'rotation_deg');
