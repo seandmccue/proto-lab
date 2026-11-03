@@ -52,3 +52,17 @@ test('tool runtime: design_part + wings with sine drives report stroke amplitude
   console.log('butterfly', r.passed, JSON.stringify(r.metrics).slice(0, 220), r.failureReasons);
   assert.ok(r.metrics['flap_l.amplitude_rad'] >= 0.8, `amplitude ${r.metrics['flap_l.amplitude_rad']}`);
 });
+
+test('set_drives infers a missing profile kind from the fields present', async () => {
+  const rt = new ToolRuntime(baseSpec('Ferris wheel'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'wheel', ops: [
+    { op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true },
+    { op: 'mount', id: 'wheel', part: 'spoked-wheel-400', onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ] });
+  const r = await rt.call('set_drives', { drives: [{ controlId: 'spin', mode: 'position', profile: { amplitude: 0.5, frequency_hz: 1, phase: 0, role: 'swing', swingDuty: 0.3 } }] }) as { error?: string };
+  assert.ok(!r.error, r.error);
+  assert.equal(rt.assembly.controller.drives[0].profile.kind, 'gait');
+  const r2 = await rt.call('set_drives', { drives: [{ controlId: 'spin', mode: 'velocity', value: 2 }] }) as { error?: string };
+  assert.ok(!r2.error, r2.error);
+  assert.equal(rt.assembly.controller.drives[0].profile.kind, 'constant');
+});
