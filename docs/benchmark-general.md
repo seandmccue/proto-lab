@@ -242,3 +242,35 @@ connector ids with kind and outward axis), so Muse mounts by id directly.
 | butterfly | 173 s | **92 s** | first try |
 
 Every fast demo prompt is now under 100 s end to end.
+
+
+## Fifth full pass, with the catalog index (v6, 2026-11-03 08:34 UTC)
+
+| Metric | Value |
+| --- | --- |
+| Success rate | **100 % (10/10)** |
+| Errors (API/model) | **0 %** |
+| Median completion time | 352 s |
+| Mean iterations (versions) | 1.8 |
+| Runs escalated to the specialist | 0 % |
+| Runs creating a custom part | 10 % |
+
+| Prompt | Result | Time | Versions | Custom parts | Handoffs | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferris | passed | 62 s | 1 | 0 | 0 | Miniature Ferris wheel: anchored tower-300 with spoked-wheel-400 (Ø400mm, 8 spokes) on the… |
+| muse | passed | 99 s | 3 | 0 | 0 | Muse-inspired quadruped: chassis-quad-160 + enclosure shell with eye domes, 4x 2-DOF legs … |
+| butterfly | passed | 152 s | 1 | 0 | 0 | Mechanical butterfly on anchored stand: plate-120x80 base + rod-200 vertical post + body-b… |
+| catapult | passed | 352 s | 2 | 1 | 0 | Tabletop catapult: anchored base-plate-300x200, servo-mg996r (1.1 N·m) at top_back, custom… |
+| crab | passed | 393 s | 1 | 0 | 0 | Six-legged crab: yawed chassis-hex-200 (body across travel) with 6x 2-DOF legs (ds3218 hip… |
+| windmill | passed | 130 s | 1 | 0 | 0 | Built a windmill: anchored tower-500 with gearmotor-25 on its top axle driving a windmill-… |
+| drawbridge | passed | 110 s | 1 | 0 | 0 | Automated drawbridge: anchored 300x200mm base, 3.5 N·m hinge servo at rear edge, 200x150mm… |
+| claw | passed | 746 s | 2 | 0 | 0 | Robotic grabbing claw: anchored plate-80x50 base + beam-100 post + plate-120x80 palm holdi… |
+| crane | passed | 391 s | 3 | 0 | 0 | Miniature crane: anchored 300x200 base, 150mm A-frame mast, 3.5 N·m luff servo driving a 1… |
+| novel | passed | 368 s | 3 | 0 | 0 | Bird-scaring garden gadget: anchored tower-500 pole with a 3-blade Ø200mm pinwheel spinnin… |
+
+Ten of ten on the first full pass after the catalog index landed, with no Muse Wonder consult needed:
+the walker walked and danced in 99 s, the drawbridge lifted in 110 s, the crab scuttled first-try. With
+the index in the prompt the model reaches for library parts more and designs fewer of its own (10 % of
+runs vs 70 %); custom parts still appear where the library has nothing (the catapult arm here, the bells
+and one-piece stand of the pendulum desk toy in the gallery). Across six passes on the current engine:
+55 of 60 runs passed, and every miss was traced to a cause and fixed.
