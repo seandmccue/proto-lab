@@ -229,6 +229,36 @@ export default function Workspace() {
                     )}
                   </div>
                 )}
+                {detail && detail.versions.length > 1 && (
+                  <div className="rounded-md border border-slate-200 p-2 text-xs">
+                    <div className="panel-title mb-1">Iterations</div>
+                    <table className="w-full mono"><tbody>
+                      {detail.versions.map((v) => { const t = v.tests[v.tests.length - 1]; const key = t ? (t.metrics.distance_m !== undefined ? ['distance', fmt.m2(t.metrics.distance_m)] : t.metrics.landingDistance_m !== undefined ? ['landing', fmt.m2(t.metrics.landingDistance_m)] : t.metrics.payloadDrop_m !== undefined ? ['payload drop', fmt.m2(t.metrics.payloadDrop_m)] : Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad')) ? ['amplitude', `${Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad'))![1].toFixed(2)} rad`] : ['tilt', fmt.deg(t.metrics.maxTilt_deg ?? 0)]) : ['', '']; return (
+                        <tr key={v.id} className={`${v.id === versionId ? 'bg-accent-soft' : ''} cursor-pointer hover:bg-slate-50`} onClick={() => setVersionId(v.id)}>
+                          <td className="px-1 py-0.5 text-slate-500">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-slate-500">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${v.status === 'passed' ? 'text-emerald-700' : 'text-rose-600'}`}>{v.status === 'passed' ? '✓' : '✗'}</td>
+                        </tr>); })}
+                    </tbody></table>
+                  </div>
+                )}
+                {version && prevVersion && (() => {
+                  const prevI = new Map(prevVersion.assembly.instances.map((i) => [i.id, i])); const curI = new Map(version.assembly.instances.map((i) => [i.id, i]));
+                  const prevP = new Map(prevVersion.assembly.parts.map((p) => [p.id, p])); const curP = new Map(version.assembly.parts.map((p) => [p.id, p]));
+                  const added = [...curI.values()].filter((i) => !prevI.has(i.id)); const removed = [...prevI.values()].filter((i) => !curI.has(i.id));
+                  const swapped = [...curI.values()].filter((i) => prevI.has(i.id) && prevI.get(i.id)!.partId !== i.partId).map((i) => `${i.label}: ${prevP.get(prevI.get(i.id)!.partId)?.name ?? prevI.get(i.id)!.partId} → ${curP.get(i.partId)?.name ?? i.partId}`);
+                  const prevD = new Map(prevVersion.assembly.controller.drives.map((d) => [d.controlId, JSON.stringify(d.profile)])); const driveChanges = version.assembly.controller.drives.filter((d) => prevD.get(d.controlId) !== JSON.stringify(d.profile)).map((d) => `${d.controlId}: ${d.profile.kind}${'amplitude' in d.profile ? ` ${(d.profile as { amplitude: number }).amplitude.toFixed(2)}` : ''}${'frequency_hz' in d.profile ? ` @ ${(d.profile as { frequency_hz: number }).frequency_hz} Hz` : ''}${'value' in d.profile ? ` ${(d.profile as { value: number }).value}` : ''}`);
+                  const moved = changedIds.size - added.length - swapped.length;
+                  if (!added.length && !removed.length && !swapped.length && !driveChanges.length && moved <= 0) return null;
+                  return (
+                    <div className="rounded-md border border-orange-200 bg-orange-50 p-2 text-xs text-slate-800">
+                      <div className="panel-title mb-1 text-orange-700">Changed since v{prevVersion.iteration}</div>
+                      {swapped.length > 0 && <div><span className="text-slate-500">Part swaps:</span> {swapped.slice(0, 6).join('; ')}{swapped.length > 6 ? ` (+${swapped.length - 6})` : ''}</div>}
+                      {added.length > 0 && <div><span className="text-slate-500">Added:</span> {added.slice(0, 8).map((i) => i.label).join(', ')}{added.length > 8 ? ` (+${added.length - 8})` : ''}</div>}
+                      {removed.length > 0 && <div><span className="text-slate-500">Removed:</span> {removed.slice(0, 8).map((i) => i.label).join(', ')}{removed.length > 8 ? ` (+${removed.length - 8})` : ''}</div>}
+                      {moved > 0 && <div><span className="text-slate-500">Repositioned:</span> {moved} component{moved === 1 ? '' : 's'}</div>}
+                      {driveChanges.length > 0 && <div><span className="text-slate-500">Drives:</span> {driveChanges.slice(0, 6).join('; ')}{driveChanges.length > 6 ? ` (+${driveChanges.length - 6})` : ''}</div>}
+                    </div>
+                  );
+                })()}
                 {version?.decisions.map((d, i) => (
                   <div key={i} className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs">
                     <div className="font-medium text-slate-800">{d.source === 'model' ? `Model decision${d.modelId ? ` · ${d.modelId}` : ''}` : 'Planner decision'}</div>
