@@ -53,7 +53,7 @@ export function SpecPanel({ spec }: { spec: Spec }) {
 export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
   const end = useRef<HTMLLIElement>(null);
   useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
-  const visible = events.filter((e) => e.type !== 'spec' && e.type !== 'version');
+  const visible = events.filter((e) => e.type !== 'version' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
   return (
     <div className="flex h-full flex-col">
       <div className="px-3 pt-3 pb-2 flex items-center justify-between">
@@ -94,6 +94,21 @@ function EventRow({ e }: { e: JobEvent }) {
           <div className="font-medium text-slate-800">{String(e.testId)} — {passed ? 'passed' : 'did not pass'} <span className="text-slate-400 font-normal">(simulator result)</span></div>
           <Metrics metrics={e.metrics as Record<string, number>} kind={String(e.kind)} />
           {reasons.length > 0 && <ul className="mt-1 list-disc pl-4 text-amber-800">{reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+        </div>
+      );
+    }
+    case 'spec': {
+      const plan = (e.spec as { plan?: { purpose: string; features: string[]; motions: string[]; subassemblies: string[]; unverified: string[] } }).plan!;
+      return (
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-slate-800">
+          <div className="font-medium">Engineering plan</div>
+          <p className="text-slate-700">{plan.purpose}</p>
+          <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
+            <div><span className="text-slate-500">Features:</span> {plan.features.join(', ')}</div>
+            <div><span className="text-slate-500">Motions:</span> {plan.motions.join(', ')}</div>
+            <div className="col-span-2"><span className="text-slate-500">Sub-assemblies:</span> {plan.subassemblies.join(' · ')}</div>
+            {plan.unverified.length > 0 && <div className="col-span-2 text-amber-800"><span className="text-amber-700">Not verifiable here:</span> {plan.unverified.join('; ')}</div>}
+          </div>
         </div>
       );
     }

@@ -6,22 +6,22 @@ const steps = [
   {
     title: 'Describe an idea',
     label: 'Your brief',
-    detail: 'Tell ProtoLab what you want to build and how it should move. It extracts initial test goals and interprets your brief as a four- or six-legged walker.',
+    detail: 'Tell ProtoLab what you want to build and how it should move: a butterfly, a Ferris wheel, a catapult, a walking robot, a crane. Muse writes an engineering plan: the recognisable features, the motions, the sub-assemblies, measurable success criteria, and what the physics cannot verify.',
   },
   {
     title: 'Pick parts and assemble',
     label: 'Muse Spark + parts catalog',
-    detail: 'Spark searches the catalog for a chassis, servos, leg bars, and feet. It can request custom parametric parts when presets don’t fit. ProtoLab’s tools assemble the parts and connect the joints.',
+    detail: 'Spark searches a 100-part component library (frames, gears, shafts, hinges, sliders, cranks, servos, gearmotors, springs, wings, propellers, grippers…) and designs missing parts itself from profiles, extrusions and revolves. It then mounts parts at real connectors with structured assembly operations; every op is validated before it runs.',
   },
   {
     title: 'Run the physics tests',
     label: 'Rapier simulator',
-    detail: 'Rapier simulates the walk and measures distance, tilt, and torque demand against the servo ratings. If the brief calls for a dance, the agent can test it after walking passes.',
+    detail: 'Rapier simulates the mechanism and measures what matters for that invention: stroke and flap rate for wings, revolutions and gondola clearance for a wheel, landing distance for a catapult, payload retention for a claw, distance and tilt for a walker. Motor demand is checked against each part’s rating.',
   },
   {
     title: 'Revise and retest',
     label: 'Muse Spark + Muse Wonder',
-    detail: 'Spark reads the measurements and can change the gait, geometry, or parts before running another test. After repeated walk failures, Wonder can review the same history, try a targeted fix, and hand control back to Spark.',
+    detail: 'Spark reads the measurements and changes drives, geometry or parts before testing again. After repeated failures, Muse Wonder reviews the same history, diagnoses the mechanical cause, applies a targeted fix, and hands control back to Spark.',
   },
   {
     title: 'Explore the result in 3D',

@@ -3,7 +3,7 @@ import { OrbitControls, Grid, Html, Line } from '@react-three/drei';
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import type { Assembly, Axis, Instance, Shape, TestResult, Transform } from '@protolab/schema';
-import { ensureCCW } from './shapeMath.ts';
+import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
 
 export interface ViewerProps {
   assembly: Assembly;
@@ -36,6 +36,11 @@ function material(color: string, role: string, blueprint: boolean, selected: boo
   return m;
 }
 
+function boundingRadius(pieces: Assembly['parts'][number]['geometry']): number {
+  let r = 0;
+  for (const p of pieces) { const h = halfExtents(p.shape); const c = p.offset.position; r = Math.max(r, Math.hypot(c[0], c[1], c[2]) + Math.hypot(h[0], h[1], h[2])); }
+  return r;
+}
 function quat(q: Transform['rotation']) { return new THREE.Quaternion(q[0], q[1], q[2], q[3]); }
 function vec(p: Transform['position']) { return new THREE.Vector3(p[0], p[1], p[2]); }
 
@@ -92,11 +97,27 @@ function Scene(props: ViewerProps) {
   useEffect(() => { if (props.captureRef) props.captureRef.current = () => { try { return gl.domElement.toDataURL('image/png'); } catch { return null; } }; }, [gl, props.captureRef]);
 
   const partById = useMemo(() => new Map(assembly.parts.map((p) => [p.id, p])), [assembly]);
-  const center = useMemo(() => {
-    const c = new THREE.Vector3();
-    for (const i of assembly.instances) c.add(vec(i.transform.position));
-    return c.divideScalar(Math.max(1, assembly.instances.length));
-  }, [assembly]);
+  const { center, radius } = useMemo(() => {
+    const min = new THREE.Vector3(Infinity, Infinity, Infinity), max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    for (const i of assembly.instances) {
+      const part = partById.get(i.partId); const r = part ? boundingRadius(part.geometry) : 0.02; const p = vec(i.transform.position);
+      min.min(p.clone().subScalar(r)); max.max(p.clone().addScalar(r));
+    }
+    if (!assembly.instances.length) return { center: new THREE.Vector3(0, 0.1, 0), radius: 0.2 };
+    const c = min.clone().add(max).multiplyScalar(0.5); c.y = Math.max(c.y, (max.y - min.y) * 0.4);
+    return { center: c, radius: Math.max(0.08, max.distanceTo(min) / 2) };
+  }, [assembly, partById]);
+  const { camera } = useThree();
+  const framed = useRef<string>('');
+  useEffect(() => {
+    // Frame the whole machine once per assembly (size changes from a 150 mm robot to a 600 mm Ferris wheel).
+    const key = `${assembly.instances.length}:${radius.toFixed(3)}:${center.x.toFixed(3)}:${center.y.toFixed(3)}`;
+    if (framed.current === key) return; framed.current = key;
+    const dist = radius * (mini ? 2.6 : 2.4);
+    camera.position.set(center.x + dist * 0.72, center.y + dist * 0.5, center.z + dist * 0.78);
+    camera.near = Math.max(0.005, dist / 100); camera.far = Math.max(20, dist * 20); camera.updateProjectionMatrix();
+    if (controls.current) { controls.current.target.copy(center); controls.current.update(); }
+  }, [assembly, center, radius, camera, mini]);
   const explodeDir = useMemo(() => {
     const m = new Map<string, THREE.Vector3>();
     for (const i of assembly.instances) {
@@ -127,8 +148,8 @@ function Scene(props: ViewerProps) {
       g.position.copy(p); g.quaternion.copy(q);
       if (inst.id === 'body') bodyPos.copy(p);
     }
-    if (follow && controls.current && frames.length) {
-      controls.current.target.lerp(new THREE.Vector3(bodyPos.x, bodyPos.y * 0.6, bodyPos.z), 0.15);
+    if (follow && controls.current && frames.length && assembly.instances.some((i) => i.id === 'body') && bodyPos.lengthSq() > 0) {
+      controls.current.target.lerp(new THREE.Vector3(bodyPos.x, Math.max(bodyPos.y * 0.6, center.y * 0.5), bodyPos.z), 0.15);
       controls.current.update();
     }
   });
@@ -143,7 +164,7 @@ function Scene(props: ViewerProps) {
       <hemisphereLight args={['#ffffff', '#b9c4d1', 0.9]} />
       <directionalLight position={[0.6, 1.2, 0.8]} intensity={1.6} castShadow shadow-mapSize={[1024, 1024]} shadow-camera-near={0.1} shadow-camera-far={5} shadow-camera-left={-1} shadow-camera-right={1} shadow-camera-top={1} shadow-camera-bottom={-1} />
       <directionalLight position={[-0.8, 0.5, -0.6]} intensity={0.5} />
-      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={0.05} cellThickness={0.6} cellColor={blueprint ? '#1e3a5f' : mini ? '#c7d0db' : '#cfc3e7'} sectionSize={0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : mini ? '#9fb0c4' : '#a293c6'} fadeDistance={2.5} infiniteGrid />
+      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.6} cellColor={blueprint ? '#1e3a5f' : mini ? '#c7d0db' : '#cfc3e7'} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : mini ? '#9fb0c4' : '#a293c6'} fadeDistance={2.5} infiniteGrid />
       {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={0.25} /></mesh>}
       <group onPointerMissed={() => onSelect?.(null)}>
         {assembly.instances.map((inst: Instance) => {
@@ -166,7 +187,7 @@ function Scene(props: ViewerProps) {
           {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-sky-300">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
         </group>
       )}
-      <OrbitControls ref={controls as never} makeDefault enableDamping dampingFactor={0.12} minDistance={0.15} maxDistance={2} target={[0, 0.07, 0]} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
+      <OrbitControls ref={controls as never} makeDefault enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * 10} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
     </>
   );
 }
@@ -191,7 +212,7 @@ export default function Viewer(props: ViewerProps) {
   }, []);
   if (!ready) return <div className="h-full w-full bg-slate-100" />;
   return (
-    <Canvas shadows dpr={props.mini ? [1, 1.5] : [1, 2]} camera={{ position: props.mini ? [0.32, 0.2, 0.34] : [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
+    <Canvas shadows dpr={props.mini ? [1, 1.5] : [1, 2]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
       <Scene {...props} />
     </Canvas>
   );
