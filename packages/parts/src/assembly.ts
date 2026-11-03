@@ -41,7 +41,8 @@ export const PatternOp = z.object({
   controlSuffix: z.boolean().default(true),
 });
 export const RemoveOp = z.object({ op: z.literal('remove'), id: z.string() });
-export const MoveOp = z.object({ op: z.literal('move'), id: z.string(), position: z.tuple([z.number(), z.number(), z.number()]).optional(), rotation_deg: Euler.optional(), translate: z.tuple([z.number(), z.number(), z.number()]).optional() });
+export const MoveOp = z.object({ op: z.literal('move'), id: z.string(), position: z.tuple([z.number(), z.number(), z.number()]).optional(), rotation_deg: Euler.optional(), translate: z.tuple([z.number(), z.number(), z.number()]).optional(),
+  withAttached: z.boolean().optional() });   // default true: translation also carries everything mounted on this instance (its joint descendants)
 export const AssemblyOp = z.discriminatedUnion('op', [PlaceOp, MountOp, ConnectOp, PatternOp, RemoveOp, MoveOp]);
 export type AssemblyOp = z.infer<typeof AssemblyOp>;
 
@@ -199,10 +200,14 @@ export function applyOps(input: Assembly, ops: AssemblyOp[], resolve: PartResolv
       }
       case 'move': {
         const x = inst(op.id, i);
-        if (op.position) { const d = sub(op.position, x.transform.position); x.transform.position = [...op.position]; for (const j of a.joints) if (j.anchor && j.a.instanceId === op.id) j.anchor = add(j.anchor, d); }
-        if (op.translate) { x.transform.position = add(x.transform.position, op.translate); for (const j of a.joints) if (j.anchor && j.a.instanceId === op.id) j.anchor = add(j.anchor, op.translate); }
+        // Everything mounted on the moved instance (joint descendants, parent → child) moves with it, as a person expects.
+        const moved = new Set<string>([op.id]);
+        if (op.withAttached !== false) { let grew = true; while (grew) { grew = false; for (const j of a.joints) if (moved.has(j.a.instanceId) && !moved.has(j.b.instanceId)) { moved.add(j.b.instanceId); grew = true; } } }
+        const shift = (d: Vec3) => { for (const y of a.instances) if (moved.has(y.id)) y.transform.position = add(y.transform.position, d); for (const j of a.joints) if (j.anchor && moved.has(j.a.instanceId)) j.anchor = add(j.anchor, d); };
+        if (op.position) shift(sub(op.position, x.transform.position));
+        if (op.translate) shift(op.translate);
         if (op.rotation_deg) x.transform.rotation = quatFromEuler(op.rotation_deg.map((d) => (d * Math.PI) / 180) as Vec3);
-        summary.push(`moved ${op.id}`);
+        summary.push(`moved ${op.id}${moved.size > 1 ? ` (+${moved.size - 1} attached)` : ''}`);
         break;
       }
     }

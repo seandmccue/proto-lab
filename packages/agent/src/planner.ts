@@ -22,7 +22,7 @@ export async function runPlanner(rt: ToolRuntime, spec: Spec, opts: { parent: Ve
     if (r.error) throw new Error(r.error);
     // lift so the lowest foot touches the ground
     const foot = rt.resolve(params.footPartId)!; const lowest = Math.min(...rt.assembly.instances.filter((x) => x.partId === foot.id).map((x) => x.transform.position[1] - foot.params.radius));
-    if (Math.abs(lowest) > 1e-6) await rt.call('assemble', { ops: rt.assembly.instances.map((i) => ({ op: 'move', id: i.id, translate: [0, -lowest, 0] })), rationale: 'Resting the feet on the ground' });
+    if (Math.abs(lowest) > 1e-6) await rt.call('assemble', { ops: rt.assembly.instances.map((i) => ({ op: 'move', id: i.id, translate: [0, -lowest, 0], withAttached: false })), rationale: 'Resting the feet on the ground' });
     await rt.call('set_drives', { drives });
     rt.assembly.family = 'legged_walker'; rt.assembly.familyConfig = { ...params }; rt.assembly.familyParams = flattenWalkerParams(params);
   };
