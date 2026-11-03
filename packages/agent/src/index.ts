@@ -136,9 +136,17 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     { role: 'user', content: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt },
   ];
   const maxRounds = 24 + maxIterations * 6;
+  // Wall-clock budget: Meta Model API rounds take 5–60 s, so 66 rounds could run for an hour. After the budget the
+  // model gets two more rounds to finalize honestly, then the loop finalizes with the best result so far.
+  const timeBudgetMs = Math.max(60, Number(process.env.AGENT_TIME_BUDGET_S) || 1200) * 1000;
+  const startedAt = Date.now(); let overtimeRounds = 0;
   let consults = 0, specialistRoundsLeft = 0, failsAtLastConsult = 0;
   const fails = () => { let n = 0; for (const t of [...rt.tests].reverse()) { if (t.passed) break; n++; } return n; };
   for (let round = 0; round < maxRounds && !rt.finalized; round++) {
+    if (Date.now() - startedAt > timeBudgetMs) {
+      if (overtimeRounds === 0) { emit({ type: 'status', message: `Time budget (${Math.round(timeBudgetMs / 60000)} min) reached; asking ${prettyModelName(model.model)} to finalize with the best result so far.` }); messages.push({ role: 'user', content: 'Time budget reached. Call finalize_design now: honest summary of what passed and what did not, status by the last test, and list every behaviour that remains unverified.' }); specialistRoundsLeft = 0; }
+      if (overtimeRounds++ >= 2) break;
+    }
     if (specialist && specialistRoundsLeft === 0 && consults < 2 && fails() >= specialist.after && fails() > failsAtLastConsult) {
       consults++; failsAtLastConsult = fails(); specialistRoundsLeft = 6;
       const msg = `This design needs a little more engineering. Bringing in ${prettyModelName(specialist.model.model)} to help.`;
@@ -189,7 +197,8 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
   setActive(model.model);
   if (!rt.finalized) {
     const ok = rt.tests.length > 0 && rt.tests[rt.tests.length - 1].passed;
-    await rt.call('finalize_design', { summary: ok ? 'Round budget reached after a passing test.' : 'Round budget reached without a passing test; the last design is shown.', status: ok ? 'passed' : 'failed' });
+    const why = Date.now() - startedAt > timeBudgetMs ? 'Time budget' : 'Round budget';
+    await rt.call('finalize_design', { summary: ok ? `${why} reached after a passing test.` : `${why} reached without a passing test; the last design is shown.`, status: ok ? 'passed' : 'failed' });
   }
 }
 
