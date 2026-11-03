@@ -26,13 +26,15 @@ export const GENERAL_PROMPTS = [
   { id: 'crane', prompt: 'Build a miniature crane with a boom that lifts and lowers a small load.' },
   { id: 'novel', prompt: 'Build a bird-scaring garden gadget: a spinning pinwheel on a pole with a pendulum that swings below it.' },
 ];
-export const PROMPTS = process.argv.includes('--general') ? GENERAL_PROMPTS : [
+const only = arg('only', '').split(',').map((x) => x.trim()).filter(Boolean);   // --only crab,catapult
+const ALL_PROMPTS = process.argv.includes('--general') ? GENERAL_PROMPTS : [
   { id: 'muse', prompt: 'Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.' },
   { id: 'hexapod', prompt: 'Build a six-legged walking robot that can cover 50 cm in six seconds without tipping.' },
   { id: 'crawler', prompt: 'Design a calm four-legged crawler that walks 25 cm in six seconds with very little body rocking.' },
   { id: 'sprinter', prompt: 'Build a four-legged robot that walks 40 cm in 6 seconds.' },
   { id: 'pet', prompt: 'Design a small quadruped pet robot with big feet that can walk and then dance.' },
 ];
+export const PROMPTS = only.length ? ALL_PROMPTS.filter((p) => only.includes(p.id)) : ALL_PROMPTS;
 
 interface Row { prompt: string; run: number; status: string; seconds: number; iterations: number; walkTests: number; sweeps: number; customParts: number; revisions: number; meaningfulChanges: number; handoffs: number; failedThenPassed: boolean; bestDistance_m: number; modelId: string; specialistUsed: boolean; summary: string; error?: string }
 
