@@ -196,6 +196,9 @@ export class ToolRuntime {
           { const r = rawArgs as Record<string, unknown>; for (const k of ['operations', 'steps', 'assembly_ops', 'actions']) if (r.ops === undefined && Array.isArray(r[k])) { r.ops = r[k]; delete r[k]; } for (const k of ['reason', 'why', 'description', 'note']) if (r.rationale === undefined && typeof r[k] === 'string') { r.rationale = r[k]; delete r[k]; } if (r.rationale === undefined && Array.isArray(r.ops)) r.rationale = 'Assembly step'; }
           const raw = rawArgs as { ops?: unknown[] };
           if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
+          if (Array.isArray(raw?.ops)) for (const o of raw.ops as Array<Record<string, unknown>>) { // a place with no position stands on the ground; a tower/base/stand placed that way is anchored
+            if (o.op === 'place' && o.position === undefined && typeof o.part === 'string') { const p = this.resolve(o.part); if (p) { o.position = [0, +(p.dimensions_m[1] / 2).toFixed(4), 0]; if (o.anchored === undefined && /tower|base|stand|pedestal|plate|mast|pole/i.test(`${o.id} ${o.part}`)) o.anchored = true; } }
+          }
           const a = AssembleArgs.parse(rawArgs);
           const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog(), ...this.customParts.values()]);
           this.assembly = r.assembly;
@@ -219,6 +222,11 @@ export class ToolRuntime {
           const raw = rawArgs as { test?: Record<string, unknown> };
           if (raw?.test && Array.isArray(raw.test.direction)) { const v = raw.test.direction as number[]; raw.test.direction = Math.abs(v[0] ?? 0) >= Math.max(Math.abs(v[1] ?? 0), Math.abs(v[2] ?? 0)) ? 'x' : Math.abs(v[1] ?? 0) >= Math.abs(v[2] ?? 0) ? 'y' : 'z'; }
           if (raw?.test && typeof raw.test.direction === 'string') raw.test.direction = raw.test.direction.replace(/^[+-]/, '').toLowerCase();
+          if (raw?.test && raw.test.kind !== 'motion' && raw.test.criteria && typeof raw.test.criteria === 'object') { // walk/launch/grip take their thresholds at the top level; the model sometimes nests them under criteria like a motion test
+            const c = raw.test.criteria as Record<string, unknown>;
+            for (const k of ['minDistance_m', 'maxTilt_deg', 'targetDistance_m', 'tolerance_m', 'supportUntil_s', 'maxSeparation_m', 'signed']) if (raw.test[k] === undefined && c[k] !== undefined) raw.test[k] = c[k];
+            delete raw.test.criteria;
+          }
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.maxTilt_deg === 'number' && raw.test.maxTilt_deg < 8) throw new Error(`maxTilt_deg ${raw.test.maxTilt_deg}° is tighter than this simulator measures for the recipes (3–5° bare, 6–8° with a shell or claws on top); a limit that tight burns the whole test budget chasing noise. Use 10–15° unless the user asked for a stability figure.`);
           if (raw?.test && raw.test.kind === 'motion') { // a swing never completes a revolution: minRevolutions on a sine/gait-driven joint is a test that can only fail
