@@ -9,4 +9,4 @@
 09|Step five. Until it passes. Every claim is a measured test you can replay.
 10|Step six. 3D print the parts. Coming soon.
 11|Think SolidWorks, powered by AI. Anyone can build physical products. ProtoLab.
-12|Measured, not promised. One hundred twelve of one hundred twenty benchmark builds passed, with a median of about one minute.
+12|Measured, not promised. One hundred twenty-two of one hundred thirty benchmark builds passed, with a median of about one minute.
