@@ -59,3 +59,7 @@ Model: muse-spark-1.3 · specialist: muse-wonder-1.0 after 3 failures · 10 runs
 | Prompt | Result | Time | Iterations | What Muse did |
 | --- | --- | --- | --- | --- |
 | crab | **passed** | 811 s | 5 | Hex chassis, 12 servos, 2-segment sprawling legs, red carapace with claws. Sideways walk test: first attempt tipped (58°) and went the wrong way; retuned stride/lift; Wonder consulted twice; final fix replaced twelve 1.1 N·m servos with 2.0 N·m DS3218s after measured torque exceeded rating. 0.44 m sideways, 5.3° tilt. |
+| drawbridge | **passed** | 623 s | 1 | First assembly rejected for exceeding the 5 kg mass budget; rebuilt lighter: anchored base with approach plate, A-frame tower hinge, link-arm + plate deck leaf, twin gantry posts, 50 mm linear actuator. Motion test: deck amplitude 1.19 rad (≈ 68°), actuator stroke 40 mm. |
+
+**Result on the current engine: 10 of 10 prompts produce a recognisable, tested mechanism.** Timings range from
+100 s (Ferris wheel) to 22 min (butterfly), dominated by Meta Model API round-trips of 5–60 s each.
