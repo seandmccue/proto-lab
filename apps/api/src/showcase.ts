@@ -6,6 +6,7 @@ import { buildTwinDrawbridge, measureTwinDrawbridge, twinDrawbridgeTest } from '
 import { buildDrawingAutomaton, measureDrawingAutomaton, drawingAutomatonTest } from '@protolab/simulator/drawing-automaton';
 import { buildScissorLift, scissorLiftTest } from '@protolab/simulator/scissor-lift';
 import { buildCamSemaphore, measureCamSemaphore, camSemaphoreTest } from '@protolab/simulator/cam-semaphore';
+import { buildTwoAxisGimbal, twoAxisGimbalTest } from '@protolab/simulator/two-axis-gimbal';
 import { DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { now, versionSummary } from './jobs.ts';
 import type { ObjectStore } from './store.ts';
@@ -18,6 +19,7 @@ type Reference = {
   prompt: string;
   plan: NonNullable<Spec['plan']>;
   build: () => Assembly;
+  driveCount?: number;
   test: TestSpec;
   verify: (result: TestResult) => boolean;
   decision: string;
@@ -140,9 +142,31 @@ const semaphore: Reference = {
   testSummary: 'Measure both flag strokes and verify their dwell and phase from the recorded trace',
 };
 
+const twoAxisGimbal: Reference = {
+  id: 'inv_two_axis_gimbal',
+  versionId: 'ver_two_axis_gimbal_1',
+  title: 'Two-axis gimbal · passive camera leveling',
+  description: 'A reference mechanism with powered pitch and roll rings. Two passive pivots let the weighted tray stay level as both outer rings move.',
+  prompt: 'Build a two-axis camera tray that stays level while two powered rings rock in pitch and roll.',
+  plan: {
+    purpose: 'Demonstrate passive leveling with independent disturbances along perpendicular axes.',
+    features: ['Two powered outer rings', 'Two perpendicular passive pivots', 'Tray with ballast below its pivots'],
+    motions: ['The powered rings rock in pitch and roll while the passive tray pivots let gravity keep it level.'],
+    subassemblies: ['Pedestal and outer drive', 'Second powered ring', 'Passive inner ring and tray'],
+    successCriteria: ['Both driven joints reach at least 0.35 rad in each direction', 'The tray tilts no more than 10°', 'The tested parts clear one another and the tray stays above the floor'],
+    unverified: ['Fabrication tolerances and behavior with a physical camera'],
+  },
+  build: buildTwoAxisGimbal,
+  driveCount: 2,
+  test: twoAxisGimbalTest,
+  verify: ({ metrics }) => metrics['tray.maxTilt_deg'] <= 1,
+  decision: 'Place the tray’s ballast below two perpendicular passive pivots.',
+  testSummary: 'Measure both signed sweeps and the tray tilt from upright',
+};
+
 /** Save verified reference mechanisms once, with their real simulation traces. */
 export async function seedReferenceShowcases(db: DatabaseSync, store: ObjectStore, persist?: () => Promise<void>) {
-  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore]) {
+  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore, twoAxisGimbal]) {
     try {
       await saveReference(reference, db, store, persist);
     } catch (error) {
@@ -157,7 +181,7 @@ async function saveReference(reference: Reference, db: DatabaseSync, store: Obje
   const spec = Spec.parse({ task: prompt, plan: reference.plan });
   const assembly = reference.build();
   const result = await runTest(assembly, { env: spec.environment, test });
-  if (!result.passed || assembly.controller.drives.length !== 1 || !reference.verify(result)) {
+  if (!result.passed || assembly.controller.drives.length !== (reference.driveCount ?? 1) || !reference.verify(result)) {
     throw new Error('Reference mechanism did not meet its motion checks');
   }
   const date = now();

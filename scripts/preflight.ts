@@ -183,6 +183,19 @@ if (judge) checks.push(
     }
     return `passive replay passed; locked pivot reached ${locked.metrics['tray.maxTilt_deg']}°`;
   }],
+  ['Two-axis gimbal reference', async () => {
+    const id = 'inv_two_axis_gimbal';
+    const { invention } = await publicBuild(id);
+    const replay = await version(id, invention.currentVersionId);
+    if (replay.assembly.controller.drives.length !== 2 || invention.modelId !== 'deterministic-planner'
+      || !recorded(replay, (test) => test.passed && test.metrics['tray.maxTilt_deg'] <= 1
+        && test.metrics.clearanceViolation === 0 && test.metrics.groundContactViolation === 0
+        && ['pitch', 'roll'].every((joint) => test.metrics[`${joint}.minSwing_rad`] <= -0.35
+          && test.metrics[`${joint}.maxSwing_rad`] >= 0.35))) {
+      throw new Error('Expected the reference trace to pass both signed sweeps, leveling, and clearance');
+    }
+    return 'both powered axes moved while the tray stayed within 1° of level';
+  }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
     if (!invention.featured) throw new Error('Expected the clock to be featured');

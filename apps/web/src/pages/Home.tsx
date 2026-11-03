@@ -17,7 +17,7 @@ const steps = [
 const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
 const drawingRemixId = 'inv_76b7fae5bdf941c9';
-const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore'];
+const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal'];
 
 function penPathSize(test: TestSummary | null | undefined) {
   const width = test?.metrics['pen_tip.travel_x_m'];
@@ -207,7 +207,7 @@ export default function Home() {
               <div>
                 <span className="lab-label">Mechanism lab</span>
                 <h2 id="motion-gallery-title">See mechanisms in motion</h2>
-                <p>Replay reference builds to see how one drive moves several linked parts. Open the test to inspect the measured results.</p>
+                <p>Replay reference builds to see how motors and passive joints move together. Open a test to inspect the measurements.</p>
               </div>
               {orrery && <Link to={`/i/${orrery.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the Moon’s orbit <span aria-hidden="true">↗</span></Link>}
             </div>

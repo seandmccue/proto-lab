@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts", "./triplex-pump": "./src/triplex-pump.ts", "./twin-drawbridge": "./src/twin-drawbridge.ts", "./drawing-automaton": "./src/drawing-automaton.ts", "./scissor-lift": "./src/scissor-lift.ts", "./cam-semaphore": "./src/cam-semaphore.ts", "./follower-timing": "./src/follower-timing.ts", "./planar-orbit": "./src/planar-orbit.ts" },
+  "exports": { ".": "./src/index.ts", "./triplex-pump": "./src/triplex-pump.ts", "./twin-drawbridge": "./src/twin-drawbridge.ts", "./drawing-automaton": "./src/drawing-automaton.ts", "./scissor-lift": "./src/scissor-lift.ts", "./two-axis-gimbal": "./src/two-axis-gimbal.ts", "./cam-semaphore": "./src/cam-semaphore.ts", "./follower-timing": "./src/follower-timing.ts", "./planar-orbit": "./src/planar-orbit.ts" },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test src/**/*.test.ts"

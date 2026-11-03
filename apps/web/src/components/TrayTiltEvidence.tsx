@@ -5,9 +5,12 @@ import { fmt } from '../api.ts';
 import RecordedSeriesChart from './RecordedSeriesChart.tsx';
 
 const singleAxisId = 'inv_f72fb06c611342eb';
-const twoAxisId = 'inv_d3f76fcc393b49d6';
+const twoAxisIds = new Set(['inv_d3f76fcc393b49d6', 'inv_two_axis_gimbal']);
 const sweepGoal_deg = 0.35 * 180 / Math.PI;
-const signedAngle = (angle: number) => `${angle > 0 ? '+' : ''}${fmt.deg(angle)}`;
+function signedAngle(angle: number) {
+  const rounded = Number(angle.toFixed(1));
+  return `${rounded > 0 ? '+' : ''}${fmt.deg(rounded)}`;
+}
 const parts = [{ id: 'cradle', label: 'Cradle' }, { id: 'tray', label: 'Tray' }];
 
 function tiltSeries(trace: Trace, assembly: Assembly, twoAxis: boolean) {
@@ -24,7 +27,7 @@ function tiltSeries(trace: Trace, assembly: Assembly, twoAxis: boolean) {
   if (twoAxis && active.length !== 2) return null;
   const sweeps = active.map(({ controlId: id }) => ({
     id,
-    label: id.replace(/[_-]+/g, ' '),
+    label: id[0].toUpperCase() + id.slice(1).replace(/[_-]+/g, ' '),
     values: trace.frames.map(({ joints }) => joints[id] * 180 / Math.PI),
   }));
   const tracks = [...sweeps, ...tilts];
@@ -41,7 +44,7 @@ export default function TrayTiltEvidence({ version, test, time, iteration }: {
 }) {
   const headingId = useId();
   const { inventionId, assembly } = version;
-  const twoAxis = inventionId === twoAxisId;
+  const twoAxis = twoAxisIds.has(inventionId);
   const limit = twoAxis ? 10 : 8;
   const series = useMemo(() => twoAxis || inventionId === singleAxisId
     ? tiltSeries(test.trace, assembly, twoAxis) : null, [assembly, inventionId, test.trace, twoAxis]);
@@ -60,7 +63,7 @@ export default function TrayTiltEvidence({ version, test, time, iteration }: {
         <p>{twoAxis ? 'Signed drive sweeps and tray tilt from upright, measured from the saved run.' : 'Angles from upright, measured from the saved orientations.'}</p>
         <dl>
           {tracks.map(({ id, label, values }, index) => <div key={id}>
-            <dt className="capitalize">{label}{index < sweepRanges.length ? ' sweep' : ' peak'}</dt>
+            <dt>{label}{index < sweepRanges.length ? ' sweep' : ' peak'}</dt>
             <dd>{index < sweepRanges.length
               ? `${signedAngle(sweepRanges[index].min)} to ${signedAngle(sweepRanges[index].max)}`
               : fmt.deg(peaks[index - sweepRanges.length])} <small>{index < sweepRanges.length ? signedAngle(values[closest]) : fmt.deg(values[closest])} at cursor</small></dd>
