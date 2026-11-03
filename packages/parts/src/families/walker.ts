@@ -28,7 +28,9 @@ export interface WalkerParams {
     swingDuty: number;
   };
   shell: boolean;              // add cosmetic shell + eyes
+  dance?: { frequency_hz: number; bobAmplitude_rad: number; swayAmplitude_rad: number };
 }
+export const DEFAULT_DANCE = { frequency_hz: 1.6, bobAmplitude_rad: 0.3, swayAmplitude_rad: 0.1 };
 
 export const WALKER_PARAM_RANGES = {
   hipOffset_rad: { min: -0.6, max: 0.6, default: 0.0, unit: 'rad', description: 'Rest hip angle; positive swings leg forward' },
@@ -186,6 +188,7 @@ export function buildWalker(params: WalkerParams, extraParts?: PartResolver): As
   return {
     family: 'legged_walker',
     familyParams: flattenWalkerParams(params),
+    familyConfig: { ...params },
     parts: [...parts.values()],
     instances,
     joints,
@@ -204,12 +207,12 @@ export function legPhase(gait: 'crawl' | 'trot' | 'tripod', pairs: number, pairI
   return ((pairIndex + (side === 'L' ? 0 : 1)) % 2) * Math.PI;
 }
 
-export function danceController(base: GaitController, opts: { frequency_hz?: number; bobAmplitude_rad?: number; swayAmplitude_rad?: number } = {}): DanceController {
+export function danceController(base: GaitController, opts: Partial<typeof DEFAULT_DANCE> = {}): DanceController {
   const phases: Record<string, number> = {};
   for (const k of Object.keys(base.phases)) phases[k] = base.phases[k];
-  // Alternate sway left/right legs so the body shuffles in place; knees bob together.
-  for (const k of Object.keys(phases)) if (k.startsWith('hip_')) phases[k] = k.includes('_L') ? 0 : Math.PI;
-  return { kind: 'dance', frequency_hz: opts.frequency_hz ?? 1.6, bobAmplitude_rad: opts.bobAmplitude_rad ?? 0.3, swayAmplitude_rad: opts.swayAmplitude_rad ?? 0.2, hipOffset_rad: base.hipOffset_rad, kneeOffset_rad: base.kneeOffset_rad, rampIn_s: 0.4, phases };
+  // Hips keep the gait phasing (diagonal legs sway together) with a small amplitude; knees bob together so the body rises and falls in place.
+  const d = { ...DEFAULT_DANCE, ...opts };
+  return { kind: 'dance', frequency_hz: d.frequency_hz, bobAmplitude_rad: d.bobAmplitude_rad, swayAmplitude_rad: d.swayAmplitude_rad, hipOffset_rad: base.hipOffset_rad, kneeOffset_rad: base.kneeOffset_rad, rampIn_s: 0.4, phases };
 }
 
 export function flattenWalkerParams(p: WalkerParams): Record<string, number> {
@@ -223,6 +226,9 @@ export function flattenWalkerParams(p: WalkerParams): Record<string, number> {
     'gait.stiffness': p.gait.stiffness,
     'gait.damping': p.gait.damping,
     'gait.swingDuty': p.gait.swingDuty,
+    'dance.frequency_hz': (p.dance ?? DEFAULT_DANCE).frequency_hz,
+    'dance.bobAmplitude_rad': (p.dance ?? DEFAULT_DANCE).bobAmplitude_rad,
+    'dance.swayAmplitude_rad': (p.dance ?? DEFAULT_DANCE).swayAmplitude_rad,
     'gait.gaitType': p.gait.gaitType === 'crawl' ? 0 : p.gait.gaitType === 'trot' ? 1 : 2,
     shell: p.shell ? 1 : 0,
   };
