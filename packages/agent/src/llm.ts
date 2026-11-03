@@ -43,6 +43,11 @@ export type ChatMessage =
 export interface ToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
 export interface ChatResult { content: string | null; toolCalls: ToolCall[]; finishReason?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }
 
+/** A Meta Model API failure that is about availability (overloaded / 5xx / timeout), not about the request. */
+export class TransientModelError extends Error {
+  constructor(message: string) { super(message); this.name = 'TransientModelError'; }
+}
+
 export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: ToolDef[], opts: { toolChoice?: 'auto' | 'required' | { name: string }; temperature?: number; signal?: AbortSignal } = {}): Promise<ChatResult> {
   const body: Record<string, unknown> = {
     model: cfg.model,
@@ -54,10 +59,12 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
   // The Meta Model API accepts only tool_choice "auto" (no "required" / named choices); omit anything else.
   if (opts.toolChoice === 'auto') body.tool_choice = 'auto';
   // Retry transient failures (network errors, 429, 5xx) with backoff; surface everything else verbatim.
-  let res: Response | null = null; let lastErr = '';
+  let res: Response | null = null; let lastErr = ''; let tries = 0;
   const started = Date.now(); const approxChars = messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
   if (process.env.MODEL_DEBUG) console.error(`[llm] → ${cfg.model}: ${messages.length} msgs, ~${Math.round(approxChars / 4)} tokens`);
-  for (let attempt = 0; attempt < 4; attempt++) {
+  const MAX_ATTEMPTS = 6; const DELAYS_MS = [1500, 3000, 6000, 12000, 20000, 30000];
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    tries = attempt + 1;
     try {
       const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(cfg.timeoutMs)]) : AbortSignal.timeout(cfg.timeoutMs);
       res = await fetch(`${cfg.baseUrl}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` }, body: JSON.stringify(body), signal });
@@ -66,14 +73,15 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
       lastErr = `Meta Model API error from ${cfg.model}: HTTP ${res.status} ${text.slice(0, 400)}`;
       if (res.status !== 429 && res.status < 500) throw new Error(lastErr);
       res = null;
+      if (process.env.MODEL_DEBUG) console.error(`[llm] ${lastErr.slice(0, 140)}; retrying (${attempt + 1}/${MAX_ATTEMPTS})`);
     } catch (e) {
       if ((e as Error).message.startsWith('Meta Model API error')) throw e;
       lastErr = `Meta Model API request failed (${cfg.model}): ${(e as Error).name === 'TimeoutError' ? `no response within ${cfg.timeoutMs / 1000} s` : (e as Error).message}`;
       if ((e as Error).name === 'TimeoutError' && attempt >= 1) break; // one retry for timeouts, not four
     }
-    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    await new Promise((r) => setTimeout(r, DELAYS_MS[attempt] ?? 30000));
   }
-  if (!res) throw new Error(`${lastErr} (after 4 attempts)`);
+  if (!res) throw new TransientModelError(`${lastErr} (after ${tries} attempt${tries === 1 ? '' : 's'})`);
   if (process.env.MODEL_DEBUG) console.error(`[llm] ← ${cfg.model} in ${((Date.now() - started) / 1000).toFixed(1)} s`);
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }>; usage?: ChatResult['usage'] };
   const choice = json.choices?.[0]; const msg = choice?.message;
