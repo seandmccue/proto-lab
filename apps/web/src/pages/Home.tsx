@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Header, { useModelInfo } from '../components/Header.tsx';
+import { recordedTestSpec } from '../components/BuildProgress.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import PartInventory from '../components/PartInventory.tsx';
 import Viewer from '../components/Viewer.tsx';
 import { api, fmt, type Example, type InventionPublic, type TestSummary } from '../api.ts';
-import type { VersionRecord } from '@protolab/schema';
+import type { TestSpec, VersionRecord } from '@protolab/schema';
 
 const steps = [
   { title: 'Describe your idea', detail: 'Tell Muse what you want to build and what it should do. Give it a target, like a crab that scuttles at least 25 cm.' },
@@ -28,6 +29,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [heroVersion, setHeroVersion] = useState<VersionRecord | null>(null);
   const [before, setBefore] = useState<{ version: VersionRecord; test: TestSummary } | null>(null);
+  const [earlierHeroDefinition, setEarlierHeroDefinition] = useState<TestSpec>();
   const [showBefore, setShowBefore] = useState(false);
   const [heroPlaying, setHeroPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const hero = featured.find((item) => /^mechanical crab$/i.test(item.title) && item.status === 'passed' && item.latestWalk?.passed);
@@ -58,18 +60,27 @@ export default function Home() {
     void (async () => {
       const { versions } = await api.invention(heroId);
       const latestIndex = versions.findIndex((version) => version.id === heroVersionId);
-      for (const version of versions.slice(0, latestIndex).reverse()) {
-        const test = version.tests.find((result) => !result.passed && testName(result.testId) === testName(heroTestId));
-        if (!test) continue;
-        const detail = await api.version(heroId, version.id);
-        if (!cancelled) setBefore({ version: detail.version, test });
-        break;
+      let foundBefore = false;
+      let definition: TestSpec | undefined;
+      for (const version of versions.slice(0, Math.max(latestIndex, 0)).reverse()) {
+        const test = !foundBefore && version.tests.find((result) => !result.passed && testName(result.testId) === testName(heroTestId));
+        if (!test && definition) continue;
+        const detail = await api.version(heroId, version.id, Boolean(test));
+        if (cancelled) return;
+        if (test) {
+          setBefore({ version: detail.version, test });
+          foundBefore = true;
+        }
+        definition ??= recordedTestSpec(heroTestId, [detail.version]);
+        if (definition) setEarlierHeroDefinition(definition);
+        if (foundBefore && definition) break;
       }
     })().catch(() => {});
     return () => { cancelled = true; };
   }, [heroId, heroTestId, heroVersionId]);
 
   const heroTest = heroVersion?.tests.find((test) => test.testId === heroTestId);
+  const heroDefinition = heroTestId ? recordedTestSpec(heroTestId, [heroVersion]) ?? earlierHeroDefinition : undefined;
   const activeVersion = showBefore && before ? before.version : heroVersion;
   const activeTest = showBefore && before ? before.version.tests.find((test) => test.testId === before.test.testId) : heroTest;
   const beforeDistance = before?.test.metrics.distance_m;
@@ -113,9 +124,12 @@ export default function Home() {
               <div><span className="lab-label">Recorded physics test</span><h2>Mechanical crab</h2></div>
               {activeTest && <button type="button" className="lab-art-toggle" onClick={() => setHeroPlaying(!heroPlaying)}>{heroPlaying ? 'Pause' : 'Play'} preview</button>}
             </div>
+            {heroDefinition?.kind === 'walk' && (
+              <p className="lab-art-target">Test goal <strong>≥ {fmt.cm(heroDefinition.minDistance_m)} in {heroDefinition.duration_s} s · ≤ {fmt.deg(heroDefinition.maxTilt_deg)} tilt</strong></p>
+            )}
             <div className="lab-art-results" role="group" aria-label="Compare saved crab tests">
-              {beforeDistance !== undefined && <button type="button" aria-pressed={showBefore} onClick={() => setShowBefore(true)}><span>Before · Failed</span><strong>{fmt.cm(beforeDistance)}</strong></button>}
-              {afterDistance !== undefined && <button type="button" aria-pressed={!showBefore} onClick={() => setShowBefore(false)}><span>After · Passed</span><strong>{fmt.cm(afterDistance)}</strong></button>}
+              {beforeDistance !== undefined && <button type="button" aria-pressed={showBefore} onClick={() => setShowBefore(true)}><span>v{before?.version.iteration} · Failed</span><strong>{fmt.cm(beforeDistance)}</strong>{before?.test.metrics.maxTilt_deg !== undefined && <span>{fmt.deg(before.test.metrics.maxTilt_deg)} peak tilt</span>}</button>}
+              {afterDistance !== undefined && <button type="button" aria-pressed={!showBefore} onClick={() => setShowBefore(false)}><span>{heroVersion ? `v${heroVersion.iteration}` : 'After'} · Passed</span><strong>{fmt.cm(afterDistance)}</strong>{hero?.latestWalk?.metrics.maxTilt_deg !== undefined && <span>{fmt.deg(hero.latestWalk.metrics.maxTilt_deg)} peak tilt</span>}</button>}
             </div>
             <div className="lab-art-stage">
               {activeVersion ? (
@@ -127,7 +141,7 @@ export default function Home() {
               ) : <span className="lab-art-placeholder">Preparing the recorded prototype</span>}
             </div>
             <figcaption>
-              {hero && <p>Muse revised the leg stance and gait. The cards show sideways distance from the saved tests.</p>}
+              {hero && <p>Muse moved the feet under the hips and retimed the gait.</p>}
               <Link to={replayUrl} className="lab-art-link">{hero ? 'Compare both runs in 3D' : 'Explore working prototypes'} <span aria-hidden="true">↗</span></Link>
             </figcaption>
           </figure>
@@ -181,7 +195,7 @@ export default function Home() {
               <div>
                 <span className="lab-label">Inside a saved simulation</span>
                 <h3>How a test changed the crab</h3>
-                <p>The first version barely moved sideways. Muse revised the leg stance and gait, then ran the same test again.</p>
+                <p>The v{before?.version.iteration} test recorded {fmt.cm(beforeDistance)} of sideways travel. Muse revised the leg stance and gait, then ran the same test again.</p>
               </div>
               <dl aria-label="Sideways distance">
                 <div><dt>Before revision</dt><dd>{fmt.cm(beforeDistance)}</dd></div>

@@ -628,7 +628,7 @@ export default function Workspace() {
           </div>
           {sideBySide ? <>
             {storyControls}
-            <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} />
+            <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} events={events} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} />
             {canonicalProof && <CrabProofPanel />}
           </> : <>
           <div className="workbench-stage" ref={stageRef}>

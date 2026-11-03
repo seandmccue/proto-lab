@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { tiltDeg } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
-import { api, fmt } from '../api.ts';
+import { api, fmt, type JobEvent } from '../api.ts';
 import { keyMetric, recordedTestSpec } from './BuildProgress.tsx';
 import type { DiagnosticTone } from './diagnosticColors.ts';
 import { recordedPenPath } from './replayEvidence.ts';
@@ -45,12 +45,13 @@ interface Props {
   before: Replay;
   after: Replay;
   reducedMotion: boolean;
+  events: JobEvent[];
   baselineDefinition?: TestSpec;
   findTilt: (assembly: Assembly, test: TestResult, definition: TestSpec | undefined, time: number) => Tilt | null;
   revisionChanges: (before: Assembly, after: Assembly) => { changed: Set<string>; drives: Set<string> };
 }
 
-export default function ReplayComparison({ before, after, reducedMotion, baselineDefinition, findTilt, revisionChanges }: Props) {
+export default function ReplayComparison({ before, after, reducedMotion, baselineDefinition, findTilt, revisionChanges, events }: Props) {
   const [versions, setVersions] = useState<[VersionRecord, VersionRecord] | null>(null);
   const [error, setError] = useState(false);
   const [playing, setPlaying] = useState(!reducedMotion);
@@ -148,6 +149,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         </div>
       </article>)}
     </div>
+    <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />
     {travel.length > 0 && (
       <div className="border-t border-slate-200 bg-white px-3 pb-3">
         <table className="w-full table-fixed text-left text-xs">
@@ -176,4 +178,44 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
       </div>
     )}
   </section>;
+}
+
+const museLabels: Record<string, string> = {
+  'muse-spark-1.3': 'Muse Spark 1.3',
+  'muse-wonder-1.0': 'Muse Wonder 1.0',
+};
+
+function ModelHandoff({ events, versions, before, after }: {
+  events: JobEvent[];
+  versions: [VersionRecord, VersionRecord];
+  before: TestResult;
+  after: TestResult;
+}) {
+  if (before.passed || !after.passed) return null;
+  const [from, to] = versions;
+  const savedAfter = events.findIndex((event) => event.type === 'version' && event.versionId === to.id);
+  const savedBefore = events.findIndex((event) => event.type === 'version' && event.versionId === from.id);
+  if (savedBefore < 0 || savedAfter <= savedBefore) return null;
+  const revision = events.slice(savedBefore + 1, savedAfter);
+  const handoff = revision.findIndex((event) => event.type === 'handoff'
+    && event.from === from.modelId && event.to === to.modelId);
+  if (handoff < 0) return null;
+  const actions = revision.slice(handoff + 1);
+  const passingTest = actions.findIndex((event) => event.type === 'test' && event.testId === after.testId
+    && event.iteration === to.iteration && event.passed === true);
+  if (passingTest < 0) return null;
+  const build = actions.slice(0, passingTest);
+  if (build.some((event) => event.type === 'handoff')) return null;
+  const tools = [...new Set(build.flatMap((event) => event.type === 'tool' && event.ok === true
+    && typeof event.tool === 'string' ? [event.tool] : []))];
+  if (!tools.length) return null;
+  return (
+    <div className="workbench-handoff" aria-label="Recorded model handoff">
+      <span className="workbench-label">Recorded build log</span>
+      <p><strong>{museLabels[from.modelId] ?? from.modelId}</strong> handed off after v{from.iteration} failed. <strong>{museLabels[to.modelId] ?? to.modelId}</strong> revised the design and passed v{to.iteration}.</p>
+      <ul aria-label="Successful tool calls before the passing test">
+        {tools.map((tool) => <li key={tool}><code>{tool}</code></li>)}
+      </ul>
+    </div>
+  );
 }
