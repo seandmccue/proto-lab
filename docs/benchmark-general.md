@@ -363,3 +363,13 @@ first test at least once on the current engine.
 Catapult (81 s), claw (181 s), crane (137 s) and drawbridge now pass first-try where they used to burn
 tests; the walker walked and danced in 51 s. The crab, which passed first-try in the two passes before,
 missed this time (nine tests, four sweeps, two Wonder consults, best 0.21 m): see the follow-up below.
+
+### Crab re-run with the stiffness-8 hexapod figures (v8b, 2026-11-03 11:22 UTC)
+
+| Prompt | v8 | Re-run | Note |
+| --- | --- | --- | --- |
+| crab | failed, 9 tests, 857 s (stride-limited at 0.21 m) | **passed, first test, 173 s, 0.39 m** | the recipe's measured 0.385 m at stiffness 8 / swingDuty 0.3, reproduced to the centimetre |
+
+Across eight full passes and their re-runs on the current engine, every one of the ten showcase prompts
+has passed on its first test, and the misses in each pass were traced to a measurable cause, measured,
+and written into the recipe with a locking simulator test.
