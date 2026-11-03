@@ -99,7 +99,7 @@ Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbr
 garden gadget. Latest full pass on the current engine: **10 of 10, median 96 s, 0 API errors, no
 specialist escalation, nine of ten first-try** (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker
 81 s at 0.51 m, crane 87 s, catapult 96 s, crab 115 s at 0.39 m, drawbridge 122 s, garden gadget 128 s,
-claw 183 s). Across ten passes that is 92 of 100 runs, every miss traced to a measurable cause and
+claw 183 s). A second full pass (v11) also went 10 of 10 at median 102 s. Across eleven passes that is 102 of 110 runs, every miss traced to a measurable cause and
 written into a recipe or an engine rule with a locking test (a direction-only
 walk test, two Wonder 503s now handled by a visible fallback, a missing hexapod recipe, a drawbridge that
 researched a linkage until its time budget ran out); details and per-run tables in
