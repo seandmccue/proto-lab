@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Assembly, Instance, Joint, type PartDefinition, type Transform, type Vec3, type Quat, type Motor, type Drive, Controller, totalMass } from '@protolab/schema';
 import { add, scale, sub, len, norm, rotate, quatMul, quatConj, quatFromAxisAngle, QUAT_ID, transformPoint, transformDir, compose, invert, cross, dot, quatFromEuler } from './math.ts';
-import { piecesBoundingRadius } from './geometry.ts';
+import { piecesBoundingRadius, piecesVerticalExtent } from './geometry.ts';
 
 /**
  * Generic assembly-operations engine. A model (or a builder) emits structured operations; this
@@ -117,6 +117,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
         const bases = plates.filter((p) => /^base-/.test(p.id)).sort((x, y) => x.dimensions_m[0] * x.dimensions_m[2] - y.dimensions_m[0] * y.dimensions_m[2]);
         best = bases[0] ?? [...plates].sort((x, y) => y.dimensions_m[0] * y.dimensions_m[2] - x.dimensions_m[0] * x.dimensions_m[2])[0];
       }
+      else if (cands.length > 1 && cands.every((p) => p.id.startsWith(`${id.toLowerCase().replace(/[_\d]+$/, '')}-`)) && /tower|stand|pedestal|mast|pole|post/i.test(id)) best = [...cands].sort((x, y) => y.dimensions_m[1] - x.dimensions_m[1])[0]; // "tower.axle": every candidate is a tower; the tallest keeps whatever hangs on it clear of the ground
       else if (cands.length > 1 && cands.length <= 6) { const sorted = [...cands].sort((x, y) => x.connectors.length - y.connectors.length || x.mass_kg - y.mass_kg); if (sorted[0].connectors.length < sorted[1].connectors.length) best = sorted[0]; }
       if (!best) continue;
       const anchored = /base|stand|ground|floor|plate|pedestal|tower/i.test(id) || best.category === 'plates';
@@ -291,7 +292,7 @@ export function setDrives(a: Assembly, drives: Drive[]): Assembly {
 export function summarize(a: Assembly) {
   const partById = new Map(a.parts.map((p) => [p.id, p]));
   let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const x of a.instances) { const p = partById.get(x.partId); const r = p ? piecesBoundingRadius(p.geometry) : 0; const [px, py, pz] = x.transform.position; minX = Math.min(minX, px - r); maxX = Math.max(maxX, px + r); minY = Math.min(minY, py - r); maxY = Math.max(maxY, py + r); minZ = Math.min(minZ, pz - r); maxZ = Math.max(maxZ, pz + r); }
+  for (const x of a.instances) { const p = partById.get(x.partId); const r = p ? piecesBoundingRadius(p.geometry) : 0; const [px, py, pz] = x.transform.position; minX = Math.min(minX, px - r); maxX = Math.max(maxX, px + r); const [lo, hi] = p ? piecesVerticalExtent(p.geometry, x.transform) : [py, py]; minY = Math.min(minY, lo); maxY = Math.max(maxY, hi); minZ = Math.min(minZ, pz - r); maxZ = Math.max(maxZ, pz + r); }
   return {
     instances: a.instances.map((x) => ({ id: x.id, part: x.partId, group: x.group, position_m: x.transform.position.map((v) => +v.toFixed(4)), anchored: x.anchored || undefined, free: x.free || undefined })),
     joints: a.joints.map((j) => ({ id: j.id, type: j.type, a: `${j.a.instanceId}.${j.a.connectorId}`, b: `${j.b.instanceId}.${j.b.connectorId}`, axis: j.axis?.map((v) => +v.toFixed(3)), limits: j.limits, motor: j.motor ? { controlId: j.motor.controlId, rating: j.motor.maxTorque_Nm ?? j.motor.maxForce_N } : undefined })),

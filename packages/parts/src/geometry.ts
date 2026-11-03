@@ -1,5 +1,5 @@
-import type { Shape, Profile, Vec2, Vec3, Axis, GeometryPiece } from '@protolab/schema';
-import { quatFromAxisAngle, QUAT_ID, rotate, add } from './math.ts';
+import type { Shape, Profile, Vec2, Vec3, Axis, GeometryPiece, Transform } from '@protolab/schema';
+import { quatFromAxisAngle, QUAT_ID, rotate, add, quatMul, transformPoint } from './math.ts';
 
 // ---------- Profile helpers (2D, metres, counter-clockwise) ----------
 export function polygonArea(p: Profile): number {
@@ -143,6 +143,20 @@ export function piecesBoundingRadius(pieces: GeometryPiece[]): number {
   let r = 0;
   for (const p of pieces) { const h = shapeHalfExtents(p.shape); const c = p.offset.position; r = Math.max(r, Math.hypot(c[0], c[1], c[2]) + Math.hypot(h[0], h[1], h[2])); }
   return r;
+}
+
+/** World-space vertical extent [minY, maxY] of a part's pieces under an instance transform: oriented half-extents
+ *  projected onto Y, which is tight for boxes and cylinders (a bounding sphere reports an upright tower as below ground). */
+export function piecesVerticalExtent(pieces: GeometryPiece[], t: Transform): [number, number] {
+  let lo = Infinity, hi = -Infinity;
+  for (const p of pieces) {
+    const h = shapeHalfExtents(p.shape);
+    const q = quatMul(t.rotation, p.offset.rotation);
+    const c = transformPoint(t, p.offset.position);
+    const ext = Math.abs(rotate(q, [1, 0, 0])[1]) * h[0] + Math.abs(rotate(q, [0, 1, 0])[1]) * h[1] + Math.abs(rotate(q, [0, 0, 1])[1]) * h[2];
+    lo = Math.min(lo, c[1] - ext); hi = Math.max(hi, c[1] + ext);
+  }
+  return pieces.length ? [lo, hi] : [t.position[1], t.position[1]];
 }
 
 export { quatFromAxisAngle, QUAT_ID, rotate, add };

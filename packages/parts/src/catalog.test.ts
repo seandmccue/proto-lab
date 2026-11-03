@@ -144,3 +144,14 @@ test('joint "free" sets a payload down on a connector without creating a joint',
   assert.equal(r.assembly.joints.length, 1, 'only the tray joint');
   assert.ok(pizza.transform.position[1] > tray.transform.position[1] && pizza.transform.position[1] - tray.transform.position[1] < 0.03, `pizza sits just above the tray floor: ${pizza.transform.position[1] - tray.transform.position[1]}`);
 });
+
+test('an unplaced "tower" with an axle is auto-placed as the tallest tower, and the summary lowest point is the real one', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'mount', id: 'rotor', part: 'spoked-wheel-400', onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', spin_deg: 0, offset_m: 0.03 },
+  ], getPart, undefined, catalog);
+  const tower = r.assembly.instances.find((x) => x.id === 'tower');
+  assert.ok(tower && tower.anchored, 'tower placed and anchored');
+  assert.equal(tower!.partId, 'tower-500');
+  const s = summarize(r.assembly);
+  assert.ok(s.lowestPoint_m !== null && s.lowestPoint_m > -0.01, `lowest point ${s.lowestPoint_m} should sit on the ground, not below it`);
+});
