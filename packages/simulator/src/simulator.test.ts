@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWalker, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setDrives, getPart, type WalkerParams } from '@protolab/parts';
+import { buildWalker, walkerOps, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setDrives, getPart, type WalkerParams } from '@protolab/parts';
 import { runTest, driveValue } from './index.ts';
 
 const env = { gravity_m_s2: 9.81, groundFriction: 0.9 };
@@ -98,4 +98,17 @@ test('hexapod walks with the measured wave gait (recipe numbers)', async () => {
   const r = await runTest(buildWalker(hex), { env, test: { ...walk, id: 'hex_walk' } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics.distance_m >= 0.3 && r.metrics.maxTilt_deg < 10, JSON.stringify(r.metrics));
+});
+
+test('hexapod placed across the walk direction scuttles sideways (walk test direction z)', async () => {
+  const hex: WalkerParams = { ...TUNED, legCount: 6, chassisPartId: 'chassis-hex-200', gait: { ...TUNED.gait, swingDuty: 0.3 } };
+  const { ops, drives } = walkerOps(hex);
+  if (ops[0].op === 'place') ops[0].rotation_deg = [0, 90, 0];
+  let a = setDrives(applyOps(emptyAssembly(), ops, getPart).assembly, drives);
+  const foot = getPart('foot-pad-12')!;
+  const lowest = Math.min(...a.instances.filter((x) => x.partId === foot.id).map((x) => x.transform.position[1] - foot.params.radius));
+  a = applyOps(a, [{ op: 'move', id: 'body', translate: [0, -lowest, 0] }], getPart).assembly;
+  const r = await runTest(a, { env, test: { ...walk, id: 'side_walk', direction: 'z' } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.ok(r.metrics.distance_m >= 0.3, JSON.stringify(r.metrics));
 });
