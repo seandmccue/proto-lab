@@ -41,11 +41,15 @@ async function one(p: { id: string; prompt: string }, run: number): Promise<Row>
   let n = 0; let sweeps = 0, custom = 0, revisions = 0, meaningful = 0, handoffs = 0; let error: string | undefined;
   const model = planner ? null : modelConfigFromEnv();
   const specialist = planner ? null : specialistConfigFromEnv();
+  const trail: string[] = [];
   const out = await runAgent({ prompt: p.prompt, inventionId: `bench_${p.id}_${run}`, model, specialist, newVersionId: () => `${p.id}_${run}_v${++n}` }, (e: AgentEvent) => {
-    if (e.type === 'tool' && e.entry.ok) { if (e.entry.tool === 'sweep_gait') sweeps++; if (e.entry.tool === 'create_parametric_part') custom++; if (e.entry.tool === 'revise_walker') revisions++; }
-    if (e.type === 'handoff') handoffs++;
-    if (e.type === 'error') error = e.message;
+    if (e.type === 'tool') { trail.push(`[${e.entry.ok ? 'ok' : 'ERR'}] ${e.entry.tool}: ${e.entry.summary}`); if (e.entry.ok) { if (e.entry.tool === 'sweep_drive' || e.entry.tool === 'sweep_gait') sweeps++; if (e.entry.tool === 'create_part' || e.entry.tool === 'design_part' || e.entry.tool === 'create_parametric_part') custom++; if (e.entry.tool === 'assemble' || e.entry.tool === 'set_drives' || e.entry.tool === 'revise_walker') revisions++; } }
+    if (e.type === 'status') trail.push(`[status] ${e.message}`);
+    if (e.type === 'handoff') { handoffs++; trail.push(`[handoff] ${e.message}`); }
+    if (e.type === 'error') { error = e.message; trail.push(`[error] ${e.message}`); }
+    if (e.type === 'done') trail.push(`[done] ${e.status}: ${e.summary}`);
   });
+  writeFileSync(resolve(outDir, `${p.id}_${run}.log`), trail.join('\n'));
   for (const v of out.versions.slice(1)) if (Object.keys(v.decisions[0]?.changes ?? {}).length > 0 || v.decisions[0]?.basedOn) meaningful++;
   const walks = out.versions.flatMap((v) => v.tests);
   const firstFailIdx = walks.findIndex((t) => !t.passed);
