@@ -259,3 +259,29 @@ li[data-state='active'] .build-progress-dot { background: var(--violet, #6d28d9)
 .parts-bin-card { border: 1px solid #eef2f7; border-radius: 0.5rem; padding: 0.4rem; background: #fafafa; animation: pb-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 @keyframes pb-in { from { opacity: 0; transform: translateY(10px) scale(0.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .parts-bin-card, .build-progress-dot, .build-progress-spinner { animation: none; } }
+
+/* Build strip: compact progress over the 3D view once an assembly is on screen */
+.build-strip { position: absolute; left: 0.65rem; right: 0.65rem; bottom: 0.65rem; display: flex; flex-direction: column; gap: 0.4rem; pointer-events: none; }
+.build-strip-panel { display: flex; flex-direction: column; gap: 0.35rem; border: 1px solid var(--bench-line, #e2e8f0); border-radius: 0.75rem; background: color-mix(in srgb, var(--bench-panel, #fff) 92%, transparent); backdrop-filter: blur(6px); padding: 0.5rem 0.7rem; box-shadow: 0 6px 20px -12px rgba(15, 23, 42, 0.35); }
+.build-strip-stages { font-size: 0.62rem; gap: 0.25rem 0.7rem; }
+.build-strip-now { display: flex; align-items: center; gap: 0.55rem; }
+.build-strip-spinner { width: 1.1rem; height: 1.1rem; }
+.build-strip-toast { display: flex; align-items: center; gap: 0.5rem; align-self: flex-start; max-width: 100%; border-radius: 0.65rem; padding: 0.45rem 0.7rem; font-size: 0.78rem; box-shadow: 0 10px 24px -14px rgba(15, 23, 42, 0.5); animation: bs-toast 7s ease forwards; }
+.build-strip-toast.is-pass { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.build-strip-toast.is-fail { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.build-strip-toast-mark { font-weight: 700; font-size: 1rem; }
+@keyframes bs-toast { 0% { opacity: 0; transform: translateY(8px) scale(0.97); } 6% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-4px); } }
+
+/* Iteration ribbon in the canvas heading: one chip per version, a pulsing chip for the one being built */
+.iteration-ribbon { display: flex; align-items: center; gap: 0.3rem; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; margin-left: 0.5rem; }
+.iteration-ribbon::-webkit-scrollbar { display: none; }
+.iteration-ribbon li { flex: none; }
+.iteration-chip { display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid var(--bench-line, #e2e8f0); border-radius: 999px; padding: 0.15rem 0.55rem; background: var(--bench-panel, #fff); color: #475569; font: 600 0.66rem/1.3 var(--font-mono, ui-monospace, monospace); white-space: nowrap; cursor: pointer; transition: border-color 0.15s, background 0.15s; animation: pb-in 0.35s ease both; }
+.iteration-chip:hover { border-color: #94a3b8; }
+.iteration-chip[aria-pressed='true'] { border-color: var(--violet, #6d28d9); background: var(--accent-soft, #ede9fe); color: var(--violet-dark, #4c1d95); }
+.iteration-chip.is-pass .iteration-chip-mark { color: #059669; }
+.iteration-chip.is-fail .iteration-chip-mark { color: #d97706; }
+.iteration-chip-metric { color: #64748b; font-weight: 500; }
+.iteration-chip.is-building { cursor: default; color: var(--violet-dark, #4c1d95); border-style: dashed; }
+.iteration-chip.is-building .build-progress-dot { background: var(--violet, #6d28d9); animation: bp-pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .build-strip-toast, .iteration-chip { animation: none; } }
