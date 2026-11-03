@@ -16,7 +16,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export interface TestSummary { testId: string; kind: 'walk' | 'dance'; passed: boolean; metrics: Record<string, number>; failureReasons: string[] }
-export interface InventionPublic { id: string; title: string; description: string; prompt: string; visibility: 'private' | 'public'; status: string; currentVersionId: string | null; featured: boolean; isOwner: boolean; ownerLabel: string; sourceInventionId: string | null; parentVersionId: string | null; modelId: string | null; tests: TestSummary[]; previewUrl: string | null; createdAt: string; updatedAt: string }
+export interface InventionPublic { latestWalk: TestSummary | null; latestDance: TestSummary | null; id: string; title: string; description: string; prompt: string; visibility: 'private' | 'public'; status: string; currentVersionId: string | null; featured: boolean; isOwner: boolean; ownerLabel: string; sourceInventionId: string | null; parentVersionId: string | null; modelId: string | null; tests: TestSummary[]; previewUrl: string | null; createdAt: string; updatedAt: string }
 export interface VersionMeta { id: string; iteration: number; status: string; modelId: string; parentVersionId: string | null; createdAt: string; tests: TestSummary[]; spec: VersionRecord['spec'] }
 export interface InventionDetail { invention: InventionPublic; versions: VersionMeta[]; latestJob?: { id: string; status: string; step: string }; source: { id: string; title: string; ownerLabel: string } | null }
 export type JobEvent = { t: string; type: string; [k: string]: unknown };
