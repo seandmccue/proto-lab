@@ -24,6 +24,8 @@ export interface WalkerParams {
     kneeAmplitude_rad: number;
     stiffness: number;
     damping: number;
+    gaitType: 'crawl' | 'trot' | 'tripod';
+    swingDuty: number;
   };
   shell: boolean;              // add cosmetic shell + eyes
 }
@@ -36,6 +38,7 @@ export const WALKER_PARAM_RANGES = {
   'gait.kneeAmplitude_rad': { min: 0.0, max: 1.0, default: 0.4, unit: 'rad', description: 'Knee lift during swing' },
   'gait.stiffness': { min: 1, max: 200, default: 30, unit: 'N·m/rad', description: 'Position-servo stiffness' },
   'gait.damping': { min: 0, max: 20, default: 1.5, unit: 'N·m·s/rad', description: 'Position-servo damping' },
+  'gait.swingDuty': { min: 0.1, max: 0.5, default: 0.22, unit: '', description: 'Fraction of the stride a leg is in the air (crawl ≤ 0.25 keeps 3 feet down)' },
 } as const;
 
 export const DEFAULT_WALKER: WalkerParams = {
@@ -48,7 +51,7 @@ export const DEFAULT_WALKER: WalkerParams = {
   footPartId: 'foot-pad-12',
   hipOffset_rad: 0,
   kneeFlex_rad: 0.5,
-  gait: { frequency_hz: 1.5, hipAmplitude_rad: 0.35, kneeAmplitude_rad: 0.4, stiffness: 30, damping: 1.5 },
+  gait: { frequency_hz: 1.0, hipAmplitude_rad: 0.3, kneeAmplitude_rad: 0.5, stiffness: 3, damping: 0.1, gaitType: 'crawl', swingDuty: 0.22 },
   shell: true,
 };
 
@@ -143,8 +146,7 @@ export function buildWalker(params: WalkerParams, extraParts?: PartResolver): As
       instances.push(footInst);
       joints.push({ id: `fix_foot_${legId}`, type: 'fixed', a: { instanceId: lowerInst.id, connectorId: 'tip' }, b: { instanceId: footInst.id, connectorId: 'mount' } });
 
-      // Gait phase: trot (quadruped) or tripod (hexapod). Diagonal pairs move together.
-      const phase = ((i + (side === 'L' ? 0 : 1)) % 2) * Math.PI;
+      const phase = legPhase(params.gait.gaitType, pairs, i, side);
       phases[hipCtl] = phase;
       phases[kneeCtl] = phase;
     }
@@ -169,6 +171,9 @@ export function buildWalker(params: WalkerParams, extraParts?: PartResolver): As
 
   const controller: GaitController = {
     kind: 'gait',
+    gaitType: params.gait.gaitType,
+    swingDuty: params.gait.swingDuty,
+    rampIn_s: 0.6,
     frequency_hz: params.gait.frequency_hz,
     hipAmplitude_rad: params.gait.hipAmplitude_rad,
     kneeAmplitude_rad: params.gait.kneeAmplitude_rad,
@@ -188,10 +193,23 @@ export function buildWalker(params: WalkerParams, extraParts?: PartResolver): As
   };
 }
 
+/** Leg phase for a given gait. Crawl: one leg swings at a time (3 down). Trot/tripod: alternating sets. */
+export function legPhase(gait: 'crawl' | 'trot' | 'tripod', pairs: number, pairIndex: number, side: 'L' | 'R'): number {
+  if (gait === 'crawl') {
+    // Measured best sequence in simulation: left legs front→back, then right legs front→back.
+    const legs = pairs * 2;
+    const order = side === 'L' ? pairIndex : pairs + pairIndex;
+    return (order / legs) * 2 * Math.PI;
+  }
+  return ((pairIndex + (side === 'L' ? 0 : 1)) % 2) * Math.PI;
+}
+
 export function danceController(base: GaitController, opts: { frequency_hz?: number; bobAmplitude_rad?: number; swayAmplitude_rad?: number } = {}): DanceController {
   const phases: Record<string, number> = {};
   for (const k of Object.keys(base.phases)) phases[k] = base.phases[k];
-  return { kind: 'dance', frequency_hz: opts.frequency_hz ?? 2, bobAmplitude_rad: opts.bobAmplitude_rad ?? 0.35, swayAmplitude_rad: opts.swayAmplitude_rad ?? 0.25, phases };
+  // Alternate sway left/right legs so the body shuffles in place; knees bob together.
+  for (const k of Object.keys(phases)) if (k.startsWith('hip_')) phases[k] = k.includes('_L') ? 0 : Math.PI;
+  return { kind: 'dance', frequency_hz: opts.frequency_hz ?? 1.6, bobAmplitude_rad: opts.bobAmplitude_rad ?? 0.3, swayAmplitude_rad: opts.swayAmplitude_rad ?? 0.2, hipOffset_rad: base.hipOffset_rad, kneeOffset_rad: base.kneeOffset_rad, rampIn_s: 0.4, phases };
 }
 
 export function flattenWalkerParams(p: WalkerParams): Record<string, number> {
@@ -204,6 +222,8 @@ export function flattenWalkerParams(p: WalkerParams): Record<string, number> {
     'gait.kneeAmplitude_rad': p.gait.kneeAmplitude_rad,
     'gait.stiffness': p.gait.stiffness,
     'gait.damping': p.gait.damping,
+    'gait.swingDuty': p.gait.swingDuty,
+    'gait.gaitType': p.gait.gaitType === 'crawl' ? 0 : p.gait.gaitType === 'trot' ? 1 : 2,
     shell: p.shell ? 1 : 0,
   };
 }
