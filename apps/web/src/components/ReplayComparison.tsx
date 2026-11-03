@@ -4,10 +4,42 @@ import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/sc
 import { api, fmt } from '../api.ts';
 import { keyMetric, recordedTestSpec } from './BuildProgress.tsx';
 import type { DiagnosticTone } from './diagnosticColors.ts';
+import { recordedPenPath } from './replayEvidence.ts';
 import Viewer, { replayBounds } from './Viewer.tsx';
 
 type Replay = { inventionId: string; versionId: string; testId: string; label: string };
 type Tilt = { highlights: ReadonlyMap<string, DiagnosticTone>; tilt: number; limit: number; feet: number };
+
+const millimetres = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const formatTravel = (metres: number) => `${millimetres.format(metres * 1000)} mm`;
+
+function travelComparison(
+  before: TestResult,
+  after: TestResult,
+  versions: [VersionRecord, VersionRecord],
+  definitions: [TestSpec | undefined, TestSpec | undefined],
+) {
+  const tests = [before, after] as const;
+  const minima = definitions.map((definition) => new Map(
+    definition?.kind === 'motion'
+      ? definition.measure.linearTravel?.map(({ instance, axis, minTravel_m }) => [`${instance}.travel_${axis}_m`, minTravel_m])
+      : undefined,
+  ));
+  const keys = new Set([...Object.keys(before.metrics), ...Object.keys(after.metrics)]);
+  return [...keys].flatMap((key) => {
+    const match = /^(.+)\.travel_([xyz])_m$/.exec(key);
+    if (!match) return [];
+    const [, instance, axis] = match;
+    const part = versions[1].assembly.instances.find(({ id }) => id === instance)
+      ?? versions[0].assembly.instances.find(({ id }) => id === instance);
+    const name = part?.label || instance.replace(/[_-]+/g, ' ');
+    return [{
+      key,
+      label: `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${axis.toUpperCase()} axis`,
+      readings: tests.map((test, index) => ({ value: test.metrics[key], minimum: minima[index].get(key) })),
+    }];
+  });
+}
 
 interface Props {
   before: Replay;
@@ -64,6 +96,11 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
     return highlights;
   }, [versions, revisionChanges]);
   const definition = recordedTestSpec(before.testId, [versions?.[0] ?? null]) ?? baselineDefinition;
+  const travel = useMemo(() => {
+    if (!versions || !beforeTest || !afterTest) return [];
+    const afterDefinition = recordedTestSpec(after.testId, [versions[1]]);
+    return travelComparison(beforeTest, afterTest, versions, [definition, afterDefinition]);
+  }, [versions, beforeTest, afterTest, after.testId, definition]);
   const peakTime = useMemo(() => {
     if (!beforeTest || beforeTest.passed || definition?.kind !== 'walk') return null;
     let peakTilt = definition.maxTilt_deg;
@@ -104,12 +141,39 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
         <p className="workbench-comparison-metric">{test.metrics.distance_m !== undefined ? `${fmt.cm(test.metrics.distance_m)} travelled` : keyMetric(test)}{test.metrics.maxTilt_deg !== undefined && ` · ${fmt.deg(test.metrics.maxTilt_deg)} peak tilt`}</p>
         <div className="workbench-comparison-canvas">
-          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} />
+          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} pathInstanceId={recordedPenPath(version.assembly, test)} />
         </div>
         <div className={`workbench-comparison-note${index === 0 ? ' is-failure' : ''}`}>
           {index === 0 ? <><strong>{tilt ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
         </div>
       </article>)}
     </div>
+    {travel.length > 0 && (
+      <div className="border-t border-slate-200 bg-white px-3 pb-3">
+        <table className="w-full table-fixed text-left text-xs">
+          <caption className="py-2 text-left text-sm font-semibold">Recorded linear travel</caption>
+          <thead className="border-b border-slate-200">
+            <tr>
+              <th scope="col" className="w-2/5 pb-2 pr-2">Part and axis</th>
+              <th scope="col" className="pb-2 pr-2">{before.label} · v{versions[0].iteration}</th>
+              <th scope="col" className="pb-2">{after.label} · v{versions[1].iteration}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {travel.map(({ key, label, readings }) => (
+              <tr key={key} className="border-b border-slate-100">
+                <th scope="row" className="break-words py-2 pr-2 font-medium">{label}</th>
+                {readings.map(({ value, minimum }, index) => (
+                  <td key={panes[index].replay.versionId} className="py-2 pr-2 align-top">
+                    {value === undefined ? 'Unmeasured' : <strong>{formatTravel(value)}</strong>}
+                    {minimum !== undefined && <span className="block text-slate-600">Minimum {formatTravel(minimum)}</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
   </section>;
 }

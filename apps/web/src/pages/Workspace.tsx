@@ -4,6 +4,7 @@ import { tiltDeg, upVector } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
+import { recordedPenPath } from '../components/replayEvidence.ts';
 import ReplayComparison from '../components/ReplayComparison.tsx';
 import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
@@ -418,7 +419,9 @@ export default function Workspace() {
   const cameraLock = comparing ? story.slice(0, 2).map((step) => step.version.id).join(':') : undefined;
   const target = story[0]?.label === 'Before revision' ? walkTargets(story[0].test) : null;
   const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
-  const canCompare = !running && !!story[1] && !separateChecks && story[0].version.id !== story[1].version.id;
+  const sharedTravel = story[0]?.test.kind === 'motion' && story[1]?.test.kind === 'motion' &&
+    Object.keys(story[0].test.metrics).some((metric) => /\.travel_[xyz]_m$/.test(metric) && metric in story[1].test.metrics);
+  const canCompare = !running && !!story[1] && (!separateChecks || sharedTravel) && story[0].version.id !== story[1].version.id;
   const sideBySide = comparisonOpen && canCompare;
   const stageRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -452,7 +455,7 @@ export default function Workspace() {
     ? recordedTestSpec(test.testId, [version, prevVersion?.id === version.parentVersionId ? prevVersion : null]) ?? (testSpecKey ? earlierTestSpecs[testSpecKey] : undefined)
     : undefined;
   const strokeTargets = testDefinition?.kind === 'motion' && test?.trace.frames.length ? testDefinition.measure.linearTravel : undefined;
-  const penPath = id === 'inv_drawing_automaton' && test?.trace.frames.some((frame) => frame.bodies.pen_tip) ? 'pen_tip' : undefined;
+  const penPath = version ? recordedPenPath(version.assembly, test) : undefined;
   const sourceParentId = detail?.source?.versionId;
   useEffect(() => {
     if (!version || !test || !testSpecKey || testDefinition || !version.parentVersionId) return;

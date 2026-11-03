@@ -57,25 +57,34 @@ function material(color: string, role: string, blueprint: boolean, selected: boo
   return m;
 }
 
-function boundingRadius(pieces: Assembly['parts'][number]['geometry']): number {
-  let r = 0;
-  for (const p of pieces) { const h = halfExtents(p.shape); const c = p.offset.position; r = Math.max(r, Math.hypot(c[0], c[1], c[2]) + Math.hypot(h[0], h[1], h[2])); }
-  return r;
-}
 function quat(q: Transform['rotation']) { return new THREE.Quaternion(q[0], q[1], q[2], q[3]); }
 function vec(p: Transform['position']) { return new THREE.Vector3(p[0], p[1], p[2]); }
 
 export function replayBounds(assembly: Assembly, test?: TestResult | null): THREE.Box3 {
   const bounds = new THREE.Box3();
-  const radii = new Map(assembly.parts.map((part) => [part.id, boundingRadius(part.geometry)]));
-  const frames = test?.trace.frames ?? [];
+  const partBounds = new Map<string, THREE.Box3>();
+  const matrix = new THREE.Matrix4();
   const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3(1, 1, 1);
+  const box = new THREE.Box3();
+  for (const part of assembly.parts) {
+    const local = new THREE.Box3();
+    for (const { shape, offset } of part.geometry) {
+      // Include room for the diagnostic outline and poses between trace samples.
+      const half = vec(halfExtents(shape)).multiplyScalar(1.12);
+      matrix.compose(position.fromArray(offset.position), rotation.fromArray(offset.rotation), scale);
+      local.union(box.set(half.clone().negate(), half).applyMatrix4(matrix));
+    }
+    if (!local.isEmpty()) partBounds.set(part.id, local);
+  }
+  const frames = test?.trace.frames ?? [];
+  const fallback = new THREE.Box3(new THREE.Vector3(-.02, -.02, -.02), new THREE.Vector3(.02, .02, .02));
   for (const instance of assembly.instances) {
-    const radius = (radii.get(instance.partId) ?? 0.02) * 1.1;
+    const local = partBounds.get(instance.partId) ?? fallback;
     const addPose = (pose: Transform) => {
-      position.fromArray(pose.position);
-      bounds.expandByPoint(position.addScalar(radius));
-      bounds.expandByPoint(position.addScalar(-2 * radius));
+      matrix.compose(position.fromArray(pose.position), rotation.fromArray(pose.rotation), scale);
+      bounds.union(box.copy(local).applyMatrix4(matrix));
     };
     addPose(instance.transform);
     for (const frame of frames) {
