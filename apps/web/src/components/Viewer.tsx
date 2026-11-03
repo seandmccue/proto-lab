@@ -166,7 +166,12 @@ function Dim({ from, to, label }: { from: [number, number, number]; to: [number,
 
 export default function Viewer(props: ViewerProps) {
   const [ready, setReady] = useState(false);
-  useEffect(() => setReady(true), []);
+  useEffect(() => {
+    setReady(true);
+    // Nudge the fiber resize observer: some embedded/emulated viewports miss the first measurement.
+    const timers = [120, 600].map((ms) => setTimeout(() => window.dispatchEvent(new Event('resize')), ms));
+    return () => timers.forEach(clearTimeout);
+  }, []);
   if (!ready) return <div className="h-full w-full bg-slate-100" />;
   return (
     <Canvas shadows dpr={props.mini ? [1, 1.5] : [1, 2]} camera={{ position: props.mini ? [0.32, 0.2, 0.34] : [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>

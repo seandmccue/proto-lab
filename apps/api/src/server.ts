@@ -1,6 +1,9 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
 import { serve } from '@hono/node-server';
 import { resolve } from 'node:path';
+// Local .env first, then the repo-root .env (first definition wins).
+loadEnv({ path: resolve(process.cwd(), '.env') });
+loadEnv({ path: resolve(process.cwd(), '../../.env') });
 import { initSimulator } from '@protolab/simulator';
 import { modelConfigFromEnv, smokeTest, DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { openDb } from './db.ts';

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import type { JobEvent, VersionMeta } from '../api.ts';
 import { fmt } from '../api.ts';
 import type { Spec } from '@protolab/schema';
@@ -14,7 +14,7 @@ export function Metrics({ metrics, kind }: { metrics: Record<string, number>; ki
   ];
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs mono">
-      {rows.map(([k, v]) => <><dt key={k + 'k'} className="text-slate-500">{k}</dt><dd key={k + 'v'} className="text-slate-800">{v}</dd></>)}
+      {rows.map(([k, v]) => <Fragment key={k}><dt className="text-slate-500">{k}</dt><dd className="text-slate-800">{v}</dd></Fragment>)}
     </dl>
   );
 }
