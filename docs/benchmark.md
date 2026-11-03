@@ -101,3 +101,13 @@ The two misses: the "walk 40 cm" run plateaued at 0.36 m, and one Muse run passe
 dance (v4) but then re-ran the walk with the dance drives and finalized as failed. Both have fixes merged
 after this pass started: a measured note that motor stiffness 8–10 walks 0.48–0.53 m (stiffness 5 walks
 0.30 m), and a rule never to re-run a passed test, with the resume message listing what already passed.
+
+### The two misses re-run on the updated recipe (2026-11-03 08:14 UTC)
+
+| Prompt | Result | Time | Versions | Best walk | Note |
+| --- | --- | --- | --- | --- | --- |
+| sprinter (40 cm) | **passed** | 67 s | 1 | 0.489 m | Stiffness 8 from the recipe; first test, 3.2° tilt |
+| muse (walk, then dance) | **passed** | 179 s | 6 | 0.507 m | Walk passed first try at 0.51 m; dance passed on its fifth attempt; finalized passed without re-running the walk |
+
+With those, all five walker prompts have passed on the current engine, and the hero walker now walks
+about half a metre in six seconds instead of 0.3 m.
