@@ -296,6 +296,10 @@ li[data-state='active'] .build-progress-dot { background: var(--violet, #6d28d9)
   letter-spacing: .1em;
   color: #a3ddf5;
 }
+.build-blueprint-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .65rem; }
+.build-blueprint-controls button { min-height: 28px; padding-inline: .4rem; border: 1px solid #527b9a; border-radius: .3rem; color: #d9f5ff; }
+.build-blueprint-controls button:hover { background: #174563; }
+.build-blueprint-controls button:focus-visible { outline-color: #8ae4ff; }
 .build-blueprint-stage {
   position: relative;
   display: grid;

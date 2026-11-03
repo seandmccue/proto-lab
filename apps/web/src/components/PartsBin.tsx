@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Assembly, PartDefinition, Spec } from '@protolab/schema';
 import IsoPreview from './IsoPreview.tsx';
 import { api, type JobEvent } from '../api.ts';
@@ -40,15 +40,41 @@ function PartDrawing({ part }: { part: PickedPart }) {
 
 export default function PartsBin({ parts, plan, brief }: { parts: PickedPart[]; plan?: Spec['plan']; brief?: string }) {
   const [selectedId, setSelectedId] = useState<string>();
+  const [playing, setPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [inventoryFocused, setInventoryFocused] = useState(false);
+  const inventory = useRef<HTMLUListElement>(null);
   const visible = useMemo(() => [...parts].sort((a, b) => b.t.localeCompare(a.t)).slice(0, 12), [parts]);
-  const active = visible.find((part) => part.id === selectedId) ?? visible[0];
+  const activeIndex = Math.max(0, visible.findIndex((part) => part.id === selectedId));
+  const active = visible[activeIndex];
+  const activeId = active?.id;
+  const nextId = visible.length > 1 ? visible[(activeIndex + 1) % visible.length].id : undefined;
+  useEffect(() => {
+    if (!playing || inventoryFocused || !nextId) return;
+    const timer = window.setTimeout(() => setSelectedId(nextId), 4000);
+    return () => window.clearTimeout(timer);
+  }, [playing, inventoryFocused, activeId, nextId]);
+
+  useEffect(() => {
+    const list = inventory.current;
+    const tile = list?.querySelector('[aria-pressed="true"]');
+    if (!list || !tile) return;
+    const frame = list.getBoundingClientRect();
+    const item = tile.getBoundingClientRect();
+    if (item.left < frame.left) list.scrollLeft += item.left - frame.left;
+    else if (item.right > frame.right) list.scrollLeft += item.right - frame.right;
+  }, [activeId]);
   const systems = plan?.subassemblies ?? [];
 
   return (
     <div className="build-blueprint">
       <div className="build-blueprint-heading">
         <span>Blueprint desk</span>
-        <span>{active ? `${parts.length} part types` : systems.length ? `${systems.length} subassemblies` : 'Awaiting plan'}</span>
+        <div className="build-blueprint-controls">
+          <span>{active ? `${parts.length} part types` : systems.length ? `${systems.length} subassemblies` : 'Awaiting plan'}</span>
+          {nextId && (
+            <button type="button" onClick={() => setPlaying((value) => !value)}>{playing ? 'Pause slideshow' : 'Play slideshow'}</button>
+          )}
+        </div>
       </div>
       <div className="build-blueprint-stage">
         {active ? (
@@ -72,10 +98,12 @@ export default function PartsBin({ parts, plan, brief }: { parts: PickedPart[]; 
         )}
       </div>
       {active && (
-        <ul className="build-blueprint-inventory" aria-label="Build inventory">
+        <ul ref={inventory} className="build-blueprint-inventory" aria-label="Build inventory"
+          onFocus={() => setInventoryFocused(true)}
+          onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setInventoryFocused(false); }}>
           {visible.map((part) => (
             <li key={part.id}>
-              <button type="button" aria-pressed={part.id === active.id} onClick={() => setSelectedId(part.id)}>
+              <button type="button" aria-pressed={part.id === active.id} onClick={() => { setSelectedId(part.id); setPlaying(false); }}>
                 <span>{part.custom ? 'Custom' : part.category}</span>
                 <strong>{part.name}</strong>
                 <small>{part.via}</small>
