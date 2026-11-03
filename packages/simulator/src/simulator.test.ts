@@ -4,7 +4,7 @@ import { buildWalker, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setD
 import { runTest, driveValue } from './index.ts';
 
 const env = { gravity_m_s2: 9.81, groundFriction: 0.9 };
-const walk = { id: 'walk_1', kind: 'walk' as const, duration_s: 6, base: 'body', minDistance_m: 0.3, maxTilt_deg: 25, direction: 'x' as const };
+const walk = { id: 'walk_1', kind: 'walk' as const, duration_s: 6, base: 'body', minDistance_m: 0.3, maxTilt_deg: 25, direction: 'x' as const, signed: false };
 const TUNED: WalkerParams = { ...DEFAULT_WALKER, hipOffset_rad: 0.3, hipServoPartId: 'servo-ds3218', kneeServoPartId: 'servo-ds3218', gait: { ...DEFAULT_WALKER.gait, hipAmplitude_rad: 0.4, frequency_hz: 1.0, swingDuty: 0.2, kneeAmplitude_rad: 0.3, stiffness: 5, damping: 0.2 } };
 
 test('standing walker stays upright', async () => {
