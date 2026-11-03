@@ -358,7 +358,12 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       metrics.payloadSeparation_m = +Math.abs(sep).toFixed(4); metrics.payloadHeight_m = +pe.y.toFixed(4); metrics.payloadDrop_m = +(payStart!.position[1] - pe.y).toFixed(4);
       const js = jointStats([...ctlJoints.keys()]); for (const s of js) reportJoint(s, s.joint.motor!.controlId);
       metrics.payloadGrounded = payloadGrounded ? 1 : 0;
-      if (payloadGrounded) failureReasons.push(`Payload fell to the ground after the support was removed at ${test.supportUntil_s} s (dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m)`);
+      if (payloadGrounded) {
+        const drop = (payStart!.position[1] - pe.y).toFixed(3);
+        failureReasons.push(Math.abs(sep) < 0.03
+          ? `Payload is on the ground after the support was removed at ${test.supportUntil_s} s: it slid ${drop} m down while still between the fingers (separation ${Math.abs(sep).toFixed(3)} m), so the grip did not carry its weight. Close the fingers to a tighter angle than the payload width, raise finger stiffness or servo torque, or raise the holder so the payload hangs clear of the floor; do not re-run the same drives.`
+          : `Payload fell to the ground after the support was removed at ${test.supportUntil_s} s (dropped ${drop} m)`);
+      }
       else if (Math.abs(sep) > test.maxSeparation_m || payStart!.position[1] - pe.y > test.maxSeparation_m) failureReasons.push(`Payload slipped: separation ${Math.abs(sep).toFixed(3)} m, dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m (limit ${test.maxSeparation_m} m)`);
       saturationNote();
       break;

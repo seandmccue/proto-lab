@@ -220,7 +220,7 @@ test('claw: two mirrored fingers on a palm hold a 40 mm block (recipe numbers)',
 test('grip test fails honestly when the payload lands on the floor', async () => {
   const a = setDrives(clawAssembly(0.12), ['grip_L', 'grip_R'].map((c) => ({ controlId: c, mode: 'position' as const, rampIn_s: 0, profile: { kind: 'constant' as const, value: 0 } })));
   const r = await runTest(a, { env, test: gripTest });
-  assert.ok(!r.passed && r.failureReasons[0].includes('fell to the ground'), r.failureReasons.join('; '));
+  assert.ok(!r.passed && /fell to the ground|on the ground/.test(r.failureReasons[0]), r.failureReasons.join('; '));
   assert.equal(r.metrics.payloadGrounded, 1);
 });
 
