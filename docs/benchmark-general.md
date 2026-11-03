@@ -228,3 +228,17 @@ lever the model was missing: motor stiffness. At stiffness 5 the quadruped walks
 stiffness 8–10 it walks 0.48–0.53 m with ≈3° tilt and 0.9 N·m peak hip torque, because the servos track the
 gait instead of lagging it. Longer legs, a bigger chassis, bigger feet, higher cadence and larger
 amplitude all walk worse. The numbers are now in the recipe and locked by a simulator test.
+
+### Catalog index in the prompt (v5 sample, 2026-11-03 08:18 UTC)
+
+Builds were spending 4–12 `search_catalog` and up to 10 `get_part` rounds before the first assemble. The
+system prompt now carries a one-line-per-part index of the library (≈1.9k tokens: id, mass, rating,
+connector ids with kind and outward axis), so Muse mounts by id directly.
+
+| Prompt | v4 (no index) | v5 (index) | Note |
+| --- | --- | --- | --- |
+| windmill | 277 s | **54 s** | first try, 3 searches instead of 4 and no deliberation rounds |
+| ferris | 104 s | **74 s** | first try, 0 searches (4 get_part for exact geometry) |
+| butterfly | 173 s | **92 s** | first try |
+
+Every fast demo prompt is now under 100 s end to end.

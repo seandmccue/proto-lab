@@ -90,7 +90,8 @@ garden gadget. Latest pass on the current engine: **9 of 10 passed, 0 API errors
 and every miss was traced to a cause and fixed (a direction-only walk test, two Wonder 503s now handled
 by a visible fallback, a missing hexapod recipe, a drawbridge that researched a linkage until its time
 budget ran out); details and per-run tables in [docs/benchmark-general.md](docs/benchmark-general.md).
-Timings run from 100 s to 10 min, dominated by Meta Model API round-trips.
+With the component index in the prompt the fast prompts finish in under 100 s (windmill 54 s, Ferris
+wheel 74 s, butterfly 92 s); the rest run 3–10 min, dominated by Meta Model API round-trips.
 
 ## Reliability benchmark
 
