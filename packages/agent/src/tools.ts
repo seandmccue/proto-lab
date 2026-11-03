@@ -42,6 +42,27 @@ export interface ToolEvents {
   onTest(result: TestResult): void;
 }
 
+/** Accept common field synonyms in assembly ops. */
+function normaliseOp(o: unknown): unknown {
+  if (!o || typeof o !== 'object') return o;
+  const x = { ...(o as Record<string, unknown>) };
+  const alias = (from: string, to: string) => { if (x[to] === undefined && x[from] !== undefined) { x[to] = x[from]; } if (from !== to) delete x[from]; };
+  if (typeof x.type === 'string' && x.op === undefined) { x.op = x.type; delete x.type; }
+  if (typeof x.action === 'string' && x.op === undefined) { x.op = x.action; delete x.action; }
+  if (x.op === 'add' || x.op === 'create' || x.op === 'spawn') x.op = 'place';
+  if (x.op === 'attach' || x.op === 'join') x.op = x.onto || x.parent ? 'mount' : 'connect';
+  alias('partId', 'part'); alias('part_id', 'part'); alias('instance', 'id'); alias('instanceId', 'id'); alias('name', 'id'); alias('instance_id', 'id');
+  alias('at', 'position'); alias('pos', 'position'); alias('translation', 'position'); alias('rotation', 'rotation_deg'); alias('rotation_euler_deg', 'rotation_deg'); alias('euler_deg', 'rotation_deg');
+  alias('parent', 'onto'); alias('on', 'onto'); alias('to', 'onto'); alias('parent_connector', 'connector'); alias('parentConnector', 'connector'); alias('onto_connector', 'connector');
+  alias('child_connector', 'via'); alias('childConnector', 'via'); alias('with', 'via'); alias('using', 'via');
+  alias('jointType', 'joint'); alias('joint_type', 'joint'); alias('spin', 'spin_deg'); alias('offset', 'offset_m');
+  alias('fixed', 'anchored'); alias('static', 'anchored');
+  if (x.op === 'place' && x.position === undefined && Array.isArray(x.transform)) { x.position = x.transform; delete x.transform; }
+  if (x.op === 'pattern' && x.instances === undefined && typeof x.id === 'string') { x.instances = [x.id]; delete x.id; }
+  if (x.op === 'pattern' && x.kind === undefined && typeof x.type === 'string') { x.kind = x.type; }
+  if (x.motor && typeof x.motor === 'object') { const m = x.motor as Record<string, unknown>; if (m.controlId === undefined && typeof m.id === 'string') { m.controlId = m.id; delete m.id; } if (m.controlId === undefined && typeof m.name === 'string') { m.controlId = m.name; delete m.name; } }
+  return x;
+}
 /** Accept drives written flat ({controlId, kind:'sine', amplitude...}) by wrapping the profile. */
 function normaliseDrive(d: unknown): unknown {
   if (!d || typeof d !== 'object') return d;
@@ -135,6 +156,8 @@ export class ToolRuntime {
           return { part: this.summarisePart(p) };
         }
         case 'assemble': {
+          const raw = rawArgs as { ops?: unknown[] };
+          if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
           const a = AssembleArgs.parse(rawArgs);
           const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m });
           this.assembly = r.assembly;
