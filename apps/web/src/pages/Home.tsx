@@ -14,7 +14,18 @@ const steps = [
   { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
   { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
 ];
-const referenceIds = ['inv_drawing_automaton', 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift'];
+const drawingReferenceId = 'inv_drawing_automaton';
+const drawingReferenceVersionId = 'ver_drawing_automaton_1';
+const drawingRemixId = 'inv_76b7fae5bdf941c9';
+const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift'];
+
+function penPathSize(test: TestSummary | null | undefined) {
+  const width = test?.metrics['pen_tip.travel_x_m'];
+  const height = test?.metrics['pen_tip.travel_y_m'];
+  return width !== undefined && height !== undefined && Number.isFinite(width) && Number.isFinite(height)
+    ? `${(width * 1000).toFixed(1)} × ${(height * 1000).toFixed(1)} mm`
+    : null;
+}
 
 export default function Home() {
   const nav = useNavigate();
@@ -32,20 +43,50 @@ export default function Home() {
   const [earlierHeroDefinition, setEarlierHeroDefinition] = useState<TestSpec>();
   const [showBefore, setShowBefore] = useState(false);
   const [heroPlaying, setHeroPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [drawingRemix, setDrawingRemix] = useState<InventionPublic | null>(null);
+  const [drawingBaseline, setDrawingBaseline] = useState<VersionRecord | null>(null);
   const hero = featured.find((item) => /^mechanical crab$/i.test(item.title) && item.status === 'passed' && item.latestWalk?.passed);
   const heroId = hero?.id;
   const heroVersionId = hero?.currentVersionId;
   const heroTestId = hero?.latestWalk?.testId;
   const references = referenceIds.flatMap((id) => featured.filter((item) => item.id === id));
-  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id)).slice(0, 6);
+  const drawingReference = references.find((item) => item.id === drawingReferenceId);
+  const hasFeaturedDrawingBaseline = drawingReference?.currentVersionId === drawingReferenceVersionId;
+  const originalPath = penPathSize(hasFeaturedDrawingBaseline
+    ? drawingReference?.latestTest
+    : drawingBaseline?.tests.at(-1));
+  const remixPath = penPathSize(drawingRemix?.latestTest);
+  const spotlightId = drawingRemix && originalPath && remixPath ? drawingRemix.id : null;
+  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId).slice(0, 6);
+  const recentPrototypes = recent.filter((item) => item.id !== spotlightId).slice(0, 6);
+  const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
   useEffect(() => {
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
     api.gallery('featured', 12).then((r) => setFeatured(r.items)).catch(() => {});
-    api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured).slice(0, 6))).catch(() => {});
-    api.gallery('remixes', 4).then((r) => setRemixes(r.items)).catch(() => {});
+    api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
+    api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.invention(drawingRemixId).then(({ invention }) => {
+      if (!cancelled && invention.visibility === 'public' && invention.sourceInventionId === drawingReferenceId &&
+        invention.parentVersionId === drawingReferenceVersionId && invention.modelId?.startsWith('muse-') &&
+        invention.latestTest?.passed && penPathSize(invention.latestTest)) setDrawingRemix(invention);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!drawingRemix || hasFeaturedDrawingBaseline) return;
+    let cancelled = false;
+    api.version(drawingReferenceId, drawingReferenceVersionId, false)
+      .then(({ version }) => { if (!cancelled) setDrawingBaseline(version); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [drawingRemix, hasFeaturedDrawingBaseline]);
 
   useEffect(() => {
     if (!heroId || !heroVersionId) return;
@@ -156,7 +197,7 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {references.length > 0 && (
+        {(references.length > 0 || spotlightId) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">
               <div>
@@ -165,13 +206,27 @@ export default function Home() {
                 <p>Replay reference builds to see how one drive moves several linked parts. Open the test to inspect the measured results.</p>
               </div>
             </div>
-            <div className="invention-grid">{references.map((item) => <GalleryCard key={item.id} item={item} replay />)}</div>
+            {spotlightId && (
+              <article className="lab-test-example mb-4">
+                <div>
+                  <span className="lab-label">Muse remix</span>
+                  <h3>One drawing mechanism, two pen paths</h3>
+                  <p>Compare the original linkage with Muse’s remix. The saved simulations measure the width and height of each pen path.</p>
+                </div>
+                <dl aria-label="Measured pen path width by height">
+                  <div><dt>Original reference</dt><dd>{originalPath}</dd></div>
+                  <div><dt>Muse remix</dt><dd>{remixPath}</dd></div>
+                </dl>
+                <Link to={`/i/${spotlightId}?replay=1&compare=1`} className="btn-secondary">Compare pen paths <span aria-hidden="true">↗</span></Link>
+              </article>
+            )}
+            {references.length > 0 && <div className="invention-grid">{references.map((item) => <GalleryCard key={item.id} item={item} replay />)}</div>}
           </section>
         )}
         {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} browse={{ to: '/gallery?view=mine', label: 'All your inventions' }} />}
         <Section title="Prototype gallery" items={featuredPrototypes} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery', label: 'View gallery' }} />
-        <Section title="Recent" items={recent} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
-        <Section title="Remixes" items={remixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />
+        <Section title="Recent" items={recentPrototypes} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
+        {(!spotlightId || otherRemixes.length > 0) && <Section title="Remixes" items={otherRemixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />}
         <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
           <div className="lab-section-heading">
             <div>
