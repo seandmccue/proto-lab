@@ -36,6 +36,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     : { modelId: modelStatus.modelId, label: /^muse-/i.test(modelStatus.modelId) ? `Powered by Meta ${prettyModelName(modelStatus.modelId)}` : `Model: ${modelStatus.modelId}`, live: modelStatus.live };
 
   app.get('/api/model', (c) => c.json({ ...attribution(), detail: modelStatus.detail }));
+  app.get('/api/load', (c) => c.json(runner.load()));
   app.get('/api/examples', (c) => c.json({ examples: EXAMPLES }));
 
   app.post('/api/inventions', async (c) => {
