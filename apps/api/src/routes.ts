@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
@@ -21,9 +22,15 @@ const sanitize = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u00
 
 export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   const app = new Hono();
+  const jsonLimit = bodyLimit({ maxSize: 16_384, onError: (c) => c.json({ error: 'Request body is too large' }, 413) });
+  const previewLimit = bodyLimit({ maxSize: 600_000, onError: (c) => c.json({ error: 'PNG up to 600 kB required' }, 413) });
+  app.use('/api/*', (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    return (c.req.path.endsWith('/preview') ? previewLimit : jsonLimit)(c, next);
+  });
   const session = (h: { header: (n: string) => string | undefined }) => {
     const token = (h.header('x-session-id') ?? '').slice(0, 64);
-    return token && token !== 'protolab' ? token : null;
+    return token && token !== 'protolab' && token !== 'anon' ? token : null;
   };
   const rate = new Map<string, number[]>();
   const limited = (key: string, max: number, windowMs: number) => {
@@ -87,7 +94,8 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const checkpoint = runner.waitForCheckpoint(id);
     if (checkpoint) {
       try { await checkpoint; } catch { return c.json({ error: 'Build storage is temporarily unavailable' }, 503); }
-      job = select.get(id) as JobRow;
+      job = select.get(id) as JobRow | undefined;
+      if (!job) return c.json({ error: 'Not found' }, 404);
     }
     c.header('Cache-Control', 'private, no-store');
     const since = Number(c.req.query('since') ?? 0);
@@ -185,7 +193,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     return c.json({ ok: true, invention: publicInvention(getInvention(inv.id)!, sid) });
   });
 
-  const explainCache = new Map<string, { text: string; modelId: string }>();
+  const explainCache = new Map<string, Promise<{ text: string; modelId: string }>>();
   app.post('/api/inventions/:id/versions/:vid/explain', async (c) => {
     const sid = session(c.req);
     if (limited(`explain:${sid}`, 20, 10 * 60_000)) return c.json({ error: 'Rate limited' }, 429);
@@ -193,9 +201,15 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     if (!inv || !canSee(inv, sid)) return c.json({ error: 'Not found' }, 404);
     const v = loadVersion(c.req.param('vid'));
     if (!v || v.inventionId !== inv.id) return c.json({ error: 'Not found' }, 404);
-    const cached = explainCache.get(v.id); if (cached) return c.json(cached);
-    try { const r = await explainDesign(v); explainCache.set(v.id, r); return c.json(r); }
-    catch (e) { return c.json({ error: (e as Error).message }, 502); }
+    let pending = explainCache.get(v.id);
+    if (!pending) {
+      if (limited('global:explain', 18, 60_000)) return c.json({ error: 'Explanation capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
+      if (explainCache.size >= 256) explainCache.delete(explainCache.keys().next().value!);
+      pending = explainDesign(v);
+      explainCache.set(v.id, pending);
+    }
+    try { return c.json(await pending); }
+    catch (e) { if (explainCache.get(v.id) === pending) explainCache.delete(v.id); return c.json({ error: (e as Error).message }, 502); }
   });
 
   app.post('/api/inventions/:id/preview', async (c) => {

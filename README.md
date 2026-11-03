@@ -88,8 +88,9 @@ needs a little more engineering. Bringing in Muse Wonder to help." Muse Wonder 1
 transcript, diagnoses the mechanical problem, applies one targeted change and runs a test, then
 Spark resumes. The handoff is shown in the activity log and every version records which model made
 its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_SPECIALIST_AFTER`.
-Every build also has a wall-clock budget (`AGENT_TIME_BUDGET_S`, default 20 min): when it runs out the model
-is asked to finalize honestly with the best result so far, so no build runs open-ended.
+The build deadline (`AGENT_TIME_BUDGET_S`, default 20 min) cancels pending model calls and retry delays.
+Completed simulation traces remain available when a build stops before Muse finishes its review.
+New builds run up to `JOB_CONCURRENCY` at a time and accept up to `JOB_MAX_QUEUED` waiting builds.
 
 ## Generalization benchmark
 
@@ -149,6 +150,8 @@ Rate limits, idempotency keys, input sanitisation and size limits are in place f
 
 ## Deploying to Cloudflare
 
-The API is written against two small adapters (SQLite metadata, object store). Swapping them for
-D1 and R2 and moving the job runner to a Durable Object or container is the intended next step;
-the simulation (Rapier WASM) runs in a few hundred milliseconds per test.
+ProtoLab runs as a single Cloudflare Container behind a Worker. Node runs the existing SQLite,
+object store, Rapier, and worker-thread jobs. A private R2 bucket holds a compressed SQLite and
+object-store checkpoint. Every successful mutation and recorded build version is checkpointed.
+The container restores that archive and checks SQLite integrity before serving. The R2 import copy
+is kept separately for recovery. See the [deployment and restore instructions](deploy/cloudflare/README.md).

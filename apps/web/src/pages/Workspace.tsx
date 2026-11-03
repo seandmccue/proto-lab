@@ -119,6 +119,7 @@ export default function Workspace() {
   useEffect(() => {
     if (!jobId) return;
     let since = 0, stop = false, retries = 0;
+    let needsRefresh = false;
     let timer: ReturnType<typeof setTimeout>;
     setEvents([]);
     setReconnecting(false);
@@ -126,15 +127,17 @@ export default function Workspace() {
       try {
         const j = await api.job(jobId, since);
         if (stop) return;
-        retries = 0;
-        setReconnecting(false);
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
         if (j.status === 'queued') api.load().then((next) => { if (!stop) setLoad(next); }).catch(() => {}); else setLoad(null);
         if (j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {});
-        if (j.events.some((e) => e.type === 'version' || e.type === 'done')) await refresh();
-        if (j.status === 'queued' || j.status === 'running') { if (!stop) timer = setTimeout(tick, 700); }
-        else await refresh();
+        const active = j.status === 'queued' || j.status === 'running';
+        needsRefresh ||= !active || j.events.some((e) => e.type === 'version' || e.type === 'done');
+        if (needsRefresh) { await refresh(); needsRefresh = false; }
+        if (stop) return;
+        retries = 0;
+        setReconnecting(false);
+        if (active) timer = setTimeout(tick, 700);
       } catch (e) {
         if (stop) return;
         if (/not found|forbidden|unauthorized|HTTP (400|401|403|404)/i.test((e as Error).message)) {
@@ -177,7 +180,7 @@ export default function Workspace() {
 
   // Once a passing version exists and the job is done, capture a thumbnail for the gallery (owner only).
   useEffect(() => {
-    if (!detail || running || uploadedPreview.current || !version || !(detail.invention.isOwner || detail.invention.featured) || detail.invention.previewUrl) return;
+    if (!detail || running || uploadedPreview.current || !version || version.id !== detail.invention.currentVersionId || !detail.invention.isOwner || detail.invention.previewUrl) return;
     const timer = setTimeout(async () => {
       const dataUrl = captureRef.current?.();
       if (!dataUrl) return;
@@ -249,12 +252,12 @@ export default function Workspace() {
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button className="btn-secondary" disabled={running || !inv?.currentVersionId} onClick={() => setRemixOpen(true)}>Remix</button>
           {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
-          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
+          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
           <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
         </div>
       </div>
       {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
-      {reconnecting && <div role="status" className="bg-amber-50 px-4 py-2 text-sm text-amber-800">Reconnecting to the build. The last recorded simulation is still available.</div>}
+      {reconnecting && <div role="status" className="bg-amber-50 px-4 py-2 text-sm text-amber-800">Reconnecting to the build.{version && ' The last recorded simulation is still available.'}</div>}
       {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'The versions recorded so far are shown below; use “Request change” or Remix to continue from them.' : 'Nothing was recorded; start a new build.'}</div>}
 
       <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">

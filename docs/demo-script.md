@@ -1,36 +1,31 @@
-# ProtoLab — judge demo script (≈ 6 minutes)
+# ProtoLab judge demo
 
-Everything below is live. Nothing is pre-rendered; gallery items were built by Muse on this server.
+## 73-second recording
 
-## 0. Before the demo (2 minutes)
-- `npm run dev` with `MODEL_API_KEY` set. The header badge must read **Powered by Meta Muse Spark 1.3** with a green dot (the API ran a live tool-call smoke test).
-- `npm run preflight` prints a go / no-go: model live, four featured builds passed, a public remix present, web serving.
-- Open the homepage once so the featured cards have loaded.
+The 3D shots replay saved simulator traces in the application. The opening shows the prompt interaction. It does not start a live build in the recording.
 
-## 1. Homepage (20 s)
-"What will you invent?" Point at the five featured cards: walking Muse robot (v9 walked 0.31 m after discovering why it fell; a follow-up "walk 50 % further, then dance" added v10–v12 at 0.47 m), mechanical butterfly, Ferris wheel, pizza catapult, mechanical crab (open the crab's version chips: three failed scuttles, a Muse Wonder handoff, then a pass). Hover a card: the preview animates the *actual* simulation trace. Say: *same component library, same assembly operations, no template per invention.*
+| Time | Picture | Proof |
+| --- | --- | --- |
+| 0–8 s | Homepage and the prompt “Build a small robot that walks and dances.” | A one-sentence invention brief is enough to start. |
+| 8–19 s | Saved walker v4, with the replay and test panel visible | It traveled 6.1 cm and tilted 44.4°, missing the walk test. |
+| 19–29 s | Saved walker v11 | After a follow-up asked for 45 cm in six seconds, the revised walk passed at 47.2 cm. |
+| 29–38 s | Public gallery | The same engine generated visibly different mechanisms. Each featured card opens a saved assembly with replay. |
+| 38–50 s | Dragonfly remix v1 | The user asked for four wings. The first test detected contact between the right forewing and hind wing. |
+| 50–63 s | Dragonfly remix v2 | Muse moved both rear hinges back and reran the same test. It recorded 2 Hz and no detected wing contacts. |
+| 63–73 s | Saved walker v12 dance | A distinct motion test passed with 2.4° maximum tilt. |
 
-## 2. Start a build live (measured Muse timings, so pick deliberately)
-Live Meta Model API rounds take 5–60 s each. Measured end-to-end on the latest full pass (all ten first-try or second-try): windmill ≈ 16 s, butterfly ≈ 40 s, Ferris wheel ≈ 50 s, walker ≈ 80 s, crane ≈ 90 s, catapult ≈ 100 s, crab ≈ 2 min, drawbridge ≈ 2 min, novel garden gadget ≈ 2 min, claw ≈ 3 min; earlier passes ran 2–3× longer on the legged and multi-stage prompts, so allow for that. For a live slot, start a **Ferris wheel**, **windmill** or **butterfly** (or let a judge type one) and, while it runs, open a featured build in a second tab to show the finished experience. There is always something to watch: before the first assembly the 3D pane shows the **build progress** view (stage stepper Plan → Parts → Assemble → Test → Revise → Done, the current step, elapsed time, and "Muse is reasoning, N s" when a round runs long) and the **parts bin**, where every part Muse finds or designs slides in as a thumbnail card ("designed by Muse" badge on custom parts). At the first `assemble` the parts **drop in one at a time** (badge: *assembling · n of N components placed · not yet simulated*), the newest one glowing. From then on a compact **build strip** stays over the 3D view with the stepper and timer, each test result lands as a pass/fail toast with its key number, and the **iteration ribbon** in the pane heading grows a chip per version (v1 ✗ 0.12 m → v2 ✓ 0.47 m; click a chip to view that version). The simulated version replaces the live assembly after the first test. While the live run works, narrate the activity log:
-- First line names the model. *Every decision below is the model's; results are the simulator's.*
-- **Engineering plan** card: purpose, recognisable features, motions, sub-assemblies, success criteria, and *what the physics cannot verify* (e.g. aerodynamic lift).
-- `search_catalog` / `create_part` / `design_part`: Muse picks real parts and designs missing ones (a thorax, a shaped wing). Custom parts get a **designed by Muse** badge in the BOM.
-- `assemble`: structured, validated operations. Point out a rejected op if one appears: *validation, not vibes.*
-- `define_test` → `run_test`: measured metrics with units. Failures show the exact reason.
-- Revision: the model changes one thing and cites the measurement (**Based on:** in the Tests tab).
-- If three tests fail in a row: **Model handoff** card, Muse Wonder diagnoses in one sentence, fixes, hands back. If Wonder is overloaded (it returned 503s during one benchmark pass), the card says so and Spark continues; nothing is substituted silently.
+## Live version
 
-## 3. Explore the result (60 s)
-Play / scrub the trace. **Explode** to show the mechanism. **Blueprint** for true dimensions. Click a part: mass, material, connectors, source. BOM with provenance badges. Version chips v1…vn: replay the failed attempts; the fall is real.
+1. In a signed-out browser, run preflight against the deployed URL and open the saved walker and dragonfly workbenches. Check that both versions play, their test results agree with the recording, and a judge can start a fresh build.
+2. Start a fresh flapping butterfly or Ferris wheel with the judge’s choice of constraint. Leave that tab open while showing the saved dragonfly remix. Use the 3D stage, the version controls, and the Tests tab to show the failure, the rear-hinge edit, and the retest.
+3. Return to the live job when it has reached a milestone. If it is still processing, show the actual current stage and finish the saved walkthrough. Keep the labels for live jobs and saved simulation distinct.
+4. If asked how Meta’s models participate, open the saved crab v3 and v4. Spark’s failed v3 traveled 0.27 cm at 14.28° tilt. Wonder’s revision restored a uniform stance and wave gait and passed at 31.73 cm at 4.72° tilt.
+5. Show the parts panel or exploded view if asked what was built. Explain that the saved metrics are from rigid-body simulation and that the flapping test measures joint movement and contact.
 
-## 4. Change it (60 s)
-"Request change": *make the wings bigger* / *walk 30 % further* / *give it six legs*. Same loop, new versions, numbering continues.
+## Saved run routes
 
-## 5. Publish and remix (30 s)
-Publish (opt-in). Open the gallery card. Remix: a forked design with provenance to the original, built from the parent's recorded operations. Already in the gallery from real sessions: **Dragonfly (remix of the butterfly)** — four wings, hind pair out of phase, Muse fixed a wing-clearance failure itself on iteration 2; **Six-sail windmill** — a follow-up request ("spin twice as fast and add two more sails") recorded as v2 with a 6-parts-changed badge; **Desk toy: pendulum that rings two bells** — a brief nobody had tested before, with a bell part and a one-piece stand Muse designed itself (4 versions); **See-saw with a rocking bird on one end** — another untested brief, passed first-try in 5.5 min (beam rocking on a tower axle, a winged bird bobbing on a micro servo).
+- Walker · `/i/inv_bb9d5f8a170d4d95`
+- Dragonfly · `/i/inv_fd8fcc242ed8497f`
+- Crab · `/i/inv_633b4887ad7f4cdc`
 
-## What to say when asked "is it real?"
-- Decisions: Muse's, via validated tool calls (schema-checked JSON; no generated code is executed).
-- Physics: Rapier rigid-body simulation, deterministic, fixed 1/240 s step; motors saturate at their catalog rating.
-- Not verified: anything the physics cannot measure (flight, fluids, deformation). The plan says so, the summary says so, and 3D Print stays **Coming Soon**.
-- Benchmarks: see docs/benchmark.md and docs/benchmark-general.md for honest success rates and timings.
+Confirm the deployment preserved these records before publishing the links.

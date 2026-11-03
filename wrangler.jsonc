@@ -1,0 +1,20 @@
+{
+  "name": "protolab",
+  "main": "deploy/cloudflare/worker.js",
+  "compatibility_date": "2026-11-03",
+  "workers_dev": true,
+  "preview_urls": false,
+  "containers": [{
+    "class_name": "ProtoLabContainer",
+    "image": "./Dockerfile",
+    "instance_type": "standard-1",
+    "max_instances": 1
+  }],
+  "durable_objects": {
+    "bindings": [{ "name": "PROTOLAB_CONTAINER", "class_name": "ProtoLabContainer" }]
+  },
+  "exports": {
+    "ProtoLabContainer": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "r2_buckets": [{ "binding": "PROTOLAB_DATA", "bucket_name": "protolab-production" }]
+}
