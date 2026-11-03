@@ -54,9 +54,10 @@ export function keyMetric(t: { metrics: Record<string, number> } | null | undefi
   if (m.distance_m !== undefined) return fmt.m2(m.distance_m);
   if (m.landingDistance_m !== undefined) return `landed ${fmt.m2(m.landingDistance_m)}`;
   if (m.payloadDrop_m !== undefined) return `drop ${fmt.m2(m.payloadDrop_m)}`;
-  const amp = Object.entries(m).find(([k]) => k.endsWith('amplitude_rad'));
-  if (amp) return `${((amp[1] * 180) / Math.PI).toFixed(0)}° swing`;
   const rev = Object.entries(m).find(([k]) => k.endsWith('revolutions'));
+  if (rev && rev[1] >= 0.5) return `${rev[1].toFixed(1)} rev`; // a rotor's "swing" is thousands of degrees; revolutions is the number
+  const amp = Object.entries(m).find(([k]) => k.endsWith('amplitude_rad'));
+  if (amp && amp[1] * 180 / Math.PI <= 360) return `${((amp[1] * 180) / Math.PI).toFixed(0)}° swing`;
   if (rev) return `${rev[1].toFixed(1)} rev`;
   if (m.maxTilt_deg !== undefined) return `tilt ${fmt.deg(m.maxTilt_deg)}`;
   return '';
