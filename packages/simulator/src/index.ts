@@ -233,14 +233,16 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
 
   switch (test.kind) {
     case 'walk': {
-      const end = rootT(baseRb!); const ax = test.direction === 'x' ? 0 : test.direction === 'y' ? 1 : 2; const dist = end.position[ax] - start.position[ax];
-      metrics.distance_m = +dist.toFixed(4); metrics.speed_m_s = +(dist / (test.duration_s - settle)).toFixed(4); metrics.lateralDrift_m = +Math.abs(end.position[ax === 0 ? 2 : 0] - start.position[ax === 0 ? 2 : 0]).toFixed(4);
+      const end = rootT(baseRb!); const ax = test.direction === 'x' ? 0 : test.direction === 'y' ? 1 : 2; const signedDist = end.position[ax] - start.position[ax];
+      const dist = test.signed ? signedDist : Math.abs(signedDist);
+      metrics.distance_m = +dist.toFixed(4); metrics.signedDistance_m = +signedDist.toFixed(4); metrics.travelSign = Math.sign(signedDist); metrics.speed_m_s = +(dist / (test.duration_s - settle)).toFixed(4); metrics.lateralDrift_m = +Math.abs(end.position[ax === 0 ? 2 : 0] - start.position[ax === 0 ? 2 : 0]).toFixed(4);
       const hips = allMotor.filter((s) => /hip/i.test(s.joint.motor!.controlId)), knees = allMotor.filter((s) => /knee/i.test(s.joint.motor!.controlId));
       if (hips.length) { metrics.peakHipTorque_Nm = +Math.max(...hips.map((s) => s.peak)).toFixed(4); metrics.hipServoRating_Nm = Math.min(...hips.map((s) => s.rating)); }
       if (knees.length) { metrics.peakKneeTorque_Nm = +Math.max(...knees.map((s) => s.peak)).toFixed(4); metrics.kneeServoRating_Nm = Math.min(...knees.map((s) => s.rating)); }
       if (fell) failureReasons.push(`Fell at t=${fellAt.toFixed(2)} s (tilt ${metrics.maxTilt_deg}°, min base height ${metrics.minBaseHeight_m} m)`);
       if (!fell && maxTilt > test.maxTilt_deg) failureReasons.push(`Tilt ${metrics.maxTilt_deg}° exceeds limit ${test.maxTilt_deg}°`);
       if (dist < test.minDistance_m) failureReasons.push(`Walked ${dist.toFixed(3)} m, target ${test.minDistance_m} m`);
+      if (!test.signed && signedDist < 0 && dist >= test.minDistance_m) notes.push(`Travelled ${Math.abs(signedDist).toFixed(3)} m toward −${test.direction}; the test accepts either sense. Flip the hip drive signs to reverse.`);
       if (torqueFail.length) failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`);
       break;
     }
