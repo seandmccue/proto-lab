@@ -117,8 +117,8 @@ export default function Workspace() {
     if (!hasLiveAssembly || reducedMotion) return;
     setIntroActive(true);
     setIntroBlueprint(true);
-    const shade = setTimeout(() => setIntroBlueprint(false), 850);
-    const finish = setTimeout(() => setIntroActive(false), 1500);
+    const shade = setTimeout(() => setIntroBlueprint(false), 4000);
+    const finish = setTimeout(() => setIntroActive(false), 4650);
     return () => {
       clearTimeout(shade);
       clearTimeout(finish);
