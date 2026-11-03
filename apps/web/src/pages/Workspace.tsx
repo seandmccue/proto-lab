@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { Assembly, VersionRecord } from '@protolab/schema';
+import type { Assembly, TestSpec, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
@@ -372,7 +372,32 @@ export default function Workspace() {
   const target = story[0]?.label === 'Before revision' ? walkTargets(story[0].test) : null;
   const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
   const vmeta = detail?.versions.find((v) => v.id === versionId);
-  const testDefinition = test ? recordedTestSpec(test.testId, [version, prevVersion]) : undefined;
+  const [earlierTestSpecs, setEarlierTestSpecs] = useState<Record<string, TestSpec>>({});
+  const testSpecKey = version && test ? `${version.id}/${test.testId}` : null;
+  const testDefinition = test && version
+    ? recordedTestSpec(test.testId, [version, prevVersion?.id === version.parentVersionId ? prevVersion : null]) ?? (testSpecKey ? earlierTestSpecs[testSpecKey] : undefined)
+    : undefined;
+  const sourceParentId = detail?.source?.versionId;
+  useEffect(() => {
+    if (!version || !test || !testSpecKey || testDefinition || !version.parentVersionId) return;
+    let cancelled = false;
+    void (async () => {
+      let ancestor = prevVersion?.id === version.parentVersionId ? prevVersion : version;
+      const visited = new Set([ancestor.id]);
+      while (!cancelled && ancestor.parentVersionId && !visited.has(ancestor.parentVersionId)) {
+        const parentId = ancestor.parentVersionId;
+        visited.add(parentId);
+        const inventionId = parentId === sourceParentId && sourceId ? sourceId : ancestor.inventionId;
+        ancestor = (await api.version(inventionId, parentId, false)).version;
+        const definition = recordedTestSpec(test.testId, [ancestor]);
+        if (definition) {
+          if (!cancelled) setEarlierTestSpecs((cached) => ({ ...cached, [testSpecKey]: definition }));
+          break;
+        }
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [version, test, testSpecKey, testDefinition, prevVersion, sourceId, sourceParentId]);
   const revisionDecision = version?.decisions.slice().reverse().find((decision) =>
     decision.source === 'model' && (decision.previousTestId || decision.basedOn));
   const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
