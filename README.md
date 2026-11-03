@@ -20,10 +20,11 @@ each). Nothing in the gallery is canned: every card opens the actual assembly an
 
 ## What is real
 
-- **Components** come from a 100-part library built by 35 parametric generators (frames, plates,
+- **Components** come from a 100-part library built by 36 parametric generators (frames, plates,
   beams, rods, brackets, enclosures, curved panels, gears with real teeth, shafts, bearings, wheels,
   spoked wheels, pulleys, flywheels, hinges, sliders, linkages, cranks, pistons, servos, gearmotors,
-  springs, actuators, shaped wings, propellers, gripper fingers, gondolas, tracks, payloads, trays),
+  springs, actuators, shaped left/right wings, winged bodies with built-in flap hinges, propellers,
+  gripper fingers, gondolas, tracks, payloads, trays),
   plus two CC0 scanned parts from Wikimedia Commons with attribution. Each has mass, dimensions,
   material, connectors (position, axis, kind) and limits.
 - **Autonomous part generation:** the model can create parametric parts with custom parameters, or

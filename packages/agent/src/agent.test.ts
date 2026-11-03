@@ -36,14 +36,14 @@ test('tool runtime: a Ferris wheel from generic ops passes a motion test with cl
 
 test('tool runtime: design_part + wings with sine drives report stroke amplitude', async () => {
   const rt = new ToolRuntime(baseSpec('Mechanical butterfly'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
-  const body = await rt.call('design_part', { name: 'Butterfly thorax', category: 'frames', material: 'PLA', pieces: [{ shape: { kind: 'capsule', radius: 0.012, height: 0.06, axis: 'x' }, offset: { position: [0, 0, 0], rotation: [0, 0, 0, 1] }, color: '#333333', role: 'structure', collide: true }], connectors: [{ id: 'wing_l', position: [0, 0.01, 0.012], axis: [0, 0, 1], kind: 'revolute' }, { id: 'wing_r', position: [0, 0.01, -0.012], axis: [0, 0, -1], kind: 'revolute' }, { id: 'base', position: [0, -0.012, 0], axis: [0, -1, 0], kind: 'fixed' }] }) as { error?: string; part?: { id: string } };
+  const body = await rt.call('design_part', { name: 'Butterfly thorax', category: 'frames', material: 'PLA', pieces: [{ shape: { kind: 'capsule', radius: 0.012, height: 0.06, axis: 'x' }, offset: { position: [0, 0, 0], rotation: [0, 0, 0, 1] }, color: '#333333', role: 'structure', collide: true }], connectors: [{ id: 'wing_l', position: [0, 0.01, 0.012], axis: [-1, 0, 0], kind: 'revolute' }, { id: 'wing_r', position: [0, 0.01, -0.012], axis: [1, 0, 0], kind: 'revolute' }, { id: 'base', position: [0, -0.012, 0], axis: [0, -1, 0], kind: 'fixed' }] }) as { error?: string; part?: { id: string } };
   assert.ok(!body.error, body.error);
   const r1 = await rt.call('assemble', { rationale: 'stand + thorax + wings', ops: [
     { op: 'place', id: 'stand', part: 'plate-80x50', position: [0, 0.002, 0], anchored: true },
     { op: 'mount', id: 'post', part: 'beam-50', onto: 'stand', connector: 'top', via: 'end_a', joint: 'fixed' },
     { op: 'mount', id: 'thorax', part: body.part!.id, onto: 'post', connector: 'end_b', via: 'base', joint: 'fixed' },
-    { op: 'mount', id: 'wing_l', part: 'wing-butterfly-120', onto: 'thorax', connector: 'wing_l', via: 'root', joint: 'revolute', spin_deg: 0, motor: { controlId: 'flap_l', stiffness: 0.05, damping: 0.002 } },
-    { op: 'mount', id: 'wing_r', part: 'wing-butterfly-120', onto: 'thorax', connector: 'wing_r', via: 'root', joint: 'revolute', spin_deg: 0, motor: { controlId: 'flap_r', stiffness: 0.05, damping: 0.002 } },
+    { op: 'mount', id: 'wing_l', part: 'wing-butterfly-120-left', onto: 'thorax', connector: 'wing_l', via: 'hinge', joint: 'revolute', spin_deg: 0, motor: { controlId: 'flap_l', stiffness: 0.05, damping: 0.002 } },
+    { op: 'mount', id: 'wing_r', part: 'wing-butterfly-120', onto: 'thorax', connector: 'wing_r', via: 'hinge', joint: 'revolute', spin_deg: 0, motor: { controlId: 'flap_r', stiffness: 0.05, damping: 0.002 } },
   ] }) as { error?: string };
   assert.ok(!r1.error, r1.error);
   await rt.call('set_drives', { drives: [{ controlId: 'flap_l', mode: 'position', rampIn_s: 0.3, profile: { kind: 'sine', amplitude: 0.6, offset: 0, frequency_hz: 2, phase: 0 } }, { controlId: 'flap_r', mode: 'position', rampIn_s: 0.3, profile: { kind: 'sine', amplitude: 0.6, offset: 0, frequency_hz: 2, phase: 0 } }] });
