@@ -11,7 +11,7 @@ const steps = [
   {
     title: 'Pick parts and assemble',
     label: 'Muse Spark + parts catalog',
-    detail: 'Spark searches a 100-part component library (frames, gears, shafts, hinges, sliders, cranks, servos, gearmotors, springs, wings, propellers, grippers…) and designs missing parts itself from profiles, extrusions and revolves. It then mounts parts at real connectors with structured assembly operations; every op is validated before it runs, and the 3D view shows the assembly taking shape before the first simulation.',
+    detail: 'Spark searches a 100-plus-part component library (frames, gears, shafts, hinges, sliders, cranks, servos, gearmotors, springs, wings, propellers, grippers…) and designs missing parts itself from profiles, extrusions and revolves. It then mounts parts at real connectors with structured assembly operations; every op is validated before it runs, and the 3D view shows the assembly taking shape before the first simulation.',
   },
   {
     title: 'Run the physics tests',
@@ -59,7 +59,7 @@ export default function HowItWorks() {
             <article className="pipeline-model pipeline-wonder">
               <p className="lab-label">02 / Optional specialist</p>
               <h3>Meta Muse Wonder 1.0</h3>
-              <p>Steps in after three consecutive failed walk tests by default. It reviews the evidence and attempts a targeted revision before Spark resumes.</p>
+              <p>Steps in after three consecutive failed tests by default. It reviews the evidence and attempts a targeted revision before Spark resumes. If Wonder is unavailable, the log says so and Spark continues — nothing is swapped silently.</p>
             </article>
           </div>
           <p className="pipeline-note">
