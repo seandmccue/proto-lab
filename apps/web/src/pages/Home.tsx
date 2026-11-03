@@ -43,6 +43,7 @@ export default function Home() {
   const [earlierHeroDefinition, setEarlierHeroDefinition] = useState<TestSpec>();
   const [showBefore, setShowBefore] = useState(false);
   const [heroPlaying, setHeroPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [orrery, setOrrery] = useState<InventionPublic | null>(null);
   const [drawingRemix, setDrawingRemix] = useState<InventionPublic | null>(null);
   const [drawingBaseline, setDrawingBaseline] = useState<VersionRecord | null>(null);
   const hero = featured.find((item) => /^mechanical crab$/i.test(item.title) && item.status === 'passed' && item.latestWalk?.passed);
@@ -67,6 +68,9 @@ export default function Home() {
     api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
     api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
+    api.invention('inv_adc081059ea44ab9').then(({ invention }) => {
+      if (invention.visibility === 'public' && invention.status === 'passed') setOrrery(invention);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -197,7 +201,7 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {(references.length > 0 || spotlightId) && (
+        {(references.length > 0 || spotlightId || orrery) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">
               <div>
@@ -205,6 +209,7 @@ export default function Home() {
                 <h2 id="motion-gallery-title">See mechanisms in motion</h2>
                 <p>Replay reference builds to see how one drive moves several linked parts. Open the test to inspect the measured results.</p>
               </div>
+              {orrery && <Link to={`/i/${orrery.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the Moon’s orbit <span aria-hidden="true">↗</span></Link>}
             </div>
             {spotlightId && (
               <article className="lab-test-example mb-4">
