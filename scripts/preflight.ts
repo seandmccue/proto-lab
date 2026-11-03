@@ -178,7 +178,7 @@ if (judge) checks.push(
       },
     });
     if (locked.passed || !(locked.metrics['tray.maxTilt_deg'] > 8)
-      || locked.metrics[`${drive}.minSwing_rad`] > -target || locked.metrics[`${drive}.maxSwing_rad`] < target) {
+      || !(locked.metrics[`${drive}.minSwing_rad`] <= -target && locked.metrics[`${drive}.maxSwing_rad`] >= target)) {
       throw new Error('Expected the locked pivot to fail tray tilt while keeping the required outer swing');
     }
     return `passive replay passed; locked pivot reached ${locked.metrics['tray.maxTilt_deg']}°`;
