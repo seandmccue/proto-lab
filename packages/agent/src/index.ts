@@ -154,7 +154,9 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     setActive(driver.model);
     const testsBefore = rt.tests.length;
     const res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto' });
-    messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls.length ? res.toolCalls : undefined });
+    // The Meta Model API rejects an assistant message with neither content nor tool_calls; never append one.
+    const content = res.content && res.content.trim() ? res.content : res.toolCalls.length ? null : '(no output)';
+    messages.push(res.toolCalls.length ? { role: 'assistant', content, tool_calls: res.toolCalls } : { role: 'assistant', content: content ?? '(no output)' });
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 240)}` });
     if (!res.toolCalls.length) {
       if (rt.tests.length) { messages.push({ role: 'user', content: 'Call finalize_design to finish, or continue with tools.' }); continue; }
