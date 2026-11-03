@@ -529,3 +529,26 @@ The index in the prompt now lists each part's L×H×W. `bench-results-index-dims
 
 Sizes in the index did not reduce geometry lookups (claw 1 → 6, crane 6 → 4 is run-to-run noise);
 they stay because they cost ~350 tokens and make sizing decisions possible without a round. 3 of 3, 0 errors.
+
+
+## Tenth full pass: dance floor, sizes in the index, criteria-lock message (v11, 2026-11-03 16:12 UTC)
+
+Every engine change from today in one pass. `bench-results-general-v11`, concurrency 3:
+
+| Metric | Value |
+| --- | --- |
+| Passed | **10 of 10** (second consecutive clean pass) |
+| API/model errors | 0 |
+| Median completion time | **101.7 s** |
+| Specialist escalations | 0 |
+| First-try | 8 of 10 (walker and claw needed one revision) |
+
+| Prompt | Time | Prompt | Time |
+| --- | --- | --- | --- |
+| windmill | 23 s | drawbridge | 102 s |
+| ferris | 42 s | crane | 109 s |
+| butterfly | 67 s | novel | 120 s |
+| catapult | 73 s | claw | 164 s |
+| muse | 87 s (0.51 m, v2) | crab | 223 s (first-try, 0.39 m) |
+
+Across eleven full passes: 102 of 110 runs passed.
