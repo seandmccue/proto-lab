@@ -236,7 +236,7 @@ export class ToolRuntime {
                 case 'grip': return [test.kind, test.duration_s, test.supportUntil_s, test.maxSeparation_m];
               }
             };
-            if (JSON.stringify(criteria(a.test)) !== JSON.stringify(criteria(previous))) throw new Error(`Keep the measured criteria for "${a.test.id}" fixed when comparing revisions.`);
+            if (JSON.stringify(criteria(a.test)) !== JSON.stringify(criteria(previous))) throw new Error(`Keep the measured criteria for "${a.test.id}" fixed when comparing revisions: a test that already has a measurement is not redefined. If the first definition was wrong (for example a revolutions criterion on a swinging joint), define a new test with a different id and say in its rationale what was wrong; the old result stays on record.`);
           }
           if (!previous || JSON.stringify(previous) !== JSON.stringify(a.test)) this.testSpecs.set(a.test.id, a.test);
           log(true, `Test ${a.test.id} (${a.test.kind}) defined`);
