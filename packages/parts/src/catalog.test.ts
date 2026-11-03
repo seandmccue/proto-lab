@@ -155,3 +155,15 @@ test('an unplaced "tower" with an axle is auto-placed as the tallest tower, and 
   const s = summarize(r.assembly);
   assert.ok(s.lowestPoint_m !== null && s.lowestPoint_m > -0.01, `lowest point ${s.lowestPoint_m} should sit on the ground, not below it`);
 });
+
+test('a batch that mounts onto an id it places later is reordered, not auto-placed', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'mount', id: 'wheel', part: 'spoked-wheel-400', onto: 'tower1', connector: 'axle', via: 'hub', joint: 'revolute', spin_deg: 0, offset_m: 0.03 },
+    { op: 'place', id: 'tower1', part: 'tower-300', position: [0, 0.15, 0], anchored: true },
+  ], getPart, undefined, catalog);
+  assert.equal(r.assembly.instances.length, 2);
+  assert.equal(r.assembly.instances.find((x) => x.id === 'tower1')!.partId, 'tower-300');
+  assert.equal(r.assembly.joints.length, 1, 'the wheel stays joined to the tower the model placed');
+  assert.ok(r.summary[0].startsWith('reordered: placed tower1'), r.summary[0]);
+  assert.ok(!r.summary.some((x) => x.startsWith('auto-placed')), 'no guess when the batch places it itself');
+});

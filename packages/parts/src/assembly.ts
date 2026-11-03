@@ -97,6 +97,19 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
   // First-batch recovery: a batch that mounts onto an instance nobody placed (typically "body" or "base") gets that
   // instance placed automatically when the referenced connectors identify exactly one library part.
   const ops: AssemblyOp[] = [...inputOps];
+  // A batch that mounts onto an id and only places it later (the model wrote the ops out of order): move that place
+  // op ahead of the first reference instead of auto-placing a guess that the model's own place would then replace.
+  {
+    const existing = new Set(a.instances.map((x) => x.id));
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (op.op !== 'mount' || existing.has(op.onto) || ops.slice(0, i).some((o) => (o.op === 'place' || o.op === 'mount') && o.id === op.onto)) continue;
+      const j = ops.findIndex((o, k) => k > i && o.op === 'place' && o.id === op.onto);
+      if (j < 0) continue;
+      const [late] = ops.splice(j, 1); ops.splice(i, 0, late);
+      summary.push(`reordered: placed ${op.onto} before the ops that mount onto it`);
+    }
+  }
   if (library) {
     const placed = new Set(a.instances.map((x) => x.id));
     const refs = new Map<string, Set<string>>();
