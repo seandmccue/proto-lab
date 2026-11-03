@@ -163,3 +163,14 @@ The crab is the one prompt the engine had not measured a known-good configuratio
 changes: a measured hexapod recipe in the prompt (wave gait numbers, body-mass budget, how a sideways
 crab maps onto it), the assemble batch cap raised from 60 to 120 ops (a six-leg rebuild was rejected),
 and a wall-clock budget per build (20 min, then an honest finalize) so no run can take 24 minutes again.
+
+### Crab after the hexapod recipe (v3c, 2026-11-03 06:53 UTC)
+
+| Prompt | Result | Time | Versions | Note |
+| --- | --- | --- | --- | --- |
+| crab | **passed** | 613 s | 1 | chassis-hex-200, DS3218 hips/knees, 60 mm bars, 60 g carapace with eye stalks and claws; wave gait at 1 Hz, swingDuty 0.3: 0.30 m in 6 s, 5.8° tilt, first test |
+
+Same prompt that had failed after nine tests in 24 minutes: with the measured hexapod numbers in the
+prompt, Muse built the proven configuration, kept the carapace under the mass budget, and passed on its
+first test. One wasted round (a mount onto an instance it had not placed yet) is now answered with a
+hint that lists the existing instances and the place op to use.
