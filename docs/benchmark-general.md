@@ -385,3 +385,10 @@ The windmill's recurring "tower touched rotor" turned out to be a simulator arte
 fault: the rotor hub and the tower's axle boss overlap at the bearing and were colliding, so every flush
 mount failed clearance and the large rotor jammed at 0.42 rev. Joined parts no longer collide with each
 other and are exempt from clearance checks (PR #92); a flush-mounted windmill-4x600 now spins clear.
+
+### Windmill and Ferris wheel after the bearing-contact fix (v8d, 2026-11-03 11:33 UTC)
+
+| Prompt | Result | Time | Note |
+| --- | --- | --- | --- |
+| windmill | **passed, first test** | **41 s** | fastest build on record; the flush-mounted rotor spins clear |
+| ferris | passed, first test | 78 s | unchanged behaviour, confirms no regression |
