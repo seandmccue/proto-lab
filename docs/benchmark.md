@@ -45,3 +45,59 @@ Model: muse-spark-1.3 · specialist: muse-wonder-1.0 after 3 failures · 20 runs
 | pet | 4 | passed | 36.4 | 2 | 1 | 0 | 0 | 0.499 m | Quadruped pet robot with 160mm chassis, 60mm leg bars, big 32mm foot pads and shell. Walk test: 0.499m in 6s, 4.9° tilt, torques 0.52/0.83 N |
 | pet | 2 | failed | 268.1 | 9 | 3 | 3 | 4 | 0.4234 m | Quadruped pet robot with big 32mm feet: chassis-quad-120, 40mm leg bars, MG996R 1.1Nm servos, crawl gait 0.9Hz/0.42rad/knee 0.45, stiffness  |
 | sprinter | 4 | passed | 357.8 | 5 | 3 | 2 | 4 | 0.4861 m | Quadruped (chassis-quad-160, custom 70mm leg bars, custom 2.5 N·m servos, foot-pad-12) walks 0.486m in 6s with 7.4° max tilt. Iterations: MG |
+
+
+## Generic engine, 2026-11-03 08:10 UTC (20 runs)
+
+The runs above were made by the walker-family builder. These are the same five prompts on the universal
+engine (generic assembly ops, measured recipes, Muse Wonder after three failures), the engine the gallery
+and the ten-invention benchmark use. Builds take longer because every leg is assembled from parts by the
+model, and more of them go through a Wonder consult.
+
+| Metric | Value |
+| --- | --- |
+| Success rate (walk + requested follow-ups passed) | 90 % (18/20) |
+| Errors (API/model) | 0 % |
+| Median completion time | 166.5 s |
+| Mean iterations (versions) | 5.0 |
+| Runs with ≥1 meaningful revision citing a measurement | 85 % |
+| Runs that failed a walk test and later passed one | 75 % |
+| Runs using a drive sweep | 45 % |
+| Runs creating a custom part | 30 % |
+| Runs escalated to the specialist | 60 % |
+
+| Prompt | Runs | Passed | Median time |
+| --- | --- | --- | --- |
+| muse (walk, then dance) | 4 | 3/4 | 190 s |
+| hexapod (50 cm) | 4 | 4/4 | 80 s |
+| crawler (25 cm, calm) | 4 | 4/4 | 70 s |
+| sprinter (40 cm) | 4 | 3/4 | 253 s |
+| pet (walk, then dance) | 4 | 4/4 | 211 s |
+
+| Prompt | # | Status | s | Iter | Sweeps | Custom | Handoffs | Best walk |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| crawler | 1 | passed | 65 s | 1 | 0 | 0 | 0 | 0.3216 m |
+| hexapod | 1 | passed | 70 s | 2 | 0 | 0 | 0 | 0.678 m |
+| pet | 1 | passed | 110 s | 5 | 1 | 2 | 0 | 0.2847 m |
+| muse | 1 | passed | 190 s | 7 | 1 | 2 | 2 | 0.3153 m |
+| hexapod | 2 | passed | 71 s | 2 | 0 | 0 | 0 | 0.9709 m |
+| sprinter | 1 | failed | 253 s | 9 | 1 | 0 | 4 | 0.363 m |
+| crawler | 2 | passed | 70 s | 2 | 0 | 0 | 0 | 0.3288 m |
+| muse | 2 | failed | 262 s | 9 | 1 | 2 | 2 | 0.3371 m |
+| pet | 2 | passed | 211 s | 7 | 1 | 2 | 2 | 0.3272 m |
+| sprinter | 2 | passed | 228 s | 7 | 1 | 0 | 4 | 0.411 m |
+| crawler | 3 | passed | 60 s | 2 | 0 | 0 | 0 | 0.3775 m |
+| muse | 3 | passed | 166 s | 5 | 2 | 0 | 2 | 0.3571 m |
+| pet | 3 | passed | 154 s | 7 | 0 | 2 | 2 | 0.3376 m |
+| hexapod | 3 | passed | 253 s | 4 | 0 | 0 | 2 | 0.6779 m |
+| sprinter | 3 | passed | 268 s | 7 | 0 | 0 | 4 | 0.7285 m |
+| hexapod | 4 | passed | 80 s | 2 | 0 | 0 | 0 | 0.678 m |
+| muse | 4 | passed | 165 s | 6 | 0 | 0 | 2 | 0.3775 m |
+| crawler | 4 | passed | 78 s | 2 | 0 | 0 | 0 | 0.3287 m |
+| sprinter | 4 | passed | 249 s | 8 | 1 | 0 | 4 | 0.7475 m |
+| pet | 4 | passed | 240 s | 7 | 2 | 1 | 4 | 0.3018 m |
+
+The two misses: the "walk 40 cm" run plateaued at 0.36 m, and one Muse run passed its walk (v3) and its
+dance (v4) but then re-ran the walk with the dance drives and finalized as failed. Both have fixes merged
+after this pass started: a measured note that motor stiffness 8–10 walks 0.48–0.53 m (stiffness 5 walks
+0.30 m), and a rule never to re-run a passed test, with the resume message listing what already passed.

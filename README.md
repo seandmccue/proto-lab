@@ -95,10 +95,11 @@ Timings run from 100 s to 10 min, dominated by Meta Model API round-trips.
 ## Reliability benchmark
 
 `node packages/agent/src/bench.ts --repeats 4 --concurrency 4` runs five prompts four times each
-through the real models and writes `bench-results/summary.md`. Latest run (see
-[docs/benchmark.md](docs/benchmark.md)): 20 runs, **95 % passed**, 0 API errors, median 36 s, 100 %
-of runs made a revision citing a measured result, 95 % failed a walk test and later passed one,
-25 % escalated to Muse Wonder. The run before the empty-assistant-message fix is kept in
+through the real models and writes `bench-results/summary.md`. Latest run on the universal engine (see
+[docs/benchmark.md](docs/benchmark.md)): 20 runs, **90 % passed**, 0 API errors, median 167 s, 85 %
+of runs made a revision citing a measured result, 75 % failed a walk test and later passed one,
+60 % escalated to Muse Wonder; both misses were traced and fixed (a measured speed note and a
+never-re-run-a-passed-test rule). The run before the empty-assistant-message fix is kept in
 [docs/benchmark-run1-before-fix.md](docs/benchmark-run1-before-fix.md) for honesty.
 
 ## Layout
