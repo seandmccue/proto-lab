@@ -99,6 +99,10 @@ export default function Home() {
               <div><span className="lab-label">Recorded physics test</span><h2>Mechanical crab</h2></div>
               {activeTest && <button type="button" className="lab-art-toggle" onClick={() => setHeroPlaying(!heroPlaying)}>{heroPlaying ? 'Pause' : 'Play'} preview</button>}
             </div>
+            <div className="lab-art-results" role="group" aria-label="Compare saved crab tests">
+              {beforeDistance !== undefined && <button type="button" aria-pressed={showBefore} onClick={() => setShowBefore(true)}><span>Before · Failed</span><strong>{fmt.cm(beforeDistance)}</strong></button>}
+              {afterDistance !== undefined && <button type="button" aria-pressed={!showBefore} onClick={() => setShowBefore(false)}><span>After · Passed</span><strong>{fmt.cm(afterDistance)}</strong></button>}
+            </div>
             <div className="lab-art-stage">
               {activeVersion ? (
                 <div className="lab-art-machine" aria-hidden="true">
@@ -109,10 +113,6 @@ export default function Home() {
               ) : <span className="lab-art-placeholder">Preparing the recorded prototype</span>}
             </div>
             <figcaption>
-              <div className="lab-art-results" role="group" aria-label="Compare saved crab tests">
-                {beforeDistance !== undefined && <button type="button" aria-pressed={showBefore} onClick={() => setShowBefore(true)}><span>Before · Failed</span><strong>{fmt.cm(beforeDistance)}</strong></button>}
-                {afterDistance !== undefined && <button type="button" aria-pressed={!showBefore} onClick={() => setShowBefore(false)}><span>After · Passed</span><strong>{fmt.cm(afterDistance)}</strong></button>}
-              </div>
               {hero && <p>Muse revised the leg stance and gait. The cards show sideways distance from the saved tests.</p>}
               <Link to={replayUrl} className="lab-art-link">{hero ? 'Open the interactive replay' : 'Explore working prototypes'} <span aria-hidden="true">↗</span></Link>
             </figcaption>

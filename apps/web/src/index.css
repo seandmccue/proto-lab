@@ -141,7 +141,8 @@ body {
 .lab-art :focus-visible { outline-color: #d4c3ff; }
 .lab-art figcaption { display: grid; gap: .55rem; padding: .75rem 1rem; border-top: 1px solid #423562; background: #201735; }
 .lab-art figcaption p { color: #dccfed; font-size: .76rem; line-height: 1.4; }
-.lab-art-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.lab-art-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; padding: 0 1rem .3rem; }
+.lab-art-results:empty { display: none; }
 .lab-art-results button { display: grid; gap: .14rem; padding: .4rem .6rem; text-align: left; border: 1px solid #6a5793; border-radius: .45rem; }
 .lab-art-results button[aria-pressed='true'] { border-color: #c5afff; background: #392863; }
 .lab-art-results button span { color: #e4d6ff; font-size: .72rem; }

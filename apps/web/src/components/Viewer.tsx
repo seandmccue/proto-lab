@@ -119,7 +119,7 @@ function Scene(props: ViewerProps) {
     // Frame the whole machine once per assembly (size changes from a 150 mm robot to a 600 mm Ferris wheel).
     const key = cameraLock ?? `${assembly.instances.length}:${radius.toFixed(3)}:${center.x.toFixed(3)}:${center.y.toFixed(3)}`;
     if (framed.current === key) return; framed.current = key;
-    const dist = radius * (mini ? 2.6 : 2.4);
+    const dist = radius * (mini ? 1.8 : 2.4);
     camera.position.set(center.x + dist * 0.72, center.y + dist * 0.5, center.z + dist * 0.78);
     camera.near = Math.max(0.005, dist / 100); camera.far = Math.max(20, dist * 20); camera.updateProjectionMatrix();
     if (controls.current) { controls.current.target.copy(center); controls.current.update(); }
