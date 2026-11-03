@@ -131,7 +131,7 @@ export default function Workspace() {
   return (
     <div className="flex h-full min-h-screen flex-col bg-slate-50">
       <Header compact />
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2">
+      <div className="flex flex-col gap-2 border-b border-slate-200 bg-white px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-base font-semibold text-slate-900">{inv?.title ?? '…'}</h1>
@@ -140,10 +140,10 @@ export default function Workspace() {
           </div>
           <p className="truncate text-xs text-slate-500">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button className="btn-secondary" disabled={running || !inv?.currentVersionId} onClick={() => setRemixOpen(true)}>Remix</button>
           {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
-          <button className="btn-secondary" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
+          <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
         </div>
       </div>
       {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
