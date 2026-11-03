@@ -38,9 +38,9 @@ a garden pinwheel, a pendulum desk toy, a see-saw with a rocking bird and a drag
 the prompt are simulator-measured numbers (which servo carries which load, which gait slips), not
 templates.
 
-**Measured.** Nine full ten-prompt passes through the Meta Model API: 82 of 90 runs passed, 0 API
-errors, median build under 3 minutes, fast prompts under 100 s. Every miss was traced to a measurable
-cause and fixed with a locking simulator test.
+**Measured.** Latest full ten-prompt pass through the Meta Model API: 10 of 10, median 96 s, 0 API
+errors, no specialist escalation; ten passes in all, 92 of 100 runs. Every miss was traced to a
+measurable cause and fixed with a locking simulator test.
 
 **What you can do in the demo.** Start a build and watch parts mount in 3D before the first simulation.
 Open a featured build, scrub the trace, explode the assembly, read the bill of materials with

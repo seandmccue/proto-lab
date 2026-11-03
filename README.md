@@ -95,11 +95,11 @@ is asked to finalize honestly with the best result so far, so no build runs open
 
 `node packages/agent/src/bench.ts --general` runs ten inventions through the same engine: butterfly,
 Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbridge, crane and a novel
-garden gadget. Latest full passes on the current engine: **10 of 10, then 9 of 10 three times with the
-median under 3 min**, 0 API errors, most builds first-try (windmill 41 s, walker walked and danced in
-51 s, butterfly 71 s, catapult 81 s, crane 137 s, claw 155 s, crab 173 s at 0.39 m). Across nine passes
-that is 82 of 90 runs, every miss traced to a measurable cause and written into a recipe with a locking
-test (a direction-only
+garden gadget. Latest full pass on the current engine: **10 of 10, median 96 s, 0 API errors, no
+specialist escalation, nine of ten first-try** (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker
+81 s at 0.51 m, crane 87 s, catapult 96 s, crab 115 s at 0.39 m, drawbridge 122 s, garden gadget 128 s,
+claw 183 s). Across ten passes that is 92 of 100 runs, every miss traced to a measurable cause and
+written into a recipe or an engine rule with a locking test (a direction-only
 walk test, two Wonder 503s now handled by a visible fallback, a missing hexapod recipe, a drawbridge that
 researched a linkage until its time budget ran out); details and per-run tables in
 [docs/benchmark-general.md](docs/benchmark-general.md).

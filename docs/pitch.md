@@ -18,9 +18,10 @@ publish and remix. Nothing in the gallery is canned: every card is a real build 
   toy, a see-saw with a rocking bird. Recipes in the prompt are simulator-measured numbers, not templates.
 - *Honest about limits.* Every version lists what the physics cannot verify (lift, airflow, fatigue).
 
-**Numbers (current engine, Meta Model API).** Nine full ten-prompt passes: 82 of 90 runs passed, 0 API
-errors, median build under 3 minutes, fast prompts under 100 s (windmill 41 s), every miss traced to a
-measurable cause and written into a recipe with a locking simulator test. 20-run walker reliability set:
+**Numbers (current engine, Meta Model API).** Latest full ten-prompt pass: 10 of 10, median 96 s, 0 API
+errors, no specialist escalation (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker 81 s). Ten
+passes in all: 92 of 100 runs, every miss traced to a measurable cause and written into a recipe or an
+engine rule with a locking simulator test. 20-run walker reliability set:
 18 of 20, both misses re-passed on the updated recipe.
 
 **What to try in two minutes.** Open the homepage, pick "Mechanical butterfly" or type "Build a windmill
