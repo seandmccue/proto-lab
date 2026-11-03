@@ -36,7 +36,7 @@ export const DETERMINISTIC_MODEL_ID = 'deterministic-planner';
 export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void): Promise<AgentOutput> {
   const model = input.model === undefined ? modelConfigFromEnv() : input.model;
   const modelId = model ? model.model : DETERMINISTIC_MODEL_ID;
-  const maxIterations = input.maxIterations ?? 5;
+  const maxIterations = input.maxIterations ?? 7;
   const fullPrompt = input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt;
   let spec = heuristicSpec(fullPrompt, input.parent?.spec);
   emit({ type: 'status', message: model ? `Model: ${prettyModelName(model.model)} (${model.model}) via ${model.baseUrl}. Every design decision below is the model's; test results are the simulator's.` : 'Deterministic planner (no MODEL_API_KEY configured). Decisions below are fixed rules, not a model.' });
@@ -112,6 +112,7 @@ Engineering notes (measured in this simulator):
 - Legs swing in the sagittal plane. hipOffset_rad ≈ kneeFlex_rad / 2 puts the feet under the hips; feet behind the hips make a crawl tip forward.
 - A quadruped crawl needs swingDuty ≤ 0.25 so three feet stay down; hexapods use gaitType "tripod" with swingDuty 0.5.
 - Stride per cycle ≈ 2 × hipAmplitude_rad × leg length. Target distance / duration sets the required stride × frequency.
+- Measured: above ~1.3 Hz or ~0.45 rad the feet slip on this ground and distance drops; 0.9–1.2 Hz with 0.35–0.42 rad and 60 mm bars is the efficient band. Heavier servos add leg inertia and torque demand; prefer the lightest servo with ≥25 % margin.
 - Torque demand is reported against the servo rating; pick a servo with ≥ 25 % margin.
 - Stiffness 3–10 N·m/rad and damping 0.1–0.3 work for 0.2–0.4 kg robots.
 - The catalog is small. When no preset fits (chassis length/width for your leg layout, a leg bar length between presets, a lighter or stronger servo), create_parametric_part and use its id in build_walker/revise_walker; custom parts count as real parts in the BOM.
