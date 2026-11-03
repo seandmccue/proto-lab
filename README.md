@@ -85,9 +85,10 @@ is asked to finalize honestly with the best result so far, so no build runs open
 
 `node packages/agent/src/bench.ts --general` runs ten inventions through the same engine: butterfly,
 Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbridge, crane and a novel
-garden gadget. Latest full pass on the current engine: **10 of 10 passed, 0 API errors, median 5.9 min**,
-no Muse Wonder consult needed (the walker walked and danced in 99 s, the drawbridge lifted in 110 s).
-Across six passes that is 55 of 60 runs, and every miss was traced to a cause and fixed (a direction-only
+garden gadget. Latest full passes on the current engine: **10 of 10, then 9 of 10 with the median
+down to 3 min**, 0 API errors, eight of ten first-try builds (the walker walked and danced in 80 s, the
+claw gripped in 181 s). Across seven passes that is 64 of 70 runs, and every miss was traced to a cause
+and fixed (a direction-only
 walk test, two Wonder 503s now handled by a visible fallback, a missing hexapod recipe, a drawbridge that
 researched a linkage until its time budget ran out); details and per-run tables in
 [docs/benchmark-general.md](docs/benchmark-general.md).
