@@ -67,9 +67,29 @@ export function projectFaces(assembly: Assembly, frame?: Record<string, Transfor
         }
         continue;
       }
-      // Everything else (box, cylinder, capsule, ellipsoid, revolve) draws as a box of its half extents.
+      if (s.kind === 'revolve' || s.kind === 'cylinder') {
+        // Round parts: project the end discs as polygons (rings get a hole), plus a side band so thin rims and shafts read correctly.
+        const axis: V = s.axis === 'x' ? [1, 0, 0] : s.axis === 'y' ? [0, 1, 0] : [0, 0, 1];
+        const u: V = s.axis === 'x' ? [0, 1, 0] : s.axis === 'y' ? [1, 0, 0] : [1, 0, 0];
+        const w: V = s.axis === 'x' ? [0, 0, 1] : s.axis === 'y' ? [0, 0, 1] : [0, 1, 0];
+        let rOut = 0, rIn = 0, hMin = 0, hMax = 0;
+        if (s.kind === 'cylinder') { rOut = s.radius; hMin = -s.height / 2; hMax = s.height / 2; }
+        else { const rs = s.profile.map((p) => Math.abs(p[0])), hs = s.profile.map((p) => p[1]); rOut = Math.max(...rs); rIn = Math.min(...rs); hMin = Math.min(...hs); hMax = Math.max(...hs); if (rIn > rOut * 0.95) rIn = 0; }
+        const N = 28;
+        const ring = (r: number, h: number): V[] => Array.from({ length: N }, (_, i) => { const a = (2 * Math.PI * i) / N; const local: V = [0, 0, 0]; for (let k = 0; k < 3; k++) local[k] = axis[k] * h + u[k] * r * Math.cos(a) + w[k] * r * Math.sin(a); return toView(local); });
+        const top = ring(rOut, hMax), bottom = ring(rOut, hMin);
+        const nAxisV = view(rot(q, axis));
+        // side band (visible half)
+        for (let i = 0; i < N; i++) { const j = (i + 1) % N; const a = (2 * Math.PI * (i + 0.5)) / N; const nrm: V = [0, 0, 0]; for (let k = 0; k < 3; k++) nrm[k] = u[k] * Math.cos(a) + w[k] * Math.sin(a); push([top[i], top[j], bottom[j], bottom[i]], nrm); }
+        const capColor = (lit: number) => shade(color, lit);
+        const capLit = Math.abs(nAxisV[0] * LIGHT[0] + nAxisV[1] * LIGHT[1] + nAxisV[2] * LIGHT[2]);
+        const cap = nAxisV[2] > 0 ? top : bottom; const capDepth = cap.reduce((d, p) => d + p[2], 0) / N;
+        faces.push({ depth: capDepth + 1e-6, points: nAxisV[2] > 0 ? cap : [...cap].reverse(), color: capColor(capLit), kind: 'poly' });
+        if (rIn > 0.05 * rOut) { const hole = ring(rIn, nAxisV[2] > 0 ? hMax : hMin); faces.push({ depth: capDepth + 2e-6, points: hole, color: '#f8fafc', kind: 'poly' }); }
+        continue;
+      }
+      // Everything else (box, capsule, ellipsoid) draws as a box of its half extents.
       let half: V = shapeHalfExtents(s);
-      if (s.kind === 'cylinder') half = [half[0] * 0.9, half[1] * 0.9, half[2] * 0.9];
       const axes: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
       for (let a = 0; a < 3; a++) for (const sgn of [1, -1]) {
         const u = axes[(a + 1) % 3], w = axes[(a + 2) % 3];
