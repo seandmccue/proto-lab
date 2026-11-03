@@ -18,7 +18,7 @@ export default function Home() {
 
   useEffect(() => {
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
-    api.gallery('featured', 4).then((r) => setFeatured(r.items)).catch(() => {});
+    api.gallery('featured', 6).then((r) => setFeatured(r.items)).catch(() => {});
     api.gallery('recent', 6).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
     api.gallery('remixes', 4).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
