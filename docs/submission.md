@@ -20,7 +20,7 @@ A student robotics club should be able to find out why a mechanism jams before c
 
 Muse Spark 1.3 proposes the plan, issues structured assembly and controller operations, defines tests, and revises from the results. ProtoLab validates those operations and applies generic assembly rules. Rapier runs the rigid-body simulation and records the measurements and motion trace. Muse Wonder 1.0 can diagnose a run after repeated failures, with the handoff visible in the saved history. The application records actual versions and tool actions. The featured gallery contains saved runs that can be inspected and replayed.
 
-The v10 general mechanism benchmark recorded ten passes across ten briefs and no API errors in that run. Earlier runs and their failures are included in the benchmark notes. These are measured runs on the documented engine snapshot. The simulator checks defined motion criteria. Flight, deformation, and physical fabrication are outside the demonstrated scope.
+The general mechanism benchmark (ten briefs: butterfly, Ferris wheel, walker, catapult, crab, claw, windmill, drawbridge, crane, a novel garden gadget) has recorded four consecutive clean passes, 10 of 10 each with no API errors and no specialist escalation, at medians of 96 s, 102 s, 61 s and 56 s; 122 of 130 runs across thirteen passes in all, and the 20-run walker reliability set is 20 of 20 at median 81 s. Earlier runs and their failures are included in the benchmark notes. These are measured runs on the documented engine snapshot. The simulator checks defined motion criteria. Flight, deformation, and physical fabrication are outside the demonstrated scope.
 
 ## Submission links and checks
 
