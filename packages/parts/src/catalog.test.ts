@@ -128,3 +128,16 @@ test('an unplaced "base" that only plates can be is auto-placed as the largest p
   assert.ok(base && base.anchored, 'base placed and anchored');
   assert.equal(base!.partId, 'base-plate-300x200');
 });
+
+test('joint "free" sets a payload down on a connector without creating a joint', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'base', part: 'base-plate-300x200', position: [0, 0.005, 0], anchored: true },
+    { op: 'mount', id: 'tray', part: 'tray-45', onto: 'base', connector: 'top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'pizza', part: 'foam-pizza-80', onto: 'tray', connector: 'payload', via: 'bottom', joint: 'free', spin_deg: 0, offset_m: 0 },
+  ], getPart);
+  const pizza = r.assembly.instances.find((x) => x.id === 'pizza')!;
+  const tray = r.assembly.instances.find((x) => x.id === 'tray')!;
+  assert.ok(pizza.free && !pizza.anchored);
+  assert.equal(r.assembly.joints.length, 1, 'only the tray joint');
+  assert.ok(pizza.transform.position[1] > tray.transform.position[1] && pizza.transform.position[1] - tray.transform.position[1] < 0.03, `pizza sits just above the tray floor: ${pizza.transform.position[1] - tray.transform.position[1]}`);
+});
