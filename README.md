@@ -8,7 +8,10 @@ Featured examples: a walking Muse robot, a mechanical butterfly, a miniature Fer
 catapult and a sideways-scuttling crab (three failed tests, a Muse Wonder diagnosis, then 0.32 m at 4.7°
 tilt), all built live by Muse from the same component library and assembly operations.
 
-One-page pitch for judges: [docs/pitch.md](docs/pitch.md). Demo walkthrough: [docs/demo-script.md](docs/demo-script.md).
+Live: **https://protolab.sean-abc.workers.dev** (Meta Muse via the Meta Model API, builds run on the
+server; `npm run preflight -- --api <url> --web <url>` checks it the way a judge would).
+
+One-page pitch for judges: [docs/pitch.md](docs/pitch.md). Demo walkthrough: [docs/demo-script.md](docs/demo-script.md). Submission text: [docs/submission.md](docs/submission.md).
 
 ## Quick start
 
