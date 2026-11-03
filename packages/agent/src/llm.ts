@@ -18,6 +18,15 @@ export function modelConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ModelC
   };
 }
 
+/** Optional engineering specialist (Muse Wonder) consulted after repeated failures. Empty MODEL_SPECIALIST_ID disables it. */
+export function specialistConfigFromEnv(env: NodeJS.ProcessEnv = process.env): { model: ModelConfig; after: number } | null {
+  const primary = modelConfigFromEnv(env);
+  if (!primary) return null;
+  const id = env.MODEL_SPECIALIST_ID === undefined ? 'muse-wonder-1.0' : env.MODEL_SPECIALIST_ID.trim();
+  if (!id || id === primary.model) return null;
+  return { model: { ...primary, model: id }, after: Math.max(1, Number(env.MODEL_SPECIALIST_AFTER ?? 3)) };
+}
+
 /** Human-readable model name for attribution, e.g. "muse-spark-1.3" → "Muse Spark 1.3". */
 export function prettyModelName(id: string): string {
   const m = id.match(/^muse-([a-z]+)-(\d+(?:\.\d+)?)(-contributor)?$/i);

@@ -61,6 +61,23 @@ model. If the model returns an error, the job reports it verbatim; ProtoLab neve
 another model silently. Only when no key is configured does the deterministic planner run, and
 the UI labels it as such. Note: the Meta Model API accepts only `tool_choice: "auto"`.
 
+## Two Muse models collaborating
+
+Muse Spark 1.3 is the inventor. If three walk tests in a row fail, ProtoLab says "This design
+needs a little more engineering. Bringing in Muse Wonder to help." Muse Wonder 1.0 reads the same
+transcript, diagnoses the mechanical problem, applies one targeted change and runs a test, then
+Spark resumes. The handoff is shown in the activity log and every version records which model made
+its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_SPECIALIST_AFTER`.
+
+## Reliability benchmark
+
+`node packages/agent/src/bench.ts --repeats 4 --concurrency 4` runs five prompts four times each
+through the real models and writes `bench-results/summary.md`. Latest run (see
+[docs/benchmark.md](docs/benchmark.md)): 20 runs, **95 % passed**, 0 API errors, median 36 s, 100 %
+of runs made a revision citing a measured result, 95 % failed a walk test and later passed one,
+25 % escalated to Muse Wonder. The run before the empty-assistant-message fix is kept in
+[docs/benchmark-run1-before-fix.md](docs/benchmark-run1-before-fix.md) for honesty.
+
 ## Layout
 
 ```

@@ -18,6 +18,7 @@ const t0 = Date.now();
 const out = await runAgent({ prompt, inventionId: 'cli', model, newVersionId: () => `v${++n}` }, (e) => {
   if (e.type === 'status') console.log(`[status] ${e.message}`);
   if (e.type === 'tool') console.log(`[${e.entry.ok ? 'ok' : 'ERR'}] ${e.entry.tool}: ${e.entry.summary}`);
+  if (e.type === 'handoff') console.log(`[handoff] ${e.message} (${e.from} → ${e.to})`);
   if (e.type === 'error') console.log(`[error] ${e.message}`);
 });
 console.log(`[done] ${out.status} in ${((Date.now() - t0) / 1000).toFixed(1)} s — ${out.summary}`);
