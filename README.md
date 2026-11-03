@@ -85,11 +85,12 @@ is asked to finalize honestly with the best result so far, so no build runs open
 
 `node packages/agent/src/bench.ts --general` runs ten inventions through the same engine: butterfly,
 Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbridge, crane and a novel
-garden gadget. Latest pass on the current engine: **9 of 10 passed, 0 API errors, median 5.9 min**,
-70 % of runs created custom parts, 20 % consulted Muse Wonder. Across four passes that is 36 of 40 runs,
-and every miss was traced to a cause and fixed (a direction-only walk test, two Wonder 503s now handled
-by a visible fallback, a missing hexapod recipe, a drawbridge that researched a linkage until its time
-budget ran out); details and per-run tables in [docs/benchmark-general.md](docs/benchmark-general.md).
+garden gadget. Latest full pass on the current engine: **10 of 10 passed, 0 API errors, median 5.9 min**,
+no Muse Wonder consult needed (the walker walked and danced in 99 s, the drawbridge lifted in 110 s).
+Across six passes that is 55 of 60 runs, and every miss was traced to a cause and fixed (a direction-only
+walk test, two Wonder 503s now handled by a visible fallback, a missing hexapod recipe, a drawbridge that
+researched a linkage until its time budget ran out); details and per-run tables in
+[docs/benchmark-general.md](docs/benchmark-general.md).
 With the component index in the prompt the fast prompts finish in under 100 s (windmill 54 s, Ferris
 wheel 74 s, butterfly 92 s); the rest run 3–10 min, dominated by Meta Model API round-trips.
 
