@@ -77,3 +77,11 @@ test('assemble infers a missing "op" from the fields present', async () => {
   assert.equal(rt.assembly.instances.length, 2);
   assert.equal(rt.assembly.joints[0].type, 'revolute');
 });
+
+test('define_test rejects a walk tilt limit tighter than the measured recipes', async () => {
+  const rt = new ToolRuntime(baseSpec('Mechanical crab'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  const tight = await rt.call('define_test', { test: { kind: 'walk', id: 'scuttle', duration_s: 6, base: 'body', minDistance_m: 0.3, maxTilt_deg: 6, direction: 'z' } }) as { error?: string };
+  assert.match(tight.error ?? '', /maxTilt_deg 6/);
+  const ok = await rt.call('define_test', { test: { kind: 'walk', id: 'scuttle', duration_s: 6, base: 'body', minDistance_m: 0.3, maxTilt_deg: 10, direction: 'z' } }) as { error?: string };
+  assert.ok(!ok.error, ok.error);
+});
