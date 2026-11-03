@@ -25,8 +25,9 @@ test('API golden path with the deterministic planner', async () => {
   const created = await j('/api/inventions', { method: 'POST', headers: H, body: JSON.stringify({ prompt: 'Design a small walking robot and make it dance.' }) });
   assert.equal(created.status, 201);
   const { inventionId, jobId } = created.body as { inventionId: string; jobId: string };
-  for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${jobId}`); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
-  const job = await j(`/api/jobs/${jobId}`);
+  assert.equal((await j(`/api/jobs/${jobId}`)).status, 404);
+  for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${jobId}`, { headers: H }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
+  const job = await j(`/api/jobs/${jobId}`, { headers: H });
   assert.equal(job.body.status, 'done', JSON.stringify(job.body).slice(0, 300));
   const inv = await j(`/api/inventions/${inventionId}`, { headers: H });
   const versions = inv.body.versions as Array<{ id: string; status: string }>;
@@ -35,6 +36,7 @@ test('API golden path with the deterministic planner', async () => {
   const v = await j(`/api/inventions/${inventionId}/versions/${versions[versions.length - 1].id}?trace=1`, { headers: H });
   assert.ok((v.body.version as { assembly: { instances: unknown[] } }).assembly.instances.length > 10);
   assert.ok((v.body.version as { tests: Array<{ trace: { frames: unknown[] } }> }).tests[0].trace.frames.length > 50);
+  assert.equal((await app.request(`/store/versions/${versions[0].id}.json`)).status, 404);
 
   // not the owner → cannot publish
   const forbidden = await j(`/api/inventions/${inventionId}/publish`, { method: 'POST', headers: { ...H, 'x-session-id': 'other' }, body: '{}' });
@@ -47,7 +49,7 @@ test('API golden path with the deterministic planner', async () => {
   const remix = await j(`/api/inventions/${inventionId}/remix`, { method: 'POST', headers: { ...H, 'x-session-id': 'other' }, body: JSON.stringify({ changeRequest: 'Give it six legs' }) });
   assert.equal(remix.status, 201);
   const rj = (remix.body as { jobId: string }).jobId;
-  for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${rj}`); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
+  for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${rj}`, { headers: { ...H, 'x-session-id': 'other' } }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
   const rinv = await j(`/api/inventions/${(remix.body as { inventionId: string }).inventionId}`, { headers: { ...H, 'x-session-id': 'other' } });
   assert.equal((rinv.body.source as { id: string }).id, inventionId);
   const rv = rinv.body.versions as Array<{ id: string }>;

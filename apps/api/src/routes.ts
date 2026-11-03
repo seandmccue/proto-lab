@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import type { VersionRecord } from '@protolab/schema';
@@ -20,16 +21,27 @@ const sanitize = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u00
 
 export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   const app = new Hono();
-  const session = (h: { header: (n: string) => string | undefined }) => (h.header('x-session-id') ?? '').slice(0, 64) || 'anon';
+  const session = (h: { header: (n: string) => string | undefined }) => {
+    const token = (h.header('x-session-id') ?? '').slice(0, 64);
+    return token && token !== 'protolab' ? token : null;
+  };
   const rate = new Map<string, number[]>();
   const limited = (key: string, max: number, windowMs: number) => {
-    const t = Date.now(); const arr = (rate.get(key) ?? []).filter((x) => t - x < windowMs); arr.push(t); rate.set(key, arr); return arr.length > max;
+    const t = Date.now();
+    if (rate.size >= 4096) {
+      for (const [k, times] of rate) if (t - times[times.length - 1] >= 10 * 60_000) rate.delete(k);
+      if (!rate.has(key) && rate.size >= 4096) return true;
+    }
+    const arr = (rate.get(key) ?? []).filter((x) => t - x < windowMs);
+    if (arr.length >= max) return true;
+    arr.push(t); rate.set(key, arr); return false;
   };
 
   const getInvention = (id: string) => db.prepare('SELECT * FROM inventions WHERE id=?').get(id) as InventionRow | undefined;
   const loadVersion = (vid: string): VersionRecord | null => store.getJson<VersionRecord>(`versions/${vid}.json`);
   const listVersions = (inventionId: string) => (db.prepare('SELECT * FROM versions WHERE invention_id=? ORDER BY iteration ASC, created_at ASC').all(inventionId) as unknown as VersionRow[]);
-  const canSee = (inv: InventionRow, sid: string) => inv.visibility === 'public' || inv.owner_id === sid || inv.owner_id === 'protolab';
+  const canSee = (inv: InventionRow, sid: string | null) => inv.visibility === 'public' || inv.owner_id === sid;
+  const canQueue = () => runner.hasCapacity() && !limited('global:create', 36, 60_000);
 
   const attribution = () => modelStatus.modelId === DETERMINISTIC_MODEL_ID
     ? { modelId: modelStatus.modelId, label: 'Deterministic planner (no model key configured)', live: false }
@@ -42,26 +54,42 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.post('/api/inventions', async (c) => {
     const sid = session(c.req);
-    if (limited(`create:${sid}`, 10, 10 * 60_000)) return c.json({ error: 'Rate limited: 10 builds per 10 minutes' }, 429);
+    if (!sid) return c.json({ error: 'A browser session is required' }, 400);
     const body = CreateBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? 'Invalid body' }, 400);
     const ex = body.data.exampleId ? EXAMPLES.find((e) => e.id === body.data.exampleId) : undefined;
     const prompt = sanitize(ex?.prompt ?? body.data.prompt ?? '');
     if (!prompt) return c.json({ error: 'prompt or exampleId required' }, 400);
-    const idem = c.req.header('idempotency-key');
-    if (idem) { const existing = db.prepare('SELECT id, invention_id FROM jobs WHERE id=?').get(`job_${idem}`) as { id: string; invention_id: string } | undefined; if (existing) return c.json({ inventionId: existing.invention_id, jobId: existing.id }); }
+    const idem = c.req.header('idempotency-key')?.slice(0, 128);
+    const jobId = idem ? `job_${createHash('sha256').update(JSON.stringify([sid, idem])).digest('hex').slice(0, 32)}` : newId('job');
+    if (idem) {
+      const existing = db.prepare('SELECT jobs.id, invention_id FROM jobs JOIN inventions ON inventions.id=jobs.invention_id WHERE jobs.id IN (?,?) AND owner_id=?').get(jobId, `job_${idem}`, sid) as { id: string; invention_id: string } | undefined;
+      if (existing) return c.json({ inventionId: existing.invention_id, jobId: existing.id });
+    }
+    if (limited(`create:${sid}`, 10, 10 * 60_000)) return c.json({ error: 'Rate limited: 10 builds per 10 minutes' }, 429);
+    if (!canQueue()) return c.json({ error: 'Build capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
     const inv: InventionRow = { id: newId('inv'), owner_id: sid, title: sanitize(body.data.title ?? ex?.title ?? titleFromPrompt(prompt)), description: '', visibility: 'private', current_version_id: null, status: 'queued', parent_version_id: null, source_invention_id: null, prompt, featured: 0, created_at: now(), updated_at: now() };
     db.prepare('INSERT INTO inventions (id, owner_id, title, description, visibility, current_version_id, status, parent_version_id, source_invention_id, prompt, featured, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(inv.id, inv.owner_id, inv.title, inv.description, inv.visibility, null, inv.status, null, null, inv.prompt, 0, inv.created_at, inv.updated_at);
-    const job: JobRow = { id: idem ? `job_${idem}` : newId('job'), invention_id: inv.id, version_id: null, status: 'queued', step: 'Queued', progress_json: '[]', error_code: null, created_at: now(), updated_at: now() };
+    const job: JobRow = { id: jobId, invention_id: inv.id, version_id: null, status: 'queued', step: 'Queued', progress_json: '[]', error_code: null, created_at: now(), updated_at: now() };
     db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(job.id, job.invention_id, null, job.status, job.step, '[]', null, job.created_at, job.updated_at);
     runner.enqueue(job, inv, { parent: null });
     return c.json({ inventionId: inv.id, jobId: job.id }, 201);
   });
 
-  app.get('/api/jobs/:id', (c) => {
-    const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(c.req.param('id')) as JobRow | undefined;
+  app.get('/api/jobs/:id', async (c) => {
+    const id = c.req.param('id');
+    const select = db.prepare('SELECT * FROM jobs WHERE id=?');
+    let job = select.get(id) as JobRow | undefined;
     if (!job) return c.json({ error: 'Not found' }, 404);
+    const inv = getInvention(job.invention_id);
+    if (!inv || !canSee(inv, session(c.req))) return c.json({ error: 'Not found' }, 404);
+    const checkpoint = runner.waitForCheckpoint(id);
+    if (checkpoint) {
+      try { await checkpoint; } catch { return c.json({ error: 'Build storage is temporarily unavailable' }, 503); }
+      job = select.get(id) as JobRow;
+    }
+    c.header('Cache-Control', 'private, no-store');
     const since = Number(c.req.query('since') ?? 0);
     const events = runner.events(job.id) ?? (JSON.parse(job.progress_json) as unknown[]);
     return c.json({ id: job.id, inventionId: job.invention_id, status: job.status, step: job.step, versionId: job.version_id, errorCode: job.error_code, events: events.slice(since), eventCount: events.length, updatedAt: job.updated_at });
@@ -84,7 +112,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const versions = listVersions(inv.id).map((v) => ({ id: v.id, iteration: v.iteration, status: v.status, modelId: v.model_id, parentVersionId: v.parent_version_id, createdAt: v.created_at, tests: JSON.parse(v.metrics_json), spec: JSON.parse(v.spec_json) }));
     const latestJob = db.prepare('SELECT id, status, step FROM jobs WHERE invention_id=? ORDER BY created_at DESC LIMIT 1').get(inv.id) as { id: string; status: string; step: string } | undefined;
     const source = inv.source_invention_id ? getInvention(inv.source_invention_id) : undefined;
-    return c.json({ invention: publicInvention(inv, session(c.req)), versions, latestJob, source: source ? { id: source.id, title: source.title, ownerLabel: ownerLabel(source) } : null });
+    return c.json({ invention: publicInvention(inv, session(c.req)), versions, latestJob, source: source && canSee(source, session(c.req)) ? { id: source.id, title: source.title, ownerLabel: ownerLabel(source) } : null });
   });
 
   app.get('/api/inventions/:id/versions/:vid', (c) => {
@@ -93,12 +121,11 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const v = loadVersion(c.req.param('vid'));
     if (!v || v.inventionId !== inv.id) return c.json({ error: 'Not found' }, 404);
     const withTrace = c.req.query('trace') !== '0';
-    c.header('cache-control', 'private, max-age=300');
+    c.header('cache-control', 'private, no-store');
     return c.json({ version: withTrace ? v : stripTrace(v), summary: versionSummary(v) });
   });
 
-  const startDerived = (c: { req: { header: (n: string) => string | undefined } }, inv: InventionRow, changeRequest: string, mode: 'remix' | 'follow-up') => {
-    const sid = session(c.req);
+  const startDerived = (sid: string, inv: InventionRow, changeRequest: string, mode: 'remix' | 'follow-up') => {
     const parent = inv.current_version_id ? loadVersion(inv.current_version_id) : null;
     if (!parent) return { error: 'This invention has no finished version to build on yet' } as const;
     let target = inv;
@@ -119,23 +146,29 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.post('/api/inventions/:id/remix', async (c) => {
     const sid = session(c.req);
+    if (!sid) return c.json({ error: 'A browser session is required' }, 400);
     if (limited(`create:${sid}`, 10, 10 * 60_000)) return c.json({ error: 'Rate limited' }, 429);
     const inv = getInvention(c.req.param('id'));
     if (!inv || !canSee(inv, sid)) return c.json({ error: 'Not found' }, 404);
     const body = RemixBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: 'changeRequest required' }, 400);
-    const r = startDerived(c, inv, sanitize(body.data.changeRequest), 'remix');
+    if (!canQueue()) return c.json({ error: 'Build capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
+    const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'remix');
     return 'error' in r ? c.json(r, 409) : c.json(r, 201);
   });
 
   app.post('/api/inventions/:id/follow-up', async (c) => {
     const sid = session(c.req);
+    if (!sid) return c.json({ error: 'A browser session is required' }, 400);
     if (limited(`create:${sid}`, 10, 10 * 60_000)) return c.json({ error: 'Rate limited' }, 429);
     const inv = getInvention(c.req.param('id'));
     if (!inv || inv.owner_id !== sid) return c.json({ error: 'Only the owner can change this invention; remix it instead' }, 403);
     const body = RemixBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: 'changeRequest required' }, 400);
-    const r = startDerived(c, inv, sanitize(body.data.changeRequest), 'follow-up');
+    const active = db.prepare("SELECT 1 FROM jobs WHERE invention_id=? AND status IN ('queued','running') LIMIT 1").get(inv.id);
+    if (active) return c.json({ error: 'A build is already in progress for this invention' }, 409);
+    if (!canQueue()) return c.json({ error: 'Build capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
+    const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'follow-up');
     return 'error' in r ? c.json(r, 409) : c.json(r, 201);
   });
 
@@ -168,7 +201,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   app.post('/api/inventions/:id/preview', async (c) => {
     const sid = session(c.req);
     const inv = getInvention(c.req.param('id'));
-    if (!inv || (inv.owner_id !== sid && inv.owner_id !== 'protolab')) return c.json({ error: 'Not found' }, 404);
+    if (!inv || inv.owner_id !== sid) return c.json({ error: 'Not found' }, 404);
     const buf = Buffer.from(await c.req.arrayBuffer());
     if (buf.length > 600_000 || buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) return c.json({ error: 'PNG up to 600 kB required' }, 400);
     const key = `previews/${inv.id}.png`;
@@ -189,7 +222,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.get('/api/mine', (c) => {
     const sid = session(c.req);
-    const rows = db.prepare('SELECT * FROM inventions WHERE owner_id=? ORDER BY updated_at DESC LIMIT 30').all(sid) as unknown as InventionRow[];
+    const rows = sid ? db.prepare('SELECT * FROM inventions WHERE owner_id=? ORDER BY updated_at DESC LIMIT 30').all(sid) as unknown as InventionRow[] : [];
     return c.json({ items: rows.map((inv) => publicInvention(inv, sid)) });
   });
 
@@ -209,15 +242,18 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.get('/store/*', (c) => {
     const key = c.req.path.replace(/^\/store\//, '');
+    const preview = /^previews\/([a-zA-Z0-9_-]+)\.png$/.exec(key);
+    const inv = preview && getInvention(preview[1]);
+    if (!inv || inv.visibility !== 'public') return c.text('Not found', 404);
     const bytes = store.getBytes(key);
     if (!bytes) return c.text('Not found', 404);
-    c.header('content-type', key.endsWith('.png') ? 'image/png' : 'application/json');
+    c.header('content-type', 'image/png');
     c.header('cache-control', 'public, max-age=3600');
     return c.body(new Uint8Array(bytes));
   });
 
-  function ownerLabel(inv: InventionRow) { return inv.owner_id === 'protolab' ? 'ProtoLab featured' : `Maker ${inv.owner_id.slice(0, 6)}`; }
-  function publicInvention(inv: InventionRow, sid: string) {
+  function ownerLabel(inv: InventionRow) { return inv.owner_id === 'protolab' ? 'ProtoLab featured' : `Maker ${createHash('sha256').update(inv.owner_id).digest('hex').slice(0, 6)}`; }
+  function publicInvention(inv: InventionRow, sid: string | null) {
     const v = inv.current_version_id ? (db.prepare('SELECT * FROM versions WHERE id=?').get(inv.current_version_id) as VersionRow | undefined) : undefined;
     type T = { testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] };
     const tests = v ? (JSON.parse(v.metrics_json) as T[]) : [];
@@ -229,7 +265,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
       id: inv.id, title: inv.title, description: inv.description, prompt: inv.prompt, visibility: inv.visibility, status: inv.status,
       currentVersionId: inv.current_version_id, featured: !!inv.featured, isOwner: inv.owner_id === sid, ownerLabel: ownerLabel(inv),
       sourceInventionId: inv.source_invention_id, parentVersionId: inv.parent_version_id, modelId: v?.model_id ?? null,
-      tests, previewUrl: store.has(`previews/${inv.id}.png`) ? `/store/previews/${inv.id}.png` : null, createdAt: inv.created_at, updatedAt: inv.updated_at,
+      tests, previewUrl: inv.visibility === 'public' && store.has(`previews/${inv.id}.png`) ? `/store/previews/${inv.id}.png` : null, createdAt: inv.created_at, updatedAt: inv.updated_at,
     };
   }
   return app;

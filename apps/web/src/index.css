@@ -92,7 +92,10 @@ body {
 .lab-chips .chip { min-height: 44px; font-size: .8rem; }
 .lab-chip-muse { background: var(--lavender); color: var(--violet-dark); border-color: #cec0f3; }
 .lab-art { position: relative; overflow: hidden; border: 1px solid #c1afe5; border-radius: 1.35rem; background: var(--surface); box-shadow: 5px 5px 0 #e2d8ef; }
-.lab-art img { display: block; width: 100%; height: auto; }
+.lab-art-stage { position: relative; aspect-ratio: 1.42; background: radial-gradient(ellipse at 50% 62%, #fcfbff, #ddd3f5); }
+.lab-art img, .lab-art-machine { display: block; width: 100%; height: 100%; object-fit: contain; }
+.lab-art-machine { padding: 10% 6% 6%; }
+.lab-art-toggle { position: absolute; right: 5%; bottom: 6%; }
 .lab-art-tag { position: absolute; top: 7%; left: 6%; padding: .4rem .55rem; background: var(--surface); border: 1px solid #c1afe5; border-radius: .35rem; }
 .lab-art figcaption { display: flex; align-items: center; gap: .5rem; padding: .85rem 1rem; }
 .lab-art figcaption > span:first-child { color: var(--violet); font-size: 1rem; line-height: 1; }

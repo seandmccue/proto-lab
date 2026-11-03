@@ -265,6 +265,7 @@ export const Decision = z.object({
   modelId: z.string().optional(),
   summary: z.string(),
   basedOn: z.string().optional(),
+  previousTestId: z.string().optional(),
   changes: z.record(z.object({ from: z.number().optional(), to: z.number() })).default({}),
 });
 export type Decision = z.infer<typeof Decision>;

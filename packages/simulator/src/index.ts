@@ -160,14 +160,30 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   // measurement setup
   const baseId = test.kind === 'walk' ? test.base : test.kind === 'motion' ? test.measure.base : test.kind === 'grip' ? test.holder : undefined;
   const baseRb = baseId ? bodyOf.get(baseId) : undefined;
+  if (!assembly.instances.length) failureReasons.push('There are no parts to test');
   if (baseId && !baseRb) failureReasons.push(`Base instance "${baseId}" not found`);
   const projRb = test.kind === 'launch' ? bodyOf.get(test.projectile) : undefined;
   if (test.kind === 'launch' && !projRb) failureReasons.push(`Projectile instance "${test.projectile}" not found`);
   const payRb = test.kind === 'grip' ? bodyOf.get(test.payload) : undefined;
   if (test.kind === 'grip' && !payRb) failureReasons.push(`Payload instance "${test.payload}" not found`);
+  if (test.kind === 'motion') {
+    const { measure, criteria } = test;
+    const measured = sims.filter(({ joint }) => joint.motor && (!measure.joints.length || measure.joints.includes(joint.motor.controlId)));
+    for (const id of measure.joints) if (!measured.some(({ joint }) => joint.motor?.controlId === id)) failureReasons.push(`Measured motor "${id}" not found`);
+    const jointThreshold = criteria.minJointAmplitude_rad !== undefined || criteria.minJointRate_rad_s !== undefined || criteria.minRevolutions !== undefined;
+    const baseThreshold = criteria.maxBaseTilt_deg !== undefined || criteria.maxBaseDrift_m !== undefined;
+    if (jointThreshold && !measured.length) failureReasons.push('A joint threshold needs a measurable motorized joint');
+    if (baseThreshold && !baseRb) failureReasons.push('A base threshold needs a base instance');
+    for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
+      if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
+    }
+    if (!jointThreshold && !baseThreshold && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+      failureReasons.push('Motion test needs at least one measurable criterion');
+    }
+  }
   let support: RAPIER.Collider | null = null;
   if (test.kind === 'grip' && payRb) { const p = payRb.translation(); const pi = instById.get(test.payload)!; const pp = partById.get(pi.partId)!; const h = pp.dimensions_m[1] / 2; const sb = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(p.x, p.y - h - 0.005, p.z)); support = world.createCollider(RAPIER.ColliderDesc.cuboid(0.05, 0.005, 0.05).setFriction(0.3).setCollisionGroups(groups(GROUND, FREE)), sb); }
-  if (failureReasons.length) { world.free(); return { testId: test.id, kind: test.kind, passed: false, metrics: {}, failureReasons, notes, engine: ENGINE, trace: { dt: 1 / TRACE_HZ, frames: [] } }; }
+  if (failureReasons.length) { events.free(); world.free(); return { testId: test.id, kind: test.kind, passed: false, metrics: {}, failureReasons, notes, engine: ENGINE, trace: { dt: 1 / TRACE_HZ, frames: [] } }; }
 
   const start = baseRb ? rootT(baseRb) : rootT(bodyOf.get(assembly.instances[0].id)!);
   const projStart = projRb ? rootT(projRb) : null; const payStart = payRb ? rootT(payRb) : null; const holderStart = test.kind === 'grip' ? rootT(bodyOf.get(test.holder)!) : null;

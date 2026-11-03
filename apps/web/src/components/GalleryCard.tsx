@@ -1,7 +1,8 @@
 import { useEffect, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { VersionRecord } from '@protolab/schema';
-import { api, fmt, type InventionPublic } from '../api.ts';
+import { api, type InventionPublic } from '../api.ts';
+import { keyMetric } from './BuildProgress.tsx';
 import IsoPreview from './IsoPreview.tsx';
 import './gallery.css';
 
@@ -19,10 +20,10 @@ export default function GalleryCard({ item }: { item: InventionPublic }) {
     if (!hover || traced || !item.currentVersionId || reduced) return;
     api.version(item.id, item.currentVersionId, true).then((r) => { setVersion(r.version); setTraced(true); }).catch(() => {});
   }, [hover, traced, item, reduced]);
-  const walk = item.latestWalk ?? item.tests.find((t) => t.kind === 'walk');
-  const lastTest = item.latestTest ?? item.tests[item.tests.length - 1];
+  const lastTest = item.latestWalk ?? item.latestTest ?? item.tests[item.tests.length - 1];
+  const metric = keyMetric(lastTest);
   const passed = item.status === 'passed';
-  const test = version?.tests.find((t) => t.kind === 'walk') ?? version?.tests[version.tests.length - 1] ?? null;
+  const test = version?.tests.find((t) => t.testId === lastTest?.testId) ?? version?.tests[version.tests.length - 1] ?? null;
   return (
     <Link to={`/i/${item.id}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={`Explore ${item.title} in 3D`} aria-describedby={summaryId}>
       <div className="invention-card__preview">
@@ -42,7 +43,7 @@ export default function GalleryCard({ item }: { item: InventionPublic }) {
       <div className="invention-card__body">
         <div className="invention-card__metrics">
           <span className={`invention-card__status ${passed ? 'is-passed' : ''}`}>{passed ? 'Tests passed' : 'Did not pass'}</span>
-          {walk && <span className="invention-card__distance">{fmt.m2(walk.metrics.distance_m)}</span>}
+          {metric && <span className="invention-card__distance">{metric}</span>}
         </div>
         <h3>{item.title}</h3>
         <p className="line-clamp-2" id={summaryId}>{item.description || item.prompt}</p>

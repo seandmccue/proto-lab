@@ -1,9 +1,10 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, Html, Line } from '@react-three/drei';
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import type { Assembly, Axis, Instance, Shape, TestResult, Transform } from '@protolab/schema';
 import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
+import IsoPreview from './IsoPreview.tsx';
 
 export interface ViewerProps {
   assembly: Assembly;
@@ -202,6 +203,12 @@ function Dim({ from, to, label }: { from: [number, number, number]; to: [number,
   );
 }
 
+class ViewerBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+
 export default function Viewer(props: ViewerProps) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -211,9 +218,17 @@ export default function Viewer(props: ViewerProps) {
     return () => timers.forEach(clearTimeout);
   }, []);
   if (!ready) return <div className="h-full w-full bg-slate-100" />;
+  const fallback = (
+    <div className="workbench-stage-fallback">
+      <IsoPreview assembly={props.assembly} trace={props.test?.trace} playing={props.playing} />
+      <p role="status">Showing an isometric preview. Interactive 3D needs WebGL.</p>
+    </div>
+  );
   return (
-    <Canvas shadows dpr={props.mini ? [1, 1.5] : [1, 2]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
-      <Scene {...props} />
-    </Canvas>
+    <ViewerBoundary fallback={fallback}>
+      <Canvas fallback={fallback} shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
+        <Scene {...props} />
+      </Canvas>
+    </ViewerBoundary>
   );
 }
