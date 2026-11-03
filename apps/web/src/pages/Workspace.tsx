@@ -457,6 +457,9 @@ export default function Workspace() {
     ? [...events].reverse().find((event) => event.type === 'done' && event.status === 'passed')
     : undefined;
   const finalSummary = (typeof finalEvent?.summary === 'string' ? finalEvent.summary : inv?.description?.trim()) || finalVersion?.spec.plan?.purpose;
+  const replayStatus = !showLive && version && test
+    ? { iteration: version.iteration, test, playing, definition: testDefinition, adjustment: revisionDecision?.summary }
+    : null;
 
 
   const askForExplanation = async (target: VersionRecord) => {
@@ -500,8 +503,45 @@ export default function Workspace() {
       </div>
     );
   }
+  const storyControls = !running && story.length > 0 && (
+    <div className="workbench-story">
+      <div className="workbench-story-heading">
+        <span className="workbench-label">Saved simulation</span>
+        {target ? <span><strong>Original test target</strong> {target}</span> : <span>{separateChecks ? 'Each version has its own recorded test.' : 'Compare the recorded simulations before and after the revision.'}</span>}
+        {canCompare && <button type="button" className="btn-secondary workbench-comparison-toggle" aria-pressed={sideBySide} onClick={() => {
+          setComparisonOpen(!sideBySide);
+          if (sideBySide) return;
+          setVersionId(story[0].version.id);
+          setTestId(story[0].test.testId);
+          setStageMode(true);
+          setMobilePane('canvas');
+        }}>{sideBySide ? 'Show one replay' : 'Compare side by side'}</button>}
+      </div>
+      {changeBrief && <p className="workbench-story-brief"><strong>Requested change</strong> {changeBrief}</p>}
+      {!sideBySide && <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
+        {story.map((step, index) => (
+          <button key={step.test.testId} type="button" aria-pressed={storyStep === index} onClick={() => {
+            setVersionId(step.version.id);
+            setTestId(step.test.testId);
+            setExplode(0);
+            setBlueprint(false);
+            setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          }}>
+            <span className="workbench-story-number">{index + 1}</span>
+            <span><strong>{step.label} <small className="workbench-story-version">v{step.version.iteration}</small></strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {testReadout(step.test, step.label)}</small></span>
+          </button>
+        ))}
+      </div>}
+      {!sideBySide && currentStep && (
+        <p className="workbench-story-caption" aria-live="polite">
+          {stepDecision ? `${stepDecision.modelId === 'muse-wonder-1.0' ? 'Muse Wonder' : 'Muse'}’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.failureReasons.join(' · ') || (currentStep.test.passed ? 'The mechanism passed the recorded test.' : 'The test did not meet its target.')}
+        </p>
+      )}
+      {!sideBySide && storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
+    </div>
+  );
   return (
-    <div className={`workbench${stageMode ? ' workbench--stage' : ''}${sideBySide ? ' workbench--compare' : ''}`}>
+    <div className={`workbench${stageMode ? ' workbench--stage' : ''}`}>
       <Header compact />
       <div className="workbench-heading">
         <div className="min-w-0">
@@ -552,48 +592,12 @@ export default function Workspace() {
             {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setComparisonOpen(false); setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
-          {!running && story.length > 0 && (
-            <div className="workbench-story">
-              <div className="workbench-story-heading">
-                <span className="workbench-label">Saved simulation</span>
-                {target ? <span><strong>Original test target</strong> {target}</span> : <span>{separateChecks ? 'Each version has its own recorded test.' : 'Compare the recorded simulations before and after the revision.'}</span>}
-                {canCompare && <button type="button" className="btn-secondary workbench-comparison-toggle" aria-pressed={sideBySide} onClick={() => {
-                  setComparisonOpen(!sideBySide);
-                  if (sideBySide) return;
-                  setVersionId(story[0].version.id);
-                  setTestId(story[0].test.testId);
-                  setStageMode(true);
-                  setMobilePane('canvas');
-                }}>{sideBySide ? 'Show one replay' : 'Compare side by side'}</button>}
-              </div>
-              {changeBrief && <p className="workbench-story-brief"><strong>Requested change</strong> {changeBrief}</p>}
-              {!sideBySide && <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
-                {story.map((step, index) => (
-                  <button key={step.test.testId} type="button" aria-pressed={storyStep === index} onClick={() => {
-                    setVersionId(step.version.id);
-                    setTestId(step.test.testId);
-                    setExplode(0);
-                    setBlueprint(false);
-                    setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-                  }}>
-                    <span className="workbench-story-number">{index + 1}</span>
-                    <span><strong>{step.label} <small className="workbench-story-version">v{step.version.iteration}</small></strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {testReadout(step.test, step.label)}</small></span>
-                  </button>
-                ))}
-              </div>}
-              {!sideBySide && currentStep && (
-                <p className="workbench-story-caption" aria-live="polite">
-                  {stepDecision ? `${stepDecision.modelId === 'muse-wonder-1.0' ? 'Muse Wonder' : 'Muse'}’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.failureReasons.join(' · ') || (currentStep.test.passed ? 'The mechanism passed the recorded test.' : 'The test did not meet its target.')}
-                </p>
-              )}
-              {!sideBySide && storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
-            </div>
-          )}
+          {(sideBySide || !stageMode) && storyControls}
           {sideBySide ? <>
             <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} />
             {canonicalProof && <CrabProofPanel />}
           </> : <>
-          <SimulationStatus events={events} running={running} replay={!showLive && version && test ? { iteration: version.iteration, test, playing, definition: testDefinition, adjustment: revisionDecision?.summary } : null} />
+          {running && <SimulationStatus events={events} running replay={replayStatus} />}
           <div className="workbench-stage">
             {showLive && live ? (
               <>
@@ -639,9 +643,11 @@ export default function Workspace() {
             <div className="workbench-control-group" role="group" aria-label="View controls">
               <label>Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-16" aria-label="Explode view" /></label>
               <button className="btn-ghost" aria-pressed={activeBlueprint} onClick={() => { setIntroBlueprint(false); setBlueprint(!activeBlueprint); }}>Blueprint</button>
-              {!showLive && (comparing ? <span className="workbench-view-hint">Same camera for both tests</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
+              {!showLive && (comparing ? <span className="workbench-view-hint">Camera fits the recorded motion</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
+          {stageMode && storyControls}
+          {!running && replayStatus && <SimulationStatus events={events} running={false} replay={replayStatus} />}
           </>}
           {finalVersion && (
             <section id="prototype-explanation" className="workbench-explanation" aria-label="How the final prototype works">

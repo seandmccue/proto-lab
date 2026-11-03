@@ -18,7 +18,7 @@ export interface ViewerProps {
   blueprint: boolean;
   follow?: boolean;
   cameraLock?: string;
-  cameraReference?: Assembly;
+  cameraBounds?: THREE.Box3;
   playbackTime?: number;
   selectedId: string | null;
   changedIds?: Set<string>;
@@ -60,6 +60,27 @@ function boundingRadius(pieces: Assembly['parts'][number]['geometry']): number {
 }
 function quat(q: Transform['rotation']) { return new THREE.Quaternion(q[0], q[1], q[2], q[3]); }
 function vec(p: Transform['position']) { return new THREE.Vector3(p[0], p[1], p[2]); }
+
+export function replayBounds(assembly: Assembly, test?: TestResult | null): THREE.Box3 {
+  const bounds = new THREE.Box3();
+  const radii = new Map(assembly.parts.map((part) => [part.id, boundingRadius(part.geometry)]));
+  const frames = test?.trace.frames ?? [];
+  const position = new THREE.Vector3();
+  for (const instance of assembly.instances) {
+    const radius = (radii.get(instance.partId) ?? 0.02) * 1.1;
+    const addPose = (pose: Transform) => {
+      position.fromArray(pose.position);
+      bounds.expandByPoint(position.addScalar(radius));
+      bounds.expandByPoint(position.addScalar(-2 * radius));
+    };
+    addPose(instance.transform);
+    for (const frame of frames) {
+      const pose = frame.bodies[instance.id];
+      if (pose) addPose(pose);
+    }
+  }
+  return bounds;
+}
 
 /** Rotate a +Y-aligned geometry (cylinder, capsule, lathe) so its long axis follows `axis`. */
 function alignY(g: THREE.BufferGeometry, axis: Axis) { if (axis === 'x') g.rotateZ(-Math.PI / 2); else if (axis === 'z') g.rotateX(Math.PI / 2); return g; }
@@ -108,7 +129,7 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 }
 
 function Scene(props: ViewerProps) {
-  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, cameraReference, playbackTime, timeRef, onTime, seekTo, autoRotate, mini } = props;
+  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, cameraBounds, playbackTime, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
   const enteredAt = useRef(new Map<string, number>());
   const entering = useMemo(() => new Set(enteringInstanceIds), [enteringInstanceIds]);
@@ -120,29 +141,48 @@ function Scene(props: ViewerProps) {
   useEffect(() => { if (props.captureRef) props.captureRef.current = () => { try { return gl.domElement.toDataURL('image/png'); } catch { return null; } }; }, [gl, props.captureRef]);
 
   const partById = useMemo(() => new Map(assembly.parts.map((p) => [p.id, p])), [assembly]);
-  const cameraAssembly = cameraReference ?? assembly;
-  const { center, radius } = useMemo(() => {
-    const cameraParts = new Map(cameraAssembly.parts.map((p) => [p.id, p]));
-    const min = new THREE.Vector3(Infinity, Infinity, Infinity), max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-    for (const i of cameraAssembly.instances) {
-      const part = cameraParts.get(i.partId); const r = part ? boundingRadius(part.geometry) : 0.02; const p = vec(i.transform.position);
-      min.min(p.clone().subScalar(r)); max.max(p.clone().addScalar(r));
-    }
-    if (!cameraAssembly.instances.length) return { center: new THREE.Vector3(0, 0.1, 0), radius: 0.2 };
-    const c = min.clone().add(max).multiplyScalar(0.5); c.y = Math.max(c.y, (max.y - min.y) * 0.4);
-    return { center: c, radius: Math.max(0.08, max.distanceTo(min) / 2) };
-  }, [cameraAssembly]);
-  const { camera } = useThree();
+  const followsBody = follow && assembly.instances.some((instance) => instance.id === 'body');
+  const { center, halfSize, radius } = useMemo(() => {
+    const bounds = cameraBounds ?? replayBounds(assembly, followsBody ? null : test);
+    const halfSize = bounds.isEmpty() ? new THREE.Vector3(0.1, 0.1, 0.1) : bounds.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+    return {
+      center: bounds.isEmpty() ? new THREE.Vector3(0, 0.1, 0) : bounds.getCenter(new THREE.Vector3()),
+      halfSize,
+      radius: Math.max(0.08, halfSize.length()),
+    };
+  }, [assembly, cameraBounds, followsBody, test]);
+  const { camera, size } = useThree();
+  const aspect = size.height > 0 ? size.width / size.height : 1;
   const framed = useRef<string>('');
   useEffect(() => {
-    // Frame the whole machine once per assembly (size changes from a 150 mm robot to a 600 mm Ferris wheel).
-    const key = cameraLock ?? `${assembly.instances.length}:${radius.toFixed(3)}:${center.x.toFixed(3)}:${center.y.toFixed(3)}`;
-    if (framed.current === key) return; framed.current = key;
-    const dist = radius * (cameraReference ? 3.1 : mini ? 1.8 : 2.4);
-    camera.position.set(center.x + dist * 0.72, center.y + dist * 0.5, center.z + dist * 0.78);
-    camera.near = Math.max(0.005, dist / 100); camera.far = Math.max(20, dist * 20); camera.updateProjectionMatrix();
+    if (!(camera instanceof THREE.PerspectiveCamera) || aspect <= 0) return;
+    const key = `${cameraLock ?? assembly.instances.length}:${[...center.toArray(), ...halfSize.toArray(), aspect].map((value) => value.toFixed(3)).join(':')}`;
+    if (framed.current === key) return;
+    framed.current = key;
+    // Fit all eight corners against the camera's horizontal and vertical frustum planes.
+    const back = new THREE.Vector3(0.72, 0.5, 0.78).normalize();
+    const right = new THREE.Vector3().crossVectors(camera.up, back).normalize();
+    const up = new THREE.Vector3().crossVectors(back, right);
+    const verticalSlope = Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV() / 2)) * 0.88;
+    const horizontalSlope = verticalSlope * aspect;
+    const corner = new THREE.Vector3();
+    let dist = 0.2;
+    for (const x of [-halfSize.x, halfSize.x]) {
+      for (const y of [-halfSize.y, halfSize.y]) {
+        for (const z of [-halfSize.z, halfSize.z]) {
+          corner.set(x, y, z);
+          const depth = corner.dot(back);
+          dist = Math.max(dist, depth + Math.max(Math.abs(corner.dot(right)) / horizontalSlope, Math.abs(corner.dot(up)) / verticalSlope));
+        }
+      }
+    }
+    camera.position.copy(center).addScaledVector(back, dist);
+    camera.near = Math.max(0.005, dist / 100);
+    camera.far = Math.max(20, dist * 20);
+    camera.updateProjectionMatrix();
+    camera.lookAt(center);
     if (controls.current) { controls.current.target.copy(center); controls.current.update(); }
-  }, [assembly, center, radius, camera, mini, cameraLock, cameraReference]);
+  }, [assembly.instances.length, center, halfSize, camera, cameraLock, aspect]);
   const explodeDir = useMemo(() => {
     const m = new Map<string, THREE.Vector3>();
     for (const i of assembly.instances) {
@@ -221,7 +261,7 @@ function Scene(props: ViewerProps) {
           {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-sky-300">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
         </group>
       )}
-      <OrbitControls ref={controls as never} makeDefault enabled={!cameraReference} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * 10} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
+      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
     </>
   );
 }

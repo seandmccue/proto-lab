@@ -4,7 +4,7 @@ import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/sc
 import { api, fmt } from '../api.ts';
 import { keyMetric, recordedTestSpec } from './BuildProgress.tsx';
 import type { DiagnosticTone } from './diagnosticColors.ts';
-import Viewer from './Viewer.tsx';
+import Viewer, { replayBounds } from './Viewer.tsx';
 
 type Replay = { inventionId: string; versionId: string; testId: string; label: string };
 type Tilt = { highlights: ReadonlyMap<string, DiagnosticTone>; tilt: number; limit: number; feet: number };
@@ -36,6 +36,8 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
 
   const beforeTest = versions?.[0].tests.find((test) => test.testId === before.testId);
   const afterTest = versions?.[1].tests.find((test) => test.testId === after.testId);
+  const cameraBounds = useMemo(() => versions && replayBounds(versions[0].assembly, beforeTest)
+    .union(replayBounds(versions[1].assembly, afterTest)), [versions, beforeTest, afterTest]);
   const duration = Math.min(beforeTest?.trace.frames.at(-1)?.t ?? 0, afterTest?.trace.frames.at(-1)?.t ?? 0);
   useEffect(() => {
     if (!playing || !duration) return;
@@ -102,7 +104,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
         <p className="workbench-comparison-metric">{test.metrics.distance_m !== undefined ? `${fmt.cm(test.metrics.distance_m)} travelled` : keyMetric(test)}{test.metrics.maxTilt_deg !== undefined && ` · ${fmt.deg(test.metrics.maxTilt_deg)} peak tilt`}</p>
         <div className="workbench-comparison-canvas">
-          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraReference={versions[1].assembly} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} />
+          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} />
         </div>
         <div className={`workbench-comparison-note${index === 0 ? ' is-failure' : ''}`}>
           {index === 0 ? <><strong>{tilt ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
