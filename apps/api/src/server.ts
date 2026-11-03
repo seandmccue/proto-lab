@@ -1,7 +1,7 @@
 import { config as loadEnv } from 'dotenv';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { resolve, relative } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 // Local .env first, then the repo-root .env (first definition wins).
@@ -13,6 +13,7 @@ import { openDb } from './db.ts';
 import { ObjectStore } from './store.ts';
 import { JobRunner } from './jobs.ts';
 import { CloudCheckpoint } from './persistence.ts';
+import { originOf, rewriteOg } from './og.ts';
 import { buildApp } from './routes.ts';
 import { seedFeatured, requeueInterruptedSeeds } from './seed.ts';
 
@@ -60,10 +61,20 @@ app.route('/', buildApp({ db, store, runner, modelStatus }));
 const webDist = resolve(process.env.WEB_DIST ?? resolve(import.meta.dirname, '../../web/dist'));
 if (existsSync(resolve(webDist, 'index.html'))) {
   const root = relative(process.cwd(), webDist) || '.';
+  const indexHtml = readFileSync(resolve(webDist, 'index.html'), 'utf8');
+  const ogRow = db.prepare('SELECT id, title, description, visibility FROM inventions WHERE id = ?');
+  const page = (c: Context) => {
+    if (c.req.path.startsWith('/api/')) return c.json({ error: 'Not found' }, 404);
+    const origin = originOf({ get: (n) => c.req.header(n) }, `http://localhost:${PORT}`);
+    const m = /^\/i\/([a-zA-Z0-9_-]+)$/.exec(c.req.path);
+    const row = m ? (ogRow.get(m[1]) as { id: string; title: string; description: string; visibility: string } | undefined) : undefined;
+    const inv = row && row.visibility === 'public' ? { id: row.id, title: row.title, description: row.description, previewUrl: store.has(`previews/${row.id}.png`) ? `/store/previews/${row.id}.png` : null } : null; // private builds keep the generic card
+    return c.html(rewriteOg(indexHtml, origin, inv));
+  };
+  app.get('/', page); // before the static middleware, which would otherwise serve index.html verbatim (relative og:image)
   app.use('/assets/*', serveStatic({ root }));
   app.use('/*', serveStatic({ root }));
-  const indexHtml = readFileSync(resolve(webDist, 'index.html'), 'utf8');
-  app.get('*', (c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'Not found' }, 404) : c.html(indexHtml)));
+  app.get('*', page);
   console.log(`[web] serving the built web app from ${webDist}`);
 }
 seedFeatured(db, runner);

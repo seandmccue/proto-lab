@@ -71,3 +71,17 @@ test('titleFromPrompt drops the verb and stops at the first clause', () => {
   assert.equal(titleFromPrompt('Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.'), 'Small walking robot inspired by my Muse character');
   assert.equal(titleFromPrompt('Build a miniature Ferris wheel with eight hanging gondolas that turns steadily on a tower.'), 'Miniature Ferris wheel with eight hanging gondolas');
 });
+
+test('share-preview tags: absolute image, per-invention title/description/picture for public builds only', async () => {
+  const { rewriteOg, originOf } = await import('../src/og.ts');
+  const html = '<meta property="og:title" content="ProtoLab" /><meta property="og:description" content="x" /><meta property="og:image" content="/og.png" /><meta name="twitter:title" content="ProtoLab" /><meta name="twitter:image" content="/og.png" />';
+  const generic = rewriteOg(html, 'https://example.test', null);
+  assert.ok(generic.includes('content="https://example.test/og.png"'), 'absolute og:image');
+  assert.ok(generic.includes('og:title" content="ProtoLab"'), 'generic title kept');
+  const inv = rewriteOg(html, 'https://example.test', { id: 'inv_1', title: 'Mechanical <crab>', description: 'Scuttles "sideways"', previewUrl: '/store/previews/inv_1.png' });
+  assert.ok(inv.includes('og:title" content="Mechanical &lt;crab&gt; — ProtoLab"'), 'escaped title');
+  assert.ok(inv.includes('og:description" content="Scuttles &quot;sideways&quot;"'), 'escaped description');
+  assert.ok(inv.includes('og:image" content="https://example.test/store/previews/inv_1.png"'), 'preview picture');
+  assert.equal(originOf({ get: (n) => ({ 'x-forwarded-proto': 'https', host: 'protolab.example.workers.dev' } as Record<string, string>)[n] ?? null }, 'http://localhost:1'), 'https://protolab.example.workers.dev');
+  assert.equal(originOf({ get: (n) => ({ host: 'localhost:8787' } as Record<string, string>)[n] ?? null }, 'http://localhost:1'), 'http://localhost:8787');
+});
