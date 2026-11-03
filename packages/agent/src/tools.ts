@@ -48,6 +48,8 @@ function normaliseOp(o: unknown): unknown {
   const x = { ...(o as Record<string, unknown>) };
   const alias = (from: string, to: string) => { if (x[to] === undefined && x[from] !== undefined) { x[to] = x[from]; } if (from !== to) delete x[from]; };
   if (typeof x.type === 'string' && x.op === undefined) { x.op = x.type; delete x.type; }
+  // No op at all: infer it from the fields present.
+  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; }
   if (typeof x.action === 'string' && x.op === undefined) { x.op = x.action; delete x.action; }
   if (x.op === 'add' || x.op === 'create' || x.op === 'spawn') x.op = 'place';
   if (x.op === 'attach' || x.op === 'join') x.op = x.onto || x.parent ? 'mount' : 'connect';
