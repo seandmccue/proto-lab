@@ -25,6 +25,9 @@ const PRESETS: Preset[] = [
   { id: 'pulley-15', kind: 'pulley', params: { radius: 0.015, width: 0.008 } }, { id: 'pulley-30', kind: 'pulley', params: { radius: 0.03, width: 0.01 } },
   { id: 'flywheel-100', kind: 'flywheel', params: { radius: 0.05, thickness: 0.01 } },
   // motion
+  { id: 'radial-hub-6x80', kind: 'radial_hub', params: { radius: 0.04, thickness: 0.006 } }, { id: 'radial-hub-6x40', kind: 'radial_hub', params: { radius: 0.02, thickness: 0.004 } },
+  { id: 'radial-hub-6x110', kind: 'radial_hub', params: {} }, { id: 'radial-hub-8x160', kind: 'radial_hub', params: { radius: 0.08, thickness: 0.01, stations: 8 } },
+  { id: 'hinged-petal-90x38', kind: 'hinged_petal', params: {} }, { id: 'hinged-petal-95x38', kind: 'hinged_petal', params: { length: 0.095, linkRatio: 0.045 / 0.095 } }, { id: 'hinged-petal-140x62', kind: 'hinged_petal', params: { length: 0.14, width: 0.062, thickness: 0.0025 } },
   { id: 'hinge-30', kind: 'hinge', params: { length: 0.03, leaf: 0.02 } }, { id: 'hinge-80', kind: 'hinge', params: { length: 0.08, leaf: 0.03 } }, { id: 'hinge-150', kind: 'hinge', params: { length: 0.15, leaf: 0.04 } },
   { id: 'slider-100', kind: 'slider', params: { length: 0.1, width: 0.015 } }, { id: 'slider-250', kind: 'slider', params: { length: 0.25, width: 0.02 } }, { id: 'carriage-20', kind: 'carriage', params: { size: 0.02 } }, { id: 'carriage-30', kind: 'carriage', params: { size: 0.03 } },
   { id: 'link-40', kind: 'link', params: { length: 0.04, width: 0.012, thickness: 0.004 } }, { id: 'link-80', kind: 'link', params: { length: 0.08, width: 0.012, thickness: 0.004 } }, { id: 'link-150', kind: 'link', params: { length: 0.15, width: 0.015, thickness: 0.005 } },

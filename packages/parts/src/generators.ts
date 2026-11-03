@@ -1,4 +1,4 @@
-import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape } from '@protolab/schema';
+import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape, type Profile } from '@protolab/schema';
 import { QUAT_ID, quatFromAxisAngle, quatMul, rotate } from './math.ts';
 import { profiles, shapeVolume, ensureCCW } from './geometry.ts';
 
@@ -76,6 +76,102 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
   tower: { kind: 'tower', name: 'A-frame tower', category: 'frames', description: 'Two-leg A-frame support with a revolute axle mount at the top (axis Z) and a wide base; place anchored on the ground.', params: { height: { min: 0.05, max: 1.2, default: 0.3, unit: 'm', description: 'Height to axle' }, baseWidth: { min: 0.04, max: 1.0, default: 0.2, unit: 'm', description: 'Base spread (X)' }, legWidth: { min: 0.004, max: 0.05, default: 0.012, unit: 'm', description: 'Leg section' } },
     generate: (p, id) => { const L = Math.hypot(p.height, p.baseWidth / 2); const ang = Math.atan2(p.baseWidth / 2, p.height); const g = [piece({ kind: 'box', size: [p.legWidth, L, p.legWidth] }, [p.baseWidth / 4, p.height / 2, 0], COLORS.steel, 'structure', quatFromAxisAngle([0, 0, 1], ang)), piece({ kind: 'box', size: [p.legWidth, L, p.legWidth] }, [-p.baseWidth / 4, p.height / 2, 0], COLORS.steel, 'structure', quatFromAxisAngle([0, 0, 1], -ang)), piece({ kind: 'box', size: [p.baseWidth, p.legWidth, p.legWidth * 3] }, [0, p.legWidth / 2, 0], COLORS.steel), piece({ kind: 'cylinder', radius: p.legWidth, height: p.legWidth * 3, axis: 'z' }, [0, p.height, 0], COLORS.brass)];
       return finish({ id, kind: 'tower', name: `A-frame tower ${mm(p.height)} mm`, category: 'frames', description: 'Steel A-frame with top axle boss.', params: p, mass_kg: vol(g) * DENSITY.steel * 0.6, dimensions_m: [p.baseWidth, p.height, p.legWidth * 3], material: 'steel', geometry: g, connectors: [fx('base', [0, 0, 0], [0, -1, 0]), fx('axle', [0, p.height, p.legWidth * 1.5], [0, 0, 1], 'revolute', 'axle boss, spins about Z'), fx('axle_back', [0, p.height, -p.legWidth * 1.5], [0, 0, -1], 'revolute'), fx('top', [0, p.height + p.legWidth, 0], [0, 1, 0])], cost_usd: 8 }); } },
+  radial_hub: {
+    kind: 'radial_hub', name: 'Radial linkage hub', category: 'linkages',
+    description: 'Round Y-axis hub with evenly spaced stations for folding petals, iris blades, and vents. Use hinge_0…N−1 for tangential fold hinges or pin_0…N−1 for vertical iris pivots. Attach mount below to a support, or slide/spin to a driver.',
+    params: {
+      radius: { min: 0.015, max: 0.24, default: 0.055, unit: 'm', description: 'Centre to hinge station' },
+      thickness: { min: 0.003, max: 0.03, default: 0.008, unit: 'm', description: 'Hub plate thickness along Y' },
+      stations: { min: 3, max: 12, default: 6, unit: '', description: 'Number of equally spaced stations (integer)' },
+    },
+    generate: (p, id) => {
+      const { radius, thickness, stations } = p;
+      if (!Number.isInteger(stations)) throw new ParamError('Radial hub station count must be an integer.');
+      if (thickness > radius * 0.65) throw new ParamError('Radial hub thickness must be at most 65% of the station radius.');
+      const bossRadius = Math.min(thickness * 0.75, radius * 0.18);
+      const hingeHeight = thickness / 2 + bossRadius;
+      const geometry = [
+        piece({ kind: 'cylinder', radius: radius * 0.9, height: thickness, axis: 'y' }, [0, 0, 0], '#3c526a'),
+        piece({ kind: 'cylinder', radius: radius * 0.28, height: thickness * 0.4, axis: 'y' }, [0, thickness * 0.7, 0], COLORS.brass),
+      ];
+      const connectors: Connector[] = [
+        fx('mount', [0, -thickness / 2, 0], [0, -1, 0], 'fixed', 'Fixed mount beneath the hub'),
+        fx('slide', [0, -thickness / 2, 0], [0, -1, 0], 'prismatic', 'Vertical guide or synchronized linkage yoke'),
+        fx('spin', [0, -thickness / 2, 0], [0, -1, 0], 'revolute', 'Central rotary axis'),
+        fx('top', [0, thickness * 0.9, 0], [0, 1, 0]),
+      ];
+      for (let station = 0; station < stations; station++) {
+        const angle = station * 2 * Math.PI / stations;
+        const radial: Vec3 = [Math.cos(angle), 0, Math.sin(angle)];
+        const tangent: Vec3 = [-radial[2], 0, radial[0]];
+        const pivot: Vec3 = [radial[0] * radius, hingeHeight, radial[2] * radius];
+        const padRadius = radius * 0.15;
+        geometry.push(
+          piece({ kind: 'cylinder', radius: padRadius, height: thickness, axis: 'y' }, [pivot[0], 0, pivot[2]], '#52748b'),
+          piece({ kind: 'cylinder', radius: bossRadius, height: padRadius * 1.4, axis: 'z' }, pivot, COLORS.brass, 'structure', quatFromAxisAngle([0, 1, 0], -angle)),
+        );
+        connectors.push(
+          fx(`hinge_${station}`, pivot, tangent, 'revolute', 'Tangential axis. Mount a petal by its hinge with spin_deg 0 for a flat outward rest pose. Positive joint angle lifts it.'),
+          fx(`pin_${station}`, pivot, [0, 1, 0], 'revolute', `Vertical axis for an iris blade. With hinged_petal.iris_pivot, use spin_deg ${Math.round(-angle * 180 / Math.PI)} to point outward before adding a sweep offset.`),
+        );
+      }
+      return finish({
+        id, kind: 'radial_hub', name: `Radial hub ${stations}-station Ø${mm(radius * 2)} mm`, category: 'linkages',
+        description: `A ${stations}-station hub or yoke with tangential folding hinges and vertical iris pivots. Stagger or space the panels to give them clearance.`,
+        params: p, geometry, connectors, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [radius * 2.3, Math.max(thickness * 1.4, thickness + 2 * bossRadius), radius * 2.3], cost_usd: 5,
+      });
+    },
+  },
+  hinged_petal: {
+    kind: 'hinged_petal', name: 'Hinged petal panel', category: 'panels',
+    description: 'Lightweight tapered panel for flower mechanisms, shutters, iris blades or vents. Extends from its root along +X. Mount hinge for vertical fold about Z, or iris_pivot for planar swing about Y. Use fold_link or iris_link for optional rods, and tip for a fixed test marker.',
+    params: {
+      length: { min: 0.025, max: 0.45, default: 0.09, unit: 'm', description: 'Root-to-tip length along X' },
+      width: { min: 0.008, max: 0.28, default: 0.038, unit: 'm', description: 'Maximum panel width along Z' },
+      thickness: { min: 0.0008, max: 0.009, default: 0.002, unit: 'm', description: 'Panel thickness along Y' },
+      rootRatio: { min: 0.1, max: 1, default: 0.35, unit: 'ratio', description: 'Root width divided by panel width' },
+      linkRatio: { min: 0.15, max: 0.85, default: 0.35, unit: 'ratio', description: 'Optional link mount distance from the root, divided by panel length' },
+    },
+    generate: (p, id) => {
+      const { length, width, thickness, rootRatio, linkRatio } = p;
+      if (thickness > Math.min(length, width) / 3) throw new ParamError('Hinged panel thickness must be at most one third of its length and width.');
+      const samples = 16;
+      const halfWidth = (t: number) => width / 2 * (rootRatio * (1 - t) + (1 - rootRatio * (1 - t)) * Math.sin(Math.PI * t) ** 0.8);
+      const profile: Profile = [];
+      for (let i = 0; i < samples; i++) {
+        const t = i / samples;
+        profile.push([t * length, -halfWidth(t)]);
+      }
+      profile.push([length, 0]);
+      for (let i = samples - 1; i >= 0; i--) {
+        const t = i / samples;
+        profile.push([t * length, halfWidth(t)]);
+      }
+      const rootWidth = width * rootRatio;
+      const bossRadius = Math.min(thickness * 1.2, width * 0.12);
+      const linkX = length * linkRatio;
+      const geometry = [
+        piece({ kind: 'extrude', profile, depth: thickness, axis: 'y' }, [0, 0, 0], '#a25aa6', 'shell'),
+        piece({ kind: 'cylinder', radius: bossRadius, height: rootWidth, axis: 'z' }, [0, 0, 0], COLORS.brass),
+        piece({ kind: 'cylinder', radius: bossRadius, height: thickness, axis: 'y' }, [linkX, -thickness, 0], COLORS.brass),
+      ];
+      return finish({
+        id, kind: 'hinged_petal', name: `Hinged petal panel ${mm(length)}×${mm(width)} mm`, category: 'panels',
+        description: 'A tapered lightweight panel with alternative folding and iris pivots at its root and optional link mounts underneath.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [length + bossRadius, bossRadius + Math.max(1.5 * thickness, bossRadius), width],
+        connectors: [
+          fx('hinge', [0, 0, 0], [0, 0, -1], 'revolute', 'Tangential root pivot for folding the panel up and down'),
+          fx('iris_pivot', [0, 0, 0], [0, -1, 0], 'revolute', 'Vertical root pivot for swinging in the XZ plane'),
+          fx('fold_link', [linkX, -thickness, 0], [0, 0, -1], 'revolute', 'Under-panel connecting rod pivot about the folding axis'),
+          fx('iris_link', [linkX, -thickness * 1.5, 0], [0, -1, 0], 'revolute', 'Under-panel connecting rod pivot for an iris'),
+          fx('tip', [length, 0, 0], [1, 0, 0], 'fixed', 'Tip position for a marker or test target'),
+        ],
+        cost_usd: 2,
+      });
+    },
+  },
   // ---------- rotational ----------
   shaft: { kind: 'shaft', name: 'Shaft', category: 'shafts', description: 'Round steel shaft along X; revolute ends and mid-point mounts for gears/wheels (fixed, "hub_*").', params: { length: { min: 0.01, max: 0.8, default: 0.06, unit: 'm', description: 'Length' }, radius: { min: 0.001, max: 0.02, default: 0.003, unit: 'm', description: 'Radius' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.length, axis: 'x' }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'shaft', name: `Shaft Ø${mm(p.radius * 2)}×${mm(p.length)} mm`, category: 'shafts', description: 'Ground steel shaft.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.length, p.radius * 2, p.radius * 2], material: 'steel', geometry: g, connectors: [fx('end_a', [-p.length / 2, 0, 0], [-1, 0, 0], 'revolute'), fx('end_b', [p.length / 2, 0, 0], [1, 0, 0], 'revolute'), fx('hub_mid', [0, 0, 0], [1, 0, 0], 'fixed', 'press-fit hub at mid length'), fx('hub_a', [-p.length / 4, 0, 0], [1, 0, 0]), fx('hub_b', [p.length / 4, 0, 0], [1, 0, 0])], cost_usd: 1 }); } },
