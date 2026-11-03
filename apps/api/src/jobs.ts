@@ -35,7 +35,9 @@ export function versionSummary(v: VersionRecord) {
 
 export class JobRunner {
   private queue: Array<() => Promise<void>> = [];
-  private running = false;
+  private active = 0;
+  /** Builds run in parallel worker threads (model calls are network-bound); several judges can build at once. */
+  private readonly maxConcurrent = Math.max(1, Number(process.env.JOB_CONCURRENCY) || 3);
   private live = new Map<string, PublicEvent[]>();
   private liveAssembly = new Map<string, { assembly: Assembly; iteration: number; rationale: string; at: string }>(); // latest in-progress assembly per job, for "watch it assemble"
   constructor(private db: DatabaseSync, private store: ObjectStore) {}
@@ -48,12 +50,14 @@ export class JobRunner {
     void this.pump();
   }
 
-  private async pump() {
-    if (this.running) return;
-    this.running = true;
-    while (this.queue.length) { const next = this.queue.shift()!; try { await next(); } catch (e) { console.error('job failed', e); } }
-    this.running = false;
+  private pump() {
+    while (this.queue.length && this.active < this.maxConcurrent) {
+      const next = this.queue.shift()!; this.active++;
+      next().catch((e) => console.error('job failed', e)).finally(() => { this.active--; this.pump(); });
+    }
   }
+  /** Queue depth + running jobs, for the UI's "N builds ahead of you" hint. */
+  load() { return { active: this.active, queued: this.queue.length, maxConcurrent: this.maxConcurrent }; }
 
   private async run(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     const events: PublicEvent[] = [];
