@@ -185,3 +185,18 @@ test('catapult range is set by arm length: a 140 mm arm on the 8 N·m servo land
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics.landingDistance_m > 0.45 && r.metrics.landingDistance_m < 0.75, `landed ${r.metrics.landingDistance_m}`);
 });
+
+test('a sine drive whose offset starts away from the assembled pose is blended in over rampIn_s (no t=0 slam)', async () => {
+  const deck = generatePart('plate', { length: 0.3, width: 0.15, thickness: 0.006 }, 'deck-300x150');
+  const resolve = (id: string) => (id === deck.id ? deck : getPart(id));
+  const r0 = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'base', part: 'base-plate-300x200', position: [0, 0.004, 0], anchored: true },
+    { op: 'mount', id: 'servo', part: 'servo-high-torque-35', onto: 'base', connector: 'top_back', via: 'bottom', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'deck', part: deck.id, onto: 'servo', connector: 'horn', via: 'hinge_back', joint: 'revolute', spin_deg: 180, offset_m: 0, motor: { controlId: 'lift', stiffness: 40, damping: 2 } },
+  ], resolve);
+  // phase 0: the target is already 0.55 rad at t = 0 while the deck lies flat
+  const a = setDrives(r0.assembly, [{ controlId: 'lift', mode: 'position', rampIn_s: 0.5, profile: { kind: 'sine', amplitude: 0.55, offset: 0.55, frequency_hz: 0.2, phase: 0 } }]);
+  const r = await runTest(a, { env, test: { kind: 'motion', id: 'cycle', duration_s: 10, measure: { joints: ['lift'], base: 'base', clearancePairs: [['deck', 'base']], noGroundContact: ['deck'] }, criteria: { minJointAmplitude_rad: 1.0, torqueWithinRating: true } } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.ok(r.metrics['lift.peakTorque_Nm'] < 3, `peak ${r.metrics['lift.peakTorque_Nm']}`);
+});
