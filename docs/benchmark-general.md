@@ -436,3 +436,17 @@ prompts re-run with `MODEL_MAX_TOKENS=8192`: novel 411 s → 122 s, crane 162 s 
 172 s → 281 s with one cut-off and three versions. Single runs are noisy and the smaller budget trades
 speed for cut-off risk, so the default stays at 16k; the knob is documented in `.env.example` for anyone
 who wants to try it on their prompts.
+
+### Crab re-run with the walk-tilt floor (v9d, 2026-11-03 15:08 UTC)
+
+Two of the last three crab passes burned all nine tests on a self-set 6° tilt limit, guidance or not.
+`define_test` now rejects `maxTilt_deg < 8` on a walk test with the measured figures (3–5° bare,
+6–8° with a shell) and asks for 10–15°, the same way it rejects an unrealistic `minDistance_m`.
+Two runs, concurrency 2 (`bench-results-crab-tilt`):
+
+| Run | Result | Time | Distance | Tilt |
+| --- | --- | --- | --- | --- |
+| crab #1 | **passed, first test** | 203 s | 0.39 m | 3.95° |
+| crab #2 | **passed, first test** | 204 s | 0.37 m | 5.16° |
+
+Both from the recipe (chassis-hex-200 yawed 90°, servo-ds3218 stiffness 8, swingDuty 0.3), no handoff.
