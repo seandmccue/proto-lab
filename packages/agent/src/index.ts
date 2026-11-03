@@ -12,7 +12,7 @@ function catalogIndex(): string {
   for (const p of catalog()) {
     const conns = p.connectors.slice(0, 6).map((c) => `${c.id}${c.kind === 'revolute' ? '⟳' : c.kind === 'prismatic' ? '↔' : ''}${ax(c.axis)}`).join(' ');
     const extra = p.limits.maxTorque_Nm ? ` ${p.limits.maxTorque_Nm} N·m` : p.limits.maxForce_N ? ` ${p.limits.maxForce_N} N` : '';
-    const list = byCat.get(p.category) ?? []; list.push(`${p.id} (${Math.round(p.mass_kg * 1000)} g${extra}; ${conns}${p.connectors.length > 6 ? ' …' : ''})`); byCat.set(p.category, list);
+    const list = byCat.get(p.category) ?? []; list.push(`${p.id} (${p.dimensions_m.map((v) => Math.round(v * 1000)).join('×')} mm, ${Math.round(p.mass_kg * 1000)} g${extra}; ${conns}${p.connectors.length > 6 ? ' …' : ''})`); byCat.set(p.category, list);
   }
   return [...byCat.entries()].map(([cat, items]) => `${cat}: ${items.join(' · ')}`).join('\n');
 }
@@ -127,7 +127,7 @@ Rules of thumb:
 - Be economical: search results already include connector ids/axes, so avoid get_part lookups unless you need geometry; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
 
-Component library index (part id, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
+Component library index (part id, size L×H×W in mm, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
 ${CATALOG_INDEX}
 
 Worked recipes (adapt, do not copy blindly):
