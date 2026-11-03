@@ -501,3 +501,18 @@ batch's own later `place`). `bench-results-general-v10`, concurrency 3:
 | claw | 182.9 s | passed |
 
 Across ten full passes: 92 of 100 runs passed.
+
+### Claw, catapult, crane, drawbridge after connector positions in search results (v10b, 2026-11-03 15:50 UTC)
+
+The v10 pass made 22 `get_part` calls, almost all right after a `search_catalog` that had already
+returned the part: the model wanted connector positions. Part summaries now carry each connector's
+position. `bench-results-search-positions`, concurrency 2:
+
+| Prompt | v10 | Re-run | get_part calls (v10 → now) |
+| --- | --- | --- | --- |
+| catapult | 96 s | **passed, 109 s** (0.56 m, two Wonder consults) | 6 → 0 |
+| claw | 183 s | **passed, 152 s** | 3 → 1 |
+| drawbridge | 122 s | **passed, 97 s** | 4 → 0 |
+| crane | 87 s | **passed, 177 s** | 5 → 6 (mounted by id from the index and fetched geometry in two parallel rounds) |
+
+4 of 4, 0 errors. Lookups fell 18 → 7; the crane's time went to deliberation, not lookups.
