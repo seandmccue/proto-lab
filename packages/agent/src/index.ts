@@ -46,6 +46,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   const model = input.model === undefined ? modelConfigFromEnv() : input.model;
   const specialist = model ? (input.specialist === undefined ? specialistConfigFromEnv() : input.specialist) : null;
   const modelId = model ? model.model : DETERMINISTIC_MODEL_ID;
+  const savedParent = model && input.parent?.assembly.instances.length ? input.parent : null;
   let activeModelId = modelId;
   const maxIterations = input.maxIterations ?? 7;
   const fullPrompt = input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt;
@@ -54,7 +55,8 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   emit({ type: 'spec', spec });
 
   const versions: VersionRecord[] = [];
-  let iteration = input.startIteration ?? 0;
+  const firstIteration = (input.startIteration ?? 0) + 1;
+  let iteration = firstIteration - 1;
   let pending: { assembly: Assembly; decision: Decision; log: ToolLogEntry[] } | null = null;
   let currentLog: ToolLogEntry[] = [];
   let parentId: string | null = input.parent?.id ?? null;
@@ -65,11 +67,11 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       const testedThisIteration = versions.length > 0 && versions[versions.length - 1].iteration === iteration;
       if (!pending || testedThisIteration) {
         // First build, or the first change after a test: a new iteration begins and its decision is this rationale.
-        iteration = Math.max(iteration + (pending ? 1 : 0), (input.startIteration ?? 0) + 1);
-        const lastTest = rt.tests[rt.tests.length - 1];
+        iteration = Math.max(iteration + (pending ? 1 : 0), firstIteration);
+        const lastTest = rt.tests.at(-1) ?? savedParent?.tests.at(-1);
         pending = { assembly, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn, previousTestId: lastTest?.testId, changes: {} }, log: currentLog };
         currentLog = [];
-        emit({ type: 'status', message: iteration === (input.startIteration ?? 0) + 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
+        emit({ type: 'status', message: iteration === firstIteration && !savedParent ? 'Assembling components' : `Revising design (iteration ${iteration})` });
       } else {
         // Further edits before the next test refine the same iteration; keep the first rationale, but adopt a cited measurement.
         pending.assembly = assembly; pending.log = [...pending.log, ...currentLog]; currentLog = [];
@@ -79,9 +81,17 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
     },
     onTestStart: (testId, kind) => {
       emit({ type: 'status', message: `Testing: ${testId}` });
-      emit({ type: 'test_start', iteration, testId, kind });
+      emit({ type: 'test_start', iteration: !pending && savedParent ? firstIteration : iteration, testId, kind });
     },
     onTest: (result) => {
+      if (!pending && savedParent) {
+        iteration = firstIteration;
+        pending = {
+          assembly: rt.assembly,
+          decision: { source: 'model', modelId: activeModelId, summary: 'Retested the saved assembly', previousTestId: savedParent.tests.at(-1)?.testId, changes: {} },
+          log: [],
+        };
+      }
       emit({ type: 'test', iteration, result });
       if (!pending) return;
       const existing = versions.length && versions[versions.length - 1].iteration === iteration ? versions[versions.length - 1] : null;
@@ -89,10 +99,10 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       const v: VersionRecord = { id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId, iteration, prompt: fullPrompt, spec, assembly: rt.assembly, tests: [result], decisions: [pending.decision], toolLog: [...pending.log, ...currentLog], modelId: pending.decision.modelId ?? modelId, status: result.passed ? 'passed' : 'failed', createdAt: new Date().toISOString() };
       currentLog = []; versions.push(v); parentId = v.id; emit({ type: 'version', version: v });
     },
-  }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 });
+  }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 }, savedParent?.assembly);
 
   try {
-    if (model) await runModelLoop(model, specialist, rt, input, emit, maxIterations, (id) => { activeModelId = id; });
+    if (model) await runModelLoop(model, specialist, rt, input, savedParent, emit, maxIterations, (id) => { activeModelId = id; });
     else await runPlanner(rt, spec, { parent: input.parent ?? null, changeRequest: input.changeRequest, maxIterations });
   } catch (e) {
     const message = (e as Error).message; emit({ type: 'error', message });
@@ -106,15 +116,14 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   return { versions, status, summary, modelId, spec: rt.spec };
 }
 
-/** The assemble/set_drives op lists that produced the parent's final assembly (from its tool log). */
-function parentOps(parent: VersionRecord): unknown[] {
-  const ops: unknown[] = [];
-  for (const e of parent.toolLog) if (e.ok && e.tool === 'assemble') { const a = e.args as { ops?: unknown[] }; if (a?.ops) ops.push(...a.ops); }
-  return ops;
-}
-
 function systemPrompt(parent?: VersionRecord | null): string {
   return `You are the ProtoLab engineering agent: an autonomous mechanical designer. The user describes an invention; you turn it into a working, recognisable, interactive mechanical prototype using real components, structured assembly operations and a rigid-body physics simulator. You act only through tools. Every decision is yours and must come from catalog data or measured test results; never claim a result you did not measure.
+${parent ? `
+This follow-up or remix starts with an exact copy of saved assembly v${parent.iteration}, including its instance IDs, poses, connections, drive settings and part definitions. Start with inspect_assembly, then adapt the procedure below to edit the relevant instances and drives in place. Keep all unaffected components. Existing custom part IDs are available to get_part and assemble without re-creation. Do not replay earlier assembly operations. Define and run fresh tests for the requested behavior, even if the saved design previously passed.
+Saved instances [instance id, part id]: ${JSON.stringify(parent.assembly.instances.map((instance) => [instance.id, instance.partId]))}
+Saved moving joints [joint id, type, endpoints, motor control id]: ${JSON.stringify(parent.assembly.joints.filter((joint) => joint.type !== 'fixed').map((joint) => [joint.id, joint.type, `${joint.a.instanceId}.${joint.a.connectorId}`, `${joint.b.instanceId}.${joint.b.connectorId}`, joint.motor?.controlId])).slice(0, 3000)}
+Saved drives: ${JSON.stringify(parent.assembly.controller.drives).slice(0, 2000)}
+Saved tests (historical context only): ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics, failureReasons: t.failureReasons }))).slice(0, 5000)}` : ''}
 
 Procedure (follow it, briefly narrating each step in one sentence for the user):
 1. Understand the invention and its purpose. 2. Identify its recognisable physical features and required motions. 3. Break it into sub-assemblies and components → write_plan (include a few exact candidate_part_ids from the catalog index if you already know them, plus honest "unverified" items such as aerodynamic lift, fluid flow, or anything this simulator cannot measure).
@@ -151,17 +160,13 @@ Worked recipes (adapt, do not copy blindly):
 • Grabbing claw (two-finger gripper): anchored plate-120x80 base; beam-100 post {onto:"base",connector:"top",via:"end_a"}; palm plate-120x80 {onto:"post",connector:"end_b",via:"top"} so its top_front/top_back face down; servo_L {onto:"palm",connector:"top_back",via:"bottom",joint:"fixed"} and servo_R the same on top_front with spin_deg 180 (the flipped horn then faces the other way, so {op:"move", id:"servo_R", translate:[0,0,0.046]} brings both fingers into one plane); fingers gripper-finger-50 {onto:"servo_L",connector:"horn",via:"root",joint:"revolute",motor:{controlId:"grip_L",stiffness:8,damping:0.3}} (same for R). Place block-40 free between the finger tips with its centre ≈ 12 mm above the tips. Drive both fingers {kind:"step",before:0,after:0.6,at_s:0.5}; test grip {payload:"block", holder:"palm", supportUntil_s:1.2, maxSeparation_m:0.15}. Measured: fingers 96 mm apart closing 0.6 rad cradle the block with 2 cm settle and it never reaches the floor; a block that is not between the fingers falls and the test fails with "Payload fell to the ground". Keep one assemble batch — do not deliberate over finger kinematics before the first test.
 • Drawbridge / lid / flap that lifts: anchored base-plate-300x200; servo on it {onto:"base",connector:"top_back",via:"bottom",joint:"fixed"} (the horn axis then runs sideways along Z); the deck is a plate (create_part plate length 0.3 width 0.15 thickness 0.006, or plate-200x150) mounted {onto:"servo",connector:"horn",via:"hinge_back",joint:"revolute",spin_deg:180,motor:{controlId:"lift",stiffness:40,damping:2}} so it lies flat pointing +X; drive {kind:"ramp",from:0,to:1.1,start_s:0.5,duration_s:3} (positive lifts the free end) and test motion with minJointAmplitude_rad 1.0, clearancePairs deck↔base, noGroundContact deck. Measured: a 300×150×6 mm deck needs 1.23 N·m at the hinge: servo-high-torque-35 (35 % of rating) or servo-ds3218 (62 %) lift it to 64°; spin_deg 0 points the deck backwards into the ground. To raise AND lower, use one sine cycle {kind:"sine", offset:0.55, amplitude:0.55, phase:-1.5708, frequency_hz:0.2} over duration_s 10 — measured 1.1 N·m peak on the 3.5 N·m servo with zero saturation at 0.1–0.25 Hz; a step drive that drops the deck slams it and spikes demand past 20 N·m, which fails the rating check. A linear actuator or tower can be added as the visible lifting element, but drive the hinge; do not spend rounds solving a four-bar linkage before the first test.
 • Catapult: anchored base-plate-300x200; servo-giant-8 {onto:"base",connector:"top_back",via:"bottom",joint:"fixed",offset_m:0.03}; arm (leg_segment via "pivot" onto the servo horn, spin_deg 195 so it stands up leaning back, motor stiffness 30 / damping 0.5) with tray-45 on its "tip"; projectile set down on the tray in the same batch with {op:"mount", id:"pizza", part:"foam-pizza-80", onto:"tray", connector:"payload", via:"bottom", joint:"free"} (no world coordinates to compute); drive {kind:"step", before:0, after:-1.4, at_s:0.5}; launch test with duration_s 5. Measured (8 N·m servo, foam-pizza-80): the throw is torque-limited, so the step amplitude (−0.8 … −1.4) barely matters and the ARM LENGTH sets the range — leg-bar-80 → 0.29 m, leg-bar-100 → 0.35 m, create_part leg_segment length 0.14 → 0.59 m, 0.18 → 0.76 m, 0.22 → 0.98 m; foam-ball-60 flies ≈ 20 % further than the pizza. 2–3.5 N·m servos do not fling the pizza off the tray (the test reports "had not landed"); a 350 mm arm overshoots a 0.5 m target by a metre. Pick the arm length from the target first, then test once.
-${parent ? `\nThis is a remix of an existing design. Rebuild it from its recorded operations, apply the change request, keep what worked.
-Parent parts: ${JSON.stringify(parent.assembly.parts.map((p) => p.id))}
-Parent assembly ops (last successful build, in order): ${JSON.stringify(parentOps(parent)).slice(0, 6000)}
-Parent drives: ${JSON.stringify(parent.assembly.controller.drives).slice(0, 2000)}
-Parent tests: ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics })))}
-Custom parts the parent created must be re-created with create_part/design_part before use (their definitions: ${JSON.stringify(parent.assembly.parts.filter((p) => p.kind === 'designed' || p.id.startsWith('custom-')).map((p) => ({ id: p.id, kind: p.kind, name: p.name, params: p.params, category: p.category, material: p.material, pieces: p.kind === 'designed' ? p.geometry.map((g) => ({ shape: g.shape, offset: g.offset, color: g.color, role: g.role })) : undefined, connectors: p.kind === 'designed' ? p.connectors : undefined }))).slice(0, 5000)}).` : ''}`;
+`;
 }
 
-async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
+async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, savedParent: VersionRecord | null, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
+  const savedAssembly = savedParent ? rt.assembly : null;
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(input.parent) },
+    { role: 'system', content: systemPrompt(savedParent) },
     { role: 'user', content: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt },
   ];
   const maxRounds = 24 + maxIterations * 6;
@@ -180,7 +185,12 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       messages.push({ role: 'user', content: `[Engineering specialist ${prettyModelName(specialist.model.model)} takes over for a few steps.] The last ${fails()} tests failed. Read the history: diagnose the mechanical cause (support polygon, torque vs mass, stride vs slip, clearance, joint axis orientation, drive sign), state it in one or two sentences, then act: sweep_drive if the drive space is unmeasured, redesign or move parts with assemble, change drives, and run_test once. Hand back after one test.` });
     }
     // Give slow first assemblies a nudge between model calls, when Muse can act on it.
-    if (!researchNudged && (rt.calls >= 12 || (rt.calls > 0 && performance.now() - started >= 45_000)) && rt.assembly.instances.length === 0) { researchNudged = true; emit({ type: 'status', message: 'Enough research for a first build; asking the model to assemble now and refine from measurements.' }); messages.push({ role: 'user', content: 'You have searched and designed enough for a first build. Assemble now with the parts you have (one assemble batch), set_drives, define_test and run_test; refine from the measured result rather than researching further.' }); }
+    const awaitingFirstEdit = savedAssembly ? rt.assembly === savedAssembly && !rt.tests.length : rt.assembly.instances.length === 0;
+    if (!researchNudged && awaitingFirstEdit && (rt.calls >= 12 || (rt.calls > 0 && performance.now() - started >= 45_000))) {
+      researchNudged = true;
+      emit({ type: 'status', message: savedAssembly ? 'Asking the model to revise and test the saved assembly.' : 'Enough research for a first build; asking the model to assemble now and refine from measurements.' });
+      messages.push({ role: 'user', content: savedAssembly ? 'Apply the requested edits to the saved assembly now, then define and run a test. For a test-only request, test the saved assembly directly.' : 'You have searched and designed enough for a first build. Assemble now with the parts you have (one assemble batch), set_drives, define_test and run_test; refine from the measured result rather than researching further.' });
+    }
     const driver = specialistRoundsLeft > 0 && specialist ? specialist.model : model;
     setActive(driver.model);
     const testsBefore = rt.tests.length;
@@ -207,8 +217,14 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     messages.push(res.toolCalls.length ? { role: 'assistant', content, tool_calls: res.toolCalls } : { role: 'assistant', content: content ?? '(no output)' });
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 300)}` });
     if (!res.toolCalls.length) {
-      if (res.finishReason === 'length') { emit({ type: 'status', message: 'The model ran out of output budget before acting; asking it to answer with the tool call only.' }); messages.push({ role: 'user', content: 'Your previous reply was cut off before any tool call. Reply with the tool call(s) only and minimal deliberation: send the complete assemble/set_drives/define_test batch now.' }); continue; }
-      messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.' }); continue;
+      if (res.finishReason === 'length') {
+        emit({ type: 'status', message: 'The model ran out of output budget before acting; asking it to answer with the tool call only.' });
+        messages.push({ role: 'user', content: savedAssembly ? 'Your previous reply was cut off. Reply with the tool calls to edit or test the saved assembly.' : 'Your previous reply was cut off before any tool call. Reply with the tool call(s) only and minimal deliberation: send the complete assemble/set_drives/define_test batch now.' });
+        continue;
+      }
+      const nextTool = savedAssembly ? 'Reply with a tool call. Inspect or edit the saved assembly, then define and run the requested test.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.';
+      messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : nextTool });
+      continue;
     }
     for (const call of res.toolCalls) {
       if (deadline.aborted) break;

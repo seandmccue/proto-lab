@@ -107,7 +107,8 @@ const DENSITY: Record<string, number> = { PLA: 1240, aluminium: 2700, steel: 785
 export class ToolRuntime {
   spec: Spec;
   customParts = new Map<string, PartDefinition>();
-  assembly: Assembly = emptyAssembly();
+  assembly: Assembly;
+  private savedParts = new Map<string, PartDefinition>();
   tests: TestResult[] = [];
   testSpecs = new Map<string, TestSpec>();
   private testEvidence = new Map<string, { spec: TestSpec; result: TestResult }>();
@@ -116,8 +117,27 @@ export class ToolRuntime {
   finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
   private events: ToolEvents;
   budget: { maxTests: number; maxToolCalls: number };
-  constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 9, maxToolCalls: 60 }) { this.spec = spec; this.events = events; this.budget = budget; }
-  resolve = (id: string) => this.customParts.get(id) ?? getPart(id);
+  constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 9, maxToolCalls: 60 }, savedAssembly?: Assembly) {
+    this.spec = spec;
+    this.events = events;
+    this.budget = budget;
+    this.assembly = savedAssembly ? structuredClone(savedAssembly) : emptyAssembly();
+    for (const part of this.assembly.parts) {
+      this.savedParts.set(part.id, part);
+      if (part.source.kind === 'designed' || part.kind === 'designed' || part.id.startsWith('custom-')) this.customParts.set(part.id, part);
+    }
+  }
+  resolve = (id: string) => this.customParts.get(id) ?? this.savedParts.get(id) ?? getPart(id);
+
+  private nextPartId(prefix: string) {
+    let next = 1;
+    for (const id of this.customParts.keys()) {
+      const suffix = Number(id.match(/-(\d+)$/)?.[1]);
+      if (Number.isSafeInteger(suffix) && suffix >= next && suffix < Number.MAX_SAFE_INTEGER) next = suffix + 1;
+    }
+    while (this.resolve(`${prefix}-${next}`)) next++;
+    return `${prefix}-${next}`;
+  }
 
   pendingChecks(): string[] {
     if (!this.tests.length) return ['No simulation test has run'];
@@ -150,7 +170,7 @@ export class ToolRuntime {
             if (Array.isArray(r.purpose)) r.purpose = r.purpose.map(String).join(' '); for (const k of ['features', 'motions', 'successCriteria', 'unverified', 'assumptions']) if (typeof r[k] === 'string') r[k] = [r[k]]; }
           const a = PlanArgs.parse(rawArgs);
           const plan = Plan.parse({ purpose: a.purpose, features: a.features, motions: a.motions, subassemblies: a.subassemblies, successCriteria: a.successCriteria, unverified: a.unverified });
-          const candidates = [...new Set(a.candidate_part_ids ?? [])].map(getPart).filter((p): p is PartDefinition => p !== undefined).slice(0, 12);
+          const candidates = [...new Set(a.candidate_part_ids ?? [])].map(this.resolve).filter((p): p is PartDefinition => p !== undefined).slice(0, 12);
           this.spec = { ...this.spec, plan, assumptions: a.assumptions ?? this.spec.assumptions, constraints: { ...this.spec.constraints, maxMass_kg: a.maxMass_kg ?? this.spec.constraints.maxMass_kg } };
           this.events.onPlan(this.spec);
           log(true, `Plan: ${plan.purpose.slice(0, 80)} — ${plan.subassemblies.length} sub-assemblies, ${plan.successCriteria.length} criteria, ${plan.unverified.length} unverified`, candidates.length ? candidates.map((p) => picked(p)) : undefined);
@@ -158,7 +178,7 @@ export class ToolRuntime {
         }
         case 'search_catalog': {
           const a = SearchArgs.parse(rawArgs);
-          const res = searchCatalog(a.query, { category: a.category, limit: a.limit ?? 8 });
+          const res = searchCatalog(a.query, { category: a.category, limit: a.limit ?? 8 }).map((part) => this.savedParts.get(part.id) ?? part);
           const custom = [...this.customParts.values()].filter((p) => !a.category || p.category === a.category);
           log(true, `${res.length + custom.length} parts for "${a.query}"${a.category ? ` in ${a.category}` : ''}`, [...custom, ...res].slice(0, 8).map((p) => picked(p)));
           return { parts: [...custom, ...res].map((p) => this.summarisePart(p)), generators: a.query === '' ? generatorInfo().map((g) => `${g.kind}(${Object.keys(g.params).join(',')})`) : undefined };
@@ -171,7 +191,7 @@ export class ToolRuntime {
         }
         case 'create_part': {
           const a = CreatePartArgs.parse(rawArgs);
-          const id = `custom-${a.kind}-${this.customParts.size + 1}`;
+          const id = this.nextPartId(`custom-${a.kind}`);
           const p = generatePart(a.kind, a.params, id);
           if (a.name) p.name = a.name;
           if (a.color) for (const g of p.geometry) if (g.role !== 'contact' && g.role !== 'motor') g.color = a.color;
@@ -183,7 +203,7 @@ export class ToolRuntime {
           const raw = rawArgs as { pieces?: unknown[] };
           if (Array.isArray(raw?.pieces)) raw.pieces = raw.pieces.map((pc) => normalisePiece(pc));
           const a = DesignPartArgs.parse(rawArgs);
-          const id = `designed-${this.customParts.size + 1}`;
+          const id = this.nextPartId('designed');
           const pieces = a.pieces.map((g) => GeometryPiece.parse(g));
           const r = piecesBoundingRadius(pieces); if (r > 1.0) throw new Error(`Part spans ~${(2 * r).toFixed(2)} m; keep designed parts under 2 m`);
           const volume = pieces.reduce((s, g) => s + shapeVolume(g.shape), 0);
@@ -200,7 +220,7 @@ export class ToolRuntime {
           if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
           const a = AssembleArgs.parse(rawArgs);
           const before = new Map(this.assembly.instances.map((instance) => [instance.id, instance.partId]));
-          const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog(), ...this.customParts.values()]);
+          const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog().map((part) => this.savedParts.get(part.id) ?? part), ...this.customParts.values()]);
           this.assembly = r.assembly;
           const s = summarize(this.assembly);
           const added = new Set(this.assembly.instances.filter((instance) => before.get(instance.id) !== instance.partId).map((instance) => instance.partId));
@@ -238,7 +258,7 @@ export class ToolRuntime {
             };
           });
           log(true, ids.length ? `Inspected connectors on ${ids.join(', ')}` : 'Inspected');
-          return ids.length ? { ...summary, connectorPoses } : summary;
+          return ids.length ? { connectorPoses, ...summary } : summary;
         }
         case 'define_test': {
           const raw = rawArgs as { test?: Record<string, unknown> };

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ToolLogEntry } from '@protolab/schema';
+import { createServer } from 'node:http';
+import { applyOps, emptyAssembly, generatePart, getPart, setDrives } from '@protolab/parts';
+import { VersionRecord, type ToolLogEntry } from '@protolab/schema';
 import { runAgent, type AgentEvent } from './index.ts';
 import { ToolRuntime, baseSpec } from './index.ts';
 
@@ -34,6 +36,66 @@ test('inspect_assembly reports selected connectors in the assembled world pose',
   assert.deepEqual(end?.axis_world.map((axis) => axis || 0), [0, 1, 0]);
   const missing = await rt.call('inspect_assembly', { instance_ids: ['missing'] }) as { error: string };
   assert.match(missing.error, /Unknown instance id "missing"/);
+});
+
+test('a live follow-up edits the saved assembly, reuses authored parts and records fresh evidence', async () => {
+  const custom = generatePart('wheel', { radius: 0.04 }, 'custom-wheel-7');
+  const base = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true },
+    { op: 'mount', id: 'rotor', part: custom.id, onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ], (id) => id === custom.id ? custom : getPart(id)).assembly;
+  const assembly = setDrives(base, [{ controlId: 'spin', mode: 'velocity', rampIn_s: 0, profile: { kind: 'constant', value: 1 } }]);
+  const parent = VersionRecord.parse({ id: 'saved-v4', inventionId: 'old-invention', parentVersionId: 'saved-v3', iteration: 4, prompt: 'Small rotor', spec: baseSpec('Small rotor'), assembly, tests: [], decisions: [], toolLog: [], modelId: 'muse-spark-1.3', status: 'passed', createdAt: '2026-01-01T00:00:00Z' });
+  const priorAssembly = structuredClone(parent.assembly);
+  const calls: [string, object][] = [
+    ['inspect_assembly', { instance_ids: ['rotor'] }],
+    ['get_part', { part_id: 'custom-wheel-7' }],
+    ['define_test', { test: { kind: 'motion', id: 'spin_check', duration_s: 1, measure: { joints: ['spin'] }, criteria: { minJointRate_rad_s: 0.5, torqueWithinRating: false } } }],
+    ['run_test', { test_id: 'spin_check' }],
+    ['create_part', { kind: 'wheel', params: { radius: 0.03 } }],
+    ['assemble', { ops: [{ op: 'move', id: 'tower', translate: [0, 0.01, 0] }], rationale: 'Raise the saved support by 10 mm' }],
+    ['run_test', { test_id: 'spin_check' }],
+    ['finalize_design', { status: 'passed', summary: 'The saved rotor still spins after raising the support.' }],
+  ];
+  let system = '';
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    system = JSON.parse(Buffer.concat(chunks).toString()).messages[0].content;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ choices: [{
+      finish_reason: 'tool_calls',
+      message: { content: null, tool_calls: calls.map(([name, args], index) => ({ id: `call-${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) },
+    }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    let n = 0;
+    const events: AgentEvent[] = [];
+    const result = await runAgent({
+      prompt: parent.prompt, inventionId: 'new-invention', parent, changeRequest: 'Raise the support by 10 mm',
+      startIteration: 4, newVersionId: () => `new-v${++n}`,
+      model: { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 },
+      specialist: null,
+    }, (event) => events.push(event));
+    assert.match(system, /exact copy of saved assembly v4/);
+    assert.deepEqual(events.filter((event) => event.type === 'tool' && !event.entry.ok), []);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.versions.length, 2);
+    const [retest, edited] = result.versions;
+    assert.equal(retest.parentVersionId, parent.id);
+    assert.equal(edited.parentVersionId, retest.id);
+    assert.deepEqual([retest.iteration, edited.iteration], [5, 6]);
+    assert.deepEqual(retest.assembly, priorAssembly);
+    assert.deepEqual(edited.assembly.controller, priorAssembly.controller);
+    assert.deepEqual(edited.assembly.parts, priorAssembly.parts);
+    assert.deepEqual(edited.assembly.instances[0].transform.position, [0, 0.01, 0]);
+    assert.deepEqual(parent.assembly, priorAssembly);
+    assert.equal(edited.toolLog.find((entry) => entry.tool === 'create_part')?.parts?.[0].id, 'custom-wheel-8');
+  } finally {
+    server.close();
+  }
 });
 
 test('deterministic planner builds a walker from generic ops, tests and revises honestly', async () => {
