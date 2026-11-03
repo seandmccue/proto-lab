@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import type { Spec } from '@protolab/schema';
 import { STAGES, stageOf, useElapsed } from './ActivityPanel.tsx';
 import PartsBin, { pickedParts } from './PartsBin.tsx';
 import { fmt, type JobEvent, type VersionMeta } from '../api.ts';
@@ -21,28 +21,25 @@ const STAGE_BLURB: Record<number, string> = {
   5: 'Finished.',
 };
 
-export default function BuildProgress({ events, running, jobStatus, load }: { events: JobEvent[]; running: boolean; jobStatus: string | null; load: { active: number; queued: number; maxConcurrent: number } | null }) {
+export default function BuildProgress({ events, running, jobStatus, load, brief }: { brief?: string; events: JobEvent[]; running: boolean; jobStatus: string | null; load: { active: number; queued: number; maxConcurrent: number } | null }) {
   const stage = stageOf(events); const elapsed = useElapsed(events, running); const since = useSinceLast(events, running);
   const last = [...events].reverse().find((e) => e.type === 'status' || e.type === 'tool');
   const line = last ? String(last.type === 'status' ? last.message : last.summary) : 'Starting the engineering agent…';
-  const parts = pickedParts(events); const tools = events.filter((e) => e.type === 'tool').length;
+  const parts = useMemo(() => pickedParts(events), [events]);
+  const plan = [...events].reverse().find((e) => e.type === 'spec' && (e.spec as Spec | undefined)?.plan)?.spec as Spec | undefined;
   const thinking = running && since >= 8;
   return (
     <div className="build-progress">
       <ol className="build-progress-stages" aria-label="Build stages">
         {STAGES.map((name, i) => <li key={name} data-state={i < stage ? 'done' : i === stage && running ? 'active' : 'todo'}><span className="build-progress-dot" />{name}</li>)}
       </ol>
-      <p className="build-progress-blurb">{STAGE_BLURB[stage]}</p>
-      {jobStatus === 'queued' && load && load.queued > 0 && <p className="text-sm text-slate-600">Queued behind {load.queued} other build{load.queued === 1 ? '' : 's'} ({load.active} of {load.maxConcurrent} workers busy).</p>}
+      <PartsBin parts={parts} plan={plan?.plan} brief={brief} />
       <div className="build-progress-now">
-        <span className={`build-progress-spinner${thinking ? ' is-thinking' : ''}`} aria-hidden="true" />
         <div className="min-w-0">
           <div className="truncate text-sm text-slate-700" title={line}>{line}</div>
-          <div className="mono text-[11px] text-slate-500">{elapsed && <span>{elapsed} elapsed</span>}{tools > 0 && <span> · {tools} tool calls</span>}{parts.length > 0 && <span> · {parts.length} parts picked</span>}{thinking && <span className="text-accent"> · Muse is reasoning, {since} s on this step</span>}</div>
+          <div className="mono text-[11px] text-slate-500">{elapsed ? `${elapsed} elapsed · ` : ''}{jobStatus === 'queued' && load && load.queued > 0 ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : thinking ? `Muse is reasoning · ${since} s on this step` : STAGE_BLURB[stage]}</div>
         </div>
       </div>
-      <PartsBin events={events} />
-      <p className="text-[11px] text-slate-400">Each model round takes 5–60 s; simple mechanisms finish in under a minute, legged or multi-stage ones in 2–5. <Link to="/gallery" className="text-accent hover:underline">Open a finished build in another tab →</Link></p>
     </div>
   );
 }

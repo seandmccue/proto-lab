@@ -85,6 +85,14 @@ function walkTargets(test: TestSummary): string | null {
   return values.length ? values.join(' · ') : null;
 }
 
+type LiveSnapshot = Awaited<ReturnType<typeof api.jobAssembly>>;
+
+function movedPart(before: Assembly['instances'][number] | undefined, after: Assembly['instances'][number]) {
+  return !before || before.partId !== after.partId ||
+    after.transform.position.some((value, i) => Math.abs(value - before.transform.position[i]) > 1e-4) ||
+    Math.abs(after.transform.rotation.reduce((dot, value, i) => dot + value * before.transform.rotation[i], 0)) < 0.99999;
+}
+
 export default function Workspace() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
@@ -97,28 +105,50 @@ export default function Workspace() {
   const [jobStep, setJobStep] = useState<string>('');
   const [reconnecting, setReconnecting] = useState(false);
   const [versionId, setVersionId] = useState<string | null>(null);
-  const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
+  const [live, setLive] = useState<(LiveSnapshot & { newIds: string[]; changedIds: Set<string> }) | null>(null);
+  const [viewMode, setViewMode] = useState<'auto' | 'live' | 'tested'>('auto');
   const [load, setLoad] = useState<{ active: number; queued: number; maxConcurrent: number } | null>(null); // queue hint while this build waits for a worker
-  // Drop-in reveal: when a new live assembly arrives, its parts appear one by one instead of all at once.
-  const [reveal, setReveal] = useState(0);
+  const [reveal, setReveal] = useState<{ snapshot: LiveSnapshot; count: number } | null>(null);
+  const [introActive, setIntroActive] = useState(false);
+  const [introBlueprint, setIntroBlueprint] = useState(false);
+  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const hasLiveAssembly = Boolean(live?.assembly.instances.length);
   useEffect(() => {
-    if (!live) { setReveal(0); return; }
-    const total = live.assembly.instances.length; let n = Math.min(reveal, total);
-    if (n >= total) return;
-    const id = setInterval(() => { n += 1; setReveal(n); if (n >= total) clearInterval(id); }, 110);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live]);
-  const liveShown = useMemo(() => {
-    if (!live) return null;
-    const inst = live.assembly.instances.slice(0, Math.max(1, reveal)); const ids = new Set(inst.map((i) => i.id));
-    return { ...live.assembly, instances: inst, joints: live.assembly.joints.filter((j) => ids.has(j.a.instanceId) && ids.has(j.b.instanceId)) } as Assembly;
-  }, [live, reveal]);
-  const revealGlow = useMemo(() => { if (!live) return new Set<string>(); const inst = live.assembly.instances; return reveal < inst.length && reveal > 0 ? new Set([inst[reveal - 1].id]) : new Set<string>(); }, [live, reveal]);
+    if (!hasLiveAssembly || reducedMotion) return;
+    setIntroActive(true);
+    setIntroBlueprint(true);
+    const shade = setTimeout(() => setIntroBlueprint(false), 850);
+    const finish = setTimeout(() => setIntroActive(false), 1500);
+    return () => {
+      clearTimeout(shade);
+      clearTimeout(finish);
+      setIntroActive(false);
+      setIntroBlueprint(false);
+    };
+  }, [hasLiveAssembly, jobId, reducedMotion]);
+  const revealCount = !live || reducedMotion ? live?.newIds.length ?? 0 : reveal?.snapshot === live ? reveal.count : 1;
+  useEffect(() => {
+    if (!live || revealCount >= live.newIds.length) return;
+    const timer = setTimeout(() => setReveal({ snapshot: live, count: revealCount + 1 }), Math.min(110, 1300 / live.newIds.length));
+    return () => clearTimeout(timer);
+  }, [live, revealCount]);
+  const visibleLiveIds = useMemo(() => {
+    if (!live || revealCount >= live.newIds.length) return undefined;
+    const remaining = new Set(live.newIds.slice(revealCount));
+    return new Set(live.assembly.instances.filter((part) => !remaining.has(part.id)).map((part) => part.id));
+  }, [live, revealCount]);
+  const liveHighlightIds = useMemo(() => {
+    if (!live) return undefined;
+    const additions = new Set(live.newIds);
+    const highlighted = new Set([...live.changedIds].filter((id) => !additions.has(id)));
+    const arriving = live.newIds[revealCount - 1];
+    if (arriving) highlighted.add(arriving);
+    return highlighted;
+  }, [live, revealCount]);
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
   const [testId, setTestId] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const [playing, setPlaying] = useState(!reducedMotion);
   const [explode, setExplode] = useState(0);
   const [blueprint, setBlueprint] = useState(false);
   const [follow, setFollow] = useState(true);
@@ -141,6 +171,12 @@ export default function Workspace() {
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
   const running = jobStatus === 'queued' || jobStatus === 'running';
+  const latestAssemblyEvent = useMemo(() => [...events].reverse().find((event) => event.type === 'assembly' || event.type === 'version'), [events]);
+  const newerAssembly = latestAssemblyEvent?.type === 'assembly' && !!live && live.at >= latestAssemblyEvent.t;
+  const showLive = hasLiveAssembly && (running
+    ? !version || viewMode === 'live' || (viewMode === 'auto' && (newerAssembly || introActive))
+    : introActive && viewMode === 'auto');
+  const activeBlueprint = blueprint || (showLive && introBlueprint);
   const sourceId = detail?.source?.id;
   const sourceVersionId = detail?.source?.versionId ?? detail?.invention.parentVersionId;
   useEffect(() => {
@@ -182,9 +218,14 @@ export default function Workspace() {
     if (!jobId) return;
     let since = 0, stop = false, retries = 0;
     let needsRefresh = false;
+    let pendingAssembly: JobEvent | undefined;
+    let readingAssembly = false;
     let wasActive = jobId === params.get('job') || jobId === localRevision?.jobId;
     let timer: ReturnType<typeof setTimeout>;
     setEvents([]);
+    setLive(null);
+    setReveal(null);
+    setViewMode('auto');
     setReconnecting(false);
     const tick = async () => {
       try {
@@ -193,8 +234,26 @@ export default function Workspace() {
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
         if (j.status === 'queued') api.load().then((next) => { if (!stop) setLoad(next); }).catch(() => {}); else setLoad(null);
-        if ((j.status === 'queued' || j.status === 'running') && j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {}); // the live snapshot only exists while the job runs; a finished job's replay would 404
         const active = j.status === 'queued' || j.status === 'running';
+        pendingAssembly = [...j.events].reverse().find((event) => event.type === 'assembly') ?? pendingAssembly;
+        const recentlyFinished = wasActive && pendingAssembly && Date.now() - Date.parse(pendingAssembly.t) < 15_000;
+        if ((active || recentlyFinished) && pendingAssembly && !readingAssembly) {
+          const requested = pendingAssembly;
+          readingAssembly = true;
+          void api.jobAssembly(jobId).then((next) => {
+            if (stop) return;
+            if (pendingAssembly === requested || (pendingAssembly && pendingAssembly.t <= next.at)) pendingAssembly = undefined;
+            setLive((previous) => {
+              if (previous && previous.at >= next.at) return previous;
+              const before = new Map(previous?.assembly.instances.map((part) => [part.id, part]));
+              return {
+                ...next,
+                newIds: next.assembly.instances.filter((part) => !before.has(part.id)).map((part) => part.id),
+                changedIds: new Set(next.assembly.instances.filter((part) => movedPart(before.get(part.id), part)).map((part) => part.id)),
+              };
+            });
+          }).catch(() => {}).finally(() => { readingAssembly = false; });
+        }
         needsRefresh ||= !active || j.events.some((e) => e.type === 'version' || e.type === 'done');
         if (needsRefresh) { await refresh(); needsRefresh = false; }
         if (stop) return;
@@ -224,12 +283,12 @@ export default function Workspace() {
   useEffect(() => {
     if (!detail) return;
     const latest = detail.versions[detail.versions.length - 1]?.id ?? null;
-    if (!versionId || running) {
+    if (!versionId || (running && viewMode !== 'tested')) {
       const first = !running && stageMode ? story[0] : undefined;
       setVersionId(first?.version.id ?? latest);
       if (first) setTestId(first.test.testId);
     }
-  }, [detail, running, stageMode, story, versionId]);
+  }, [detail, running, stageMode, story, versionId, viewMode]);
 
   useEffect(() => {
     if (!versionId || !detail) return;
@@ -365,13 +424,19 @@ export default function Workspace() {
 
       <div className="workbench-grid">
         <aside className="workbench-panel workbench-parts" data-active={mobilePane === 'tree'} aria-label="Assembly and parts">
-          {version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
+          {showLive && live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={liveHighlightIds} /> : version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
         </aside>
 
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
           <div className="workbench-panel-heading">
             <span className="workbench-label">{running ? 'Live build' : '3D simulation'}</span>
-            {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={setVersionId} />}
+            {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
+            {running && hasLiveAssembly && version && (
+              <div className="workbench-control-group" role="group" aria-label="Choose live assembly or recorded test">
+                <button type="button" className="btn-ghost" aria-pressed={showLive} onClick={() => setViewMode('live')}>Live assembly</button>
+                <button type="button" className="btn-ghost" aria-pressed={!showLive} onClick={() => setViewMode('tested')}>Tested replay</button>
+              </div>
+            )}
             {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
             {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
@@ -405,20 +470,24 @@ export default function Workspace() {
             </div>
           )}
           <div className="workbench-stage">
-            {!version && live ? (
+            {showLive && live ? (
               <>
-                <Viewer assembly={liveShown ?? live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={revealGlow} onSelect={setSelected} autoRotate />
-                <div className="workbench-readout"><span className="workbench-readout-model">assembling · {Math.min(reveal, live.assembly.instances.length)} of {live.assembly.instances.length} components placed · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
+                <Viewer assembly={live.assembly} visibleInstanceIds={visibleLiveIds} enteringInstanceIds={reducedMotion ? undefined : live.newIds} test={null} playing={false} speed={1} explode={explode} blueprint={activeBlueprint} follow={false} selectedId={selected} changedIds={liveHighlightIds} onSelect={setSelected} autoRotate={!reducedMotion && !introBlueprint} />
+                <div className="workbench-readout">
+                  <span className="workbench-readout-model">{running ? 'Live assembly' : 'Assembly preview'} · v{live.iteration} · {visibleLiveIds ? `${visibleLiveIds.size} of ` : ''}{live.assembly.instances.length} parts placed</span>
+                  <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{running ? newerAssembly ? 'Awaiting simulation' : 'Switch to Tested replay for the recorded result' : 'Showing the assembled parts before replay'}</span>
+                  {live.rationale && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale}</span>}
+                </div>
               </>
             ) : version ? (
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} changedIds={comparing && storyStep === 0 ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : running ? (
-              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} />
+              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
             ) : (
               <div className="p-6 text-sm text-slate-400">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
-            {(version || live) && <BuildStrip events={events} running={running} />}
-            {version && (
+            {(version || showLive) && <BuildStrip events={events} running={running} />}
+            {version && !showLive && (
               <div className="workbench-readout">
                 <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!(comparing && storyStep === 0) && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
                 {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
@@ -426,7 +495,7 @@ export default function Workspace() {
             )}
           </div>
           <div className="workbench-toolbar">
-            <div className="workbench-control-group" role="group" aria-label="Replay controls">
+            {!showLive && <div className="workbench-control-group" role="group" aria-label="Replay controls">
               <button className="btn-secondary" onClick={() => setPlaying((p) => !p)} disabled={!test} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
               <button className="btn-ghost" onClick={() => { setSeek(0); setTimeout(() => setSeek(null), 50); }} disabled={!test}>Reset</button>
               <input type="range" min={0} max={Math.max(0.01, time.d)} step={0.01} value={Math.min(time.t, time.d)} onChange={(e) => { setPlaying(false); setSeek(Number(e.target.value)); }} className="workbench-timeline" aria-label="Scrub time" disabled={!test} />
@@ -435,11 +504,11 @@ export default function Workspace() {
               {version && version.tests.length > 1 && (
                 <select value={testId ?? ''} onChange={(e) => setTestId(e.target.value)} aria-label="Test to replay">{version.tests.map((t) => <option key={t.testId} value={t.testId}>{t.testId} {t.passed ? '✓' : '✗'}</option>)}</select>
               )}
-            </div>
+            </div>}
             <div className="workbench-control-group" role="group" aria-label="View controls">
               <label>Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-16" aria-label="Explode view" /></label>
-              <button className="btn-ghost" aria-pressed={blueprint} onClick={() => setBlueprint((b) => !b)}>Blueprint</button>
-              {comparing ? <span className="workbench-view-hint">Same camera for both tests</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>}
+              <button className="btn-ghost" aria-pressed={activeBlueprint} onClick={() => { setIntroBlueprint(false); setBlueprint(!activeBlueprint); }}>Blueprint</button>
+              {!showLive && (comparing ? <span className="workbench-view-hint">Same camera for both tests</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
         </section>

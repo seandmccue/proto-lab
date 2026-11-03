@@ -105,7 +105,7 @@ export function projectFaces(assembly: Assembly, frame?: Record<string, Transfor
   return faces.sort((a, b) => a.depth - b.depth);
 }
 
-export default function IsoPreview({ assembly, trace, playing, className }: { assembly: Assembly; trace?: Trace | null; playing?: boolean; className?: string }) {
+export default function IsoPreview({ assembly, trace, playing, className, blueprint = false }: { assembly: Assembly; trace?: Trace | null; playing?: boolean; className?: string; blueprint?: boolean }) {
   const [frameIdx, setFrameIdx] = useState(0);
   const raf = useRef(0);
   useEffect(() => {
@@ -136,10 +136,10 @@ export default function IsoPreview({ assembly, trace, playing, className }: { as
   const sc = 1000;
   return (
     <svg viewBox={`${(bounds.minX + dx) * sc} ${-(bounds.minY + bounds.h) * sc} ${bounds.w * sc} ${bounds.h * sc}`} className={className} aria-hidden preserveAspectRatio="xMidYMid meet">
-      <ellipse cx={(restV[0] + dx) * sc} cy={-(bounds.minY + bounds.h * 0.06) * sc} rx={bounds.w * sc * 0.3} ry={bounds.h * sc * 0.05} fill="#0f172a" opacity={0.08} />
+      <ellipse cx={(restV[0] + dx) * sc} cy={-(bounds.minY + bounds.h * 0.06) * sc} rx={bounds.w * sc * 0.3} ry={bounds.h * sc * 0.05} fill="#0f172a" opacity={blueprint ? 0 : 0.08} />
       {faces.map((f, i) => f.kind === 'circle'
-        ? <circle key={i} cx={f.points[0][0] * sc} cy={-f.points[0][1] * sc} r={(f.r ?? 0.005) * sc} fill={f.color} />
-        : <polygon key={i} points={f.points.map((p) => `${p[0] * sc},${-p[1] * sc}`).join(' ')} fill={f.color} stroke="rgba(15,23,42,0.25)" strokeWidth={0.4} />)}
+        ? <circle key={i} cx={f.points[0][0] * sc} cy={-f.points[0][1] * sc} r={(f.r ?? 0.005) * sc} fill={blueprint ? "#123955" : f.color} stroke={blueprint ? "#8ae4ff" : undefined} strokeWidth={blueprint ? 1 : undefined} vectorEffect={blueprint ? "non-scaling-stroke" : undefined} />
+        : <polygon key={i} points={f.points.map((p) => `${p[0] * sc},${-p[1] * sc}`).join(' ')} fill={blueprint ? (f.color === "#f8fafc" ? "#0b1f36" : "#123955") : f.color} stroke={blueprint ? "#8ae4ff" : "rgba(15,23,42,0.25)"} strokeWidth={blueprint ? 1 : 0.4} vectorEffect={blueprint ? "non-scaling-stroke" : undefined} />)}
     </svg>
   );
 }

@@ -17,11 +17,11 @@ const DrivesArgs = z.object({ drives: z.array(Drive).min(1).max(40), rationale: 
 const DefineTestArgs = z.object({ test: TestSpec });
 const RunTestArgs = z.object({ test_id: z.string() });
 const SweepArgs = z.object({ test_id: z.string(), controlId: z.string(), field: z.enum(['amplitude', 'frequency_hz', 'value', 'offset']), values: z.array(z.number()).min(2).max(8), duration_s: z.number().min(1).max(6).optional() });
-const PlanArgs = Plan.extend({ task: z.string().max(400).optional(), assumptions: z.array(z.string()).max(12).optional(), maxMass_kg: z.number().positive().max(50).optional() });
+const PlanArgs = Plan.extend({ task: z.string().max(400).optional(), assumptions: z.array(z.string()).max(12).optional(), maxMass_kg: z.number().positive().max(50).optional(), candidate_part_ids: z.array(z.string().min(1).max(100)).max(24).optional().catch(undefined) });
 const FinalizeArgs = z.object({ summary: z.string().max(1200), status: z.enum(['passed', 'failed']), unverified: z.array(z.string()).max(12).optional() });
 
 export const TOOL_DEFS: ToolDef[] = [
-  { name: 'write_plan', description: 'Step 1–3 and 7 of the engineering procedure: state the purpose, the recognisable physical features, the required motions, the sub-assemblies, measurable success criteria, and which behaviours the rigid-body physics cannot verify (e.g. aerodynamic lift). Shown to the user. Call once before building; call again only if the plan changes.', parameters: { type: 'object', properties: { purpose: { type: 'string' }, features: { type: 'array', items: { type: 'string' } }, motions: { type: 'array', items: { type: 'string' } }, subassemblies: { type: 'array', items: { type: 'string' } }, successCriteria: { type: 'array', items: { type: 'string' } }, unverified: { type: 'array', items: { type: 'string' } }, assumptions: { type: 'array', items: { type: 'string' } }, maxMass_kg: { type: 'number' } }, required: ['purpose', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified'] } },
+  { name: 'write_plan', description: 'Step 1–3 and 7 of the engineering procedure: state the purpose, the recognisable physical features, the required motions, the sub-assemblies, measurable success criteria, and which behaviours the rigid-body physics cannot verify (e.g. aerodynamic lift). Include exact candidate_part_ids from the catalog index when already known so the user can see the proposed parts. Call once before building; call again only if the plan changes.', parameters: { type: 'object', properties: { purpose: { type: 'string' }, features: { type: 'array', items: { type: 'string' } }, motions: { type: 'array', items: { type: 'string' } }, subassemblies: { type: 'array', items: { type: 'string' } }, successCriteria: { type: 'array', items: { type: 'string' } }, unverified: { type: 'array', items: { type: 'string' } }, assumptions: { type: 'array', items: { type: 'string' } }, maxMass_kg: { type: 'number' }, candidate_part_ids: { type: 'array', maxItems: 12, items: { type: 'string' } } }, required: ['purpose', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified'] } },
   { name: 'search_catalog', description: 'Search the component library (100+ parts: beams, plates, chassis, towers, gears, shafts, bearings, wheels, spoked wheels, pulleys, hinges, sliders, linkages, cranks, pistons, servos, gearmotors, springs, actuators, wings, propellers, gripper fingers, gondolas, tracks, payload balls/blocks/discs, trays, winged bodies with built-in flap hinges, left/right butterfly, bird and dragonfly wings…). Returns ids, parameters, mass, limits and connector ids with their kinds and axes.', parameters: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, limit: { type: 'integer' } } } },
   { name: 'get_part', description: 'Full details of a catalog or custom part: connectors (id, position, axis, kind), geometry pieces, limits.', parameters: { type: 'object', properties: { part_id: { type: 'string' } }, required: ['part_id'] } },
   { name: 'create_part', description: 'Create a parametric part from a generator when no preset fits (any generator kind with custom params, e.g. wing{span,chord,style}, body_frame{length,width,height,legPairs}, big_wheel{radius,spokes}, servo_motor{size,torque,speed}, beam, plate, curved_panel, gear, crank, link, gripper_finger, propeller…). Returns the new part id and its connectors.', parameters: { type: 'object', properties: { kind: { type: 'string' }, params: { type: 'object', additionalProperties: { type: 'number' } }, name: { type: 'string' }, color: { type: 'string', description: 'hex colour like #e63946' }, rationale: { type: 'string' } }, required: ['kind', 'params'] } },
@@ -134,7 +134,7 @@ export class ToolRuntime {
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
     // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
-    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
+    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
     this.calls++;
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
@@ -148,9 +148,10 @@ export class ToolRuntime {
             if (Array.isArray(r.purpose)) r.purpose = r.purpose.map(String).join(' '); for (const k of ['features', 'motions', 'successCriteria', 'unverified', 'assumptions']) if (typeof r[k] === 'string') r[k] = [r[k]]; }
           const a = PlanArgs.parse(rawArgs);
           const plan = Plan.parse({ purpose: a.purpose, features: a.features, motions: a.motions, subassemblies: a.subassemblies, successCriteria: a.successCriteria, unverified: a.unverified });
+          const candidates = [...new Set(a.candidate_part_ids ?? [])].map(getPart).filter((p): p is PartDefinition => p !== undefined).slice(0, 12);
           this.spec = { ...this.spec, plan, assumptions: a.assumptions ?? this.spec.assumptions, constraints: { ...this.spec.constraints, maxMass_kg: a.maxMass_kg ?? this.spec.constraints.maxMass_kg } };
           this.events.onPlan(this.spec);
-          log(true, `Plan: ${plan.purpose.slice(0, 80)} — ${plan.subassemblies.length} sub-assemblies, ${plan.successCriteria.length} criteria, ${plan.unverified.length} unverified`);
+          log(true, `Plan: ${plan.purpose.slice(0, 80)} — ${plan.subassemblies.length} sub-assemblies, ${plan.successCriteria.length} criteria, ${plan.unverified.length} unverified`, candidates.length ? candidates.map((p) => picked(p)) : undefined);
           return { ok: true, plan };
         }
         case 'search_catalog': {
@@ -196,10 +197,13 @@ export class ToolRuntime {
           const raw = rawArgs as { ops?: unknown[] };
           if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
           const a = AssembleArgs.parse(rawArgs);
+          const before = new Map(this.assembly.instances.map((instance) => [instance.id, instance.partId]));
           const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog(), ...this.customParts.values()]);
           this.assembly = r.assembly;
           const s = summarize(this.assembly);
-          log(true, `${a.ops.length} ops: ${r.summary.slice(0, 4).join('; ')}${r.summary.length > 4 ? ` … (+${r.summary.length - 4})` : ''} → ${this.assembly.instances.length} components, ${s.totalMass_kg} kg`);
+          const added = new Set(this.assembly.instances.filter((instance) => before.get(instance.id) !== instance.partId).map((instance) => instance.partId));
+          const mounted = this.assembly.parts.filter((p) => added.has(p.id));
+          log(true, `${a.ops.length} ops: ${r.summary.slice(0, 4).join('; ')}${r.summary.length > 4 ? ` … (+${r.summary.length - 4})` : ''} → ${this.assembly.instances.length} components, ${s.totalMass_kg} kg`, mounted.length ? mounted.map((p) => picked(p, this.customParts.has(p.id))) : undefined);
           this.events.onAssembly(this.assembly, a.rationale, a.based_on);
           return { applied: r.summary, assembly: s };
         }

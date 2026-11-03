@@ -8,6 +8,8 @@ import IsoPreview from './IsoPreview.tsx';
 
 export interface ViewerProps {
   assembly: Assembly;
+  visibleInstanceIds?: Set<string>;
+  enteringInstanceIds?: string[];
   test?: TestResult | null;
   playing: boolean;
   speed?: number;
@@ -89,8 +91,10 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 }
 
 function Scene(props: ViewerProps) {
-  const { assembly, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, onSelect, follow = true, cameraLock, timeRef, onTime, seekTo, autoRotate, mini } = props;
+  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, onSelect, follow = true, cameraLock, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
+  const enteredAt = useRef(new Map<string, number>());
+  const entering = useMemo(() => new Set(enteringInstanceIds), [enteringInstanceIds]);
   const tRef = useRef(0);
   const frames = test?.trace.frames ?? [];
   const duration = frames.length ? frames[frames.length - 1].t : 0;
@@ -134,7 +138,7 @@ function Scene(props: ViewerProps) {
   useEffect(() => { if (seekTo != null) tRef.current = seekTo; }, [seekTo]);
   useEffect(() => { tRef.current = 0; }, [test?.testId]);
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     if (playing && duration > 0) { tRef.current = (tRef.current + delta * speed) % duration; }
     if (timeRef) timeRef.current = tRef.current;
     onTime?.(tRef.current, duration);
@@ -146,6 +150,13 @@ function Scene(props: ViewerProps) {
       const ta = a.bodies[inst.id] ?? inst.transform, tb = b.bodies[inst.id] ?? ta;
       const p = vec(ta.position).lerp(vec(tb.position), k);
       const q = quat(ta.rotation).slerp(quat(tb.rotation), k);
+      if (entering.has(inst.id) && (!visibleInstanceIds || visibleInstanceIds.has(inst.id))) {
+        const now = clock.elapsedTime;
+        const start = enteredAt.current.get(inst.id) ?? now;
+        enteredAt.current.set(inst.id, start);
+        const remaining = Math.max(0, 1 - (now - start) / 0.26);
+        p.y += remaining * remaining * Math.min(0.12, radius * 0.3);
+      }
       if (explode > 0) p.add(explodeDir.get(inst.id)!.clone().multiplyScalar(explode * 0.12));
       g.position.copy(p); g.quaternion.copy(q);
       if (inst.id === 'body') bodyPos.copy(p);
@@ -173,7 +184,7 @@ function Scene(props: ViewerProps) {
           const part = partById.get(inst.partId);
           if (!part) return null;
           return (
-            <group key={inst.id} ref={(g) => { if (g) groups.current[inst.id] = g; }} position={vec(inst.transform.position)} quaternion={quat(inst.transform.rotation)}>
+            <group key={inst.id} ref={(g) => { if (g) groups.current[inst.id] = g; }} visible={!visibleInstanceIds || visibleInstanceIds.has(inst.id)} position={vec(inst.transform.position)} quaternion={quat(inst.transform.rotation)}>
               {part.geometry.map((piece, i) => (
                 <PieceMesh key={i} piece={piece} mat={material(piece.color ?? '#aaa', piece.role, blueprint, selectedId === inst.id, !!changedIds?.has(inst.id))} onClick={(e) => { e.stopPropagation(); onSelect?.(inst.id); }} />
               ))}

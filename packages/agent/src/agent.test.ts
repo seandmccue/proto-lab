@@ -1,7 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { ToolLogEntry } from '@protolab/schema';
 import { runAgent, type AgentEvent } from './index.ts';
 import { ToolRuntime, baseSpec } from './index.ts';
+
+test('part events distinguish planned catalog candidates from what the build actually adds', async () => {
+  const logs: ToolLogEntry[] = [];
+  const rt = new ToolRuntime(baseSpec('Ferris wheel'), { onLog: (event) => logs.push(event), onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('write_plan', { purpose: 'Build a Ferris wheel', features: ['wheel'], motions: ['turn'], subassemblies: ['base'], successCriteria: ['rotate'], unverified: [], candidate_part_ids: ['tower-300', 'tower-300', 'unknown-part'] });
+  assert.deepEqual(logs[0].parts?.map((part) => part.id), ['tower-300']);
+  await rt.call('assemble', { rationale: 'Use a taller support', ops: [{ op: 'place', id: 'tower', part: 'tower-500', position: [0, 0, 0], anchored: true }] });
+  assert.deepEqual(logs[1].parts?.map((part) => part.id), ['tower-500']);
+  await rt.call('assemble', { rationale: 'Move the support', ops: [{ op: 'move', id: 'tower', translate: [0, 0.01, 0] }] });
+  assert.equal(logs[2].ok, true);
+  assert.equal(logs[2].parts, undefined);
+});
 
 test('deterministic planner builds a walker from generic ops, tests and revises honestly', async () => {
   const events: AgentEvent[] = []; let n = 0;
