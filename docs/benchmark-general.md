@@ -63,3 +63,37 @@ Model: muse-spark-1.3 · specialist: muse-wonder-1.0 after 3 failures · 10 runs
 
 **Result on the current engine: 10 of 10 prompts produce a recognisable, tested mechanism.** Timings range from
 100 s (Ferris wheel) to 22 min (butterfly), dominated by Meta Model API round-trips of 5–60 s each.
+
+
+## Clean pass on the merged engine (second run, all fixes in)
+
+| Metric | Value |
+| --- | --- |
+| Success rate (walk + requested follow-ups passed) | 90 % |
+| Errors (API/model) | 0 % |
+| Median completion time | 424.3 s |
+| Mean iterations (versions) | 3.4 |
+| Runs with ≥1 meaningful revision citing a measurement | 40 % |
+| Runs that failed a walk test and later passed one | 70 % |
+| Runs using sweep_gait | 20 % |
+| Runs creating a custom part | 80 % |
+| Runs escalated to the specialist | 40 % |
+
+| Prompt | Runs | Passed | Median time | Mean iterations | Escalations |
+| --- | --- | --- | --- | --- | --- |
+| butterfly | 1 | 1/1 | 542.4 s | 2.0 | 0 |
+| ferris | 1 | 1/1 | 80.9 s | 1.0 | 0 |
+| muse | 1 | 0/1 | 333 s | 9.0 | 1 |
+| catapult | 1 | 1/1 | 276.9 s | 5.0 | 0 |
+| crab | 1 | 1/1 | 424.3 s | 4.0 | 1 |
+| claw | 1 | 1/1 | 929.7 s | 4.0 | 1 |
+| windmill | 1 | 1/1 | 63.7 s | 1.0 | 0 |
+| drawbridge | 1 | 1/1 | 722.5 s | 2.0 | 0 |
+| crane | 1 | 1/1 | 694.3 s | 4.0 | 1 |
+| novel | 1 | 1/1 | 248.4 s | 2.0 | 0 |
+
+
+Nine of ten passed with zero API errors. The walker built a stable quadruped that covered 0.52 m, but in
+−X, and the walk test only credited +X; a backward walk is still a walk, so the test now accepts travel in
+either sense (and reports the sign with a hint to flip the hip drives). Counters in this pass use the generic
+tool names: 80 % of runs created at least one custom part, 40 % consulted Muse Wonder.

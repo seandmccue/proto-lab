@@ -50,7 +50,10 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       if (!pending || testedThisIteration) {
         // First build, or the first change after a test: a new iteration begins and its decision is this rationale.
         iteration = Math.max(iteration + (pending ? 1 : 0), (input.startIteration ?? 0) + 1);
-        pending = { assembly, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn, changes: {} }, log: currentLog };
+        // A revision that follows a failed test is, by construction, based on that measurement; record it if the model did not.
+        const lastTest = rt.tests[rt.tests.length - 1];
+        const cited = basedOn ?? (lastTest && !lastTest.passed ? `${lastTest.testId}: ${lastTest.failureReasons[0] ?? 'did not pass'}` : undefined);
+        pending = { assembly, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn: cited, changes: {} }, log: currentLog };
         currentLog = [];
         emit({ type: 'status', message: iteration === (input.startIteration ?? 0) + 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
       } else {

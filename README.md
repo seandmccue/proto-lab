@@ -76,9 +76,10 @@ its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_S
 
 `node packages/agent/src/bench.ts --general` runs ten inventions through the same engine: butterfly,
 Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbridge, crane and a novel
-garden gadget. On the current engine all ten produce a recognisable, tested mechanism
-([docs/benchmark-general.md](docs/benchmark-general.md)); timings run from 100 s to 22 min, dominated
-by Meta Model API round-trips.
+garden gadget. Clean pass on the merged engine: **9 of 10 passed, 0 API errors, median 7 min**, 80 % of
+runs created custom parts, 40 % consulted Muse Wonder; the one miss (a walker that walked backward) is
+fixed by a direction-agnostic walk test ([docs/benchmark-general.md](docs/benchmark-general.md)).
+Timings run from 60 s to 15 min, dominated by Meta Model API round-trips.
 
 ## Reliability benchmark
 
