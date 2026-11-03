@@ -14,7 +14,7 @@ export function modelConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ModelC
     apiKey,
     baseUrl: ((env.MODEL_API_BASE ?? env.LLM_BASE_URL)?.trim() || DEFAULT_BASE_URL).replace(/\/$/, ''),
     model: (env.MODEL_ID ?? env.LLM_MODEL)?.trim() || DEFAULT_MODEL,
-    maxTokens: Number(env.MODEL_MAX_TOKENS ?? 4096),
+    maxTokens: Number(env.MODEL_MAX_TOKENS ?? 16384),
     timeoutMs: Number(env.MODEL_TIMEOUT_MS ?? 300_000),
   };
 }
@@ -41,7 +41,7 @@ export type ChatMessage =
   | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 export interface ToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
-export interface ChatResult { content: string | null; toolCalls: ToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }
+export interface ChatResult { content: string | null; toolCalls: ToolCall[]; finishReason?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }
 
 export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: ToolDef[], opts: { toolChoice?: 'auto' | 'required' | { name: string }; temperature?: number; signal?: AbortSignal } = {}): Promise<ChatResult> {
   const body: Record<string, unknown> = {
@@ -75,10 +75,11 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
   }
   if (!res) throw new Error(`${lastErr} (after 4 attempts)`);
   if (process.env.MODEL_DEBUG) console.error(`[llm] ← ${cfg.model} in ${((Date.now() - started) / 1000).toFixed(1)} s`);
-  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] } }>; usage?: ChatResult['usage'] };
-  const msg = json.choices?.[0]?.message;
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }>; usage?: ChatResult['usage'] };
+  const choice = json.choices?.[0]; const msg = choice?.message;
   if (!msg) throw new Error('Model returned no choices');
-  return { content: msg.content ?? null, toolCalls: msg.tool_calls ?? [], usage: json.usage };
+  if (process.env.MODEL_DEBUG) console.error(`[llm]   finish=${choice?.finish_reason} tools=${msg.tool_calls?.length ?? 0} reasoning_tokens=${json.usage?.completion_tokens_details?.reasoning_tokens ?? '?'} completion=${json.usage?.completion_tokens ?? '?'}`);
+  return { content: msg.content ?? null, toolCalls: msg.tool_calls ?? [], finishReason: choice?.finish_reason, usage: json.usage };
 }
 
 /** One live tool-call round trip to confirm the model id, endpoint and tool-calling support. */

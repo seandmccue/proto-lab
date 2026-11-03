@@ -147,7 +147,10 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     const content = res.content && res.content.trim() ? res.content : res.toolCalls.length ? null : '(no output)';
     messages.push(res.toolCalls.length ? { role: 'assistant', content, tool_calls: res.toolCalls } : { role: 'assistant', content: content ?? '(no output)' });
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 300)}` });
-    if (!res.toolCalls.length) { messages.push({ role: 'user', content: rt.tests.length ? 'Continue with tools, or call finalize_design.' : 'Use the tools: write_plan, then search/create parts, assemble, set_drives, define_test, run_test.' }); continue; }
+    if (!res.toolCalls.length) {
+      if (res.finishReason === 'length') { emit({ type: 'status', message: 'The model ran out of output budget before acting; asking it to answer with the tool call only.' }); messages.push({ role: 'user', content: 'Your previous reply was cut off before any tool call. Reply with the tool call(s) only and minimal deliberation: send the complete assemble/set_drives/define_test batch now.' }); continue; }
+      messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.' }); continue;
+    }
     for (const call of res.toolCalls) {
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
