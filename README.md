@@ -4,8 +4,9 @@ AI-powered invention studio. Describe an invention, watch an engineering agent a
 real catalog parts, test it in a rigid-body physics simulator, revise it from the measured results,
 explore it in 3D, publish it, and remix it.
 
-Featured examples: a walking Muse robot, a mechanical butterfly, a miniature Ferris wheel and a pizza
-catapult, all built live by Muse from the same component library and assembly operations.
+Featured examples: a walking Muse robot, a mechanical butterfly, a miniature Ferris wheel, a pizza
+catapult and a sideways-scuttling crab (three failed tests, a Muse Wonder diagnosis, then 0.32 m at 4.7°
+tilt), all built live by Muse from the same component library and assembly operations.
 
 ## Quick start
 
