@@ -83,6 +83,8 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const colliderOwner = new Map<number, string>(); // collider handle -> instance id
   const failureReasons: string[] = []; const notes: string[] = [];
   const clearSet = new Set<string>(test.kind === 'motion' ? test.measure.clearancePairs.flat() : []);
+  // Two parts joined by a bearing touch each other at that bearing by construction; that is not a clearance violation.
+  const joined = new Set<string>(assembly.joints.map((j) => [j.a.instanceId, j.b.instanceId].sort().join('|')));
   const noGround = new Set<string>(test.kind === 'motion' ? test.measure.noGroundContact : []);
 
   for (const g of rgroups) {
@@ -143,6 +145,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     else if (j.type === 'prismatic') data = RAPIER.JointData.prismatic({ x: a1[0], y: a1[1], z: a1[2] }, { x: a2[0], y: a2[1], z: a2[2] }, { x: axisL1[0], y: axisL1[1], z: axisL1[2] });
     else { data = RAPIER.JointData.spring(j.spring?.restLength_m ?? len(sub(wa, wb)), j.spring?.stiffness ?? 200, j.spring?.damping ?? 0.5, { x: a1[0], y: a1[1], z: a1[2] }, { x: a2[0], y: a2[1], z: a2[2] }); }
     const raw = world.createImpulseJoint(data, b1, b2, true);
+    raw.setContactsEnabled(false); // the two parts share a bearing: their hub and boss may overlap, they must not collide
     const restAngle = 0; // joint coordinates are measured from the assembled rest pose
     const restOffset = sub(t2.position, t1.position);
     if (j.limits && j.type !== 'spring') (raw as RAPIER.RevoluteImpulseJoint).setLimits(j.limits[0], j.limits[1]);
@@ -222,7 +225,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (isG) { const other = h1 === groundCol.handle ? i2 : i1; if (other && noGround.has(other) && !groundHit) groundHit = other;
         if (test.kind === 'grip' && other === test.payload && t >= test.supportUntil_s && !payloadGrounded) payloadGrounded = true; // a payload that lands on the floor was not held
         if (test.kind === 'launch' && other === test.projectile && released && !landing) { const p = projRb!.translation(); landing = [p.x, p.y, p.z]; } }
-      else if (i1 && i2 && !clearanceHit && test.kind === 'motion') { for (const [a, b] of test.measure.clearancePairs) if ((a === i1 && b === i2) || (a === i2 && b === i1)) clearanceHit = `${i1} touched ${i2}`; }
+      else if (i1 && i2 && !clearanceHit && test.kind === 'motion' && !joined.has([i1, i2].sort().join('|'))) { for (const [a, b] of test.measure.clearancePairs) if ((a === i1 && b === i2) || (a === i2 && b === i1)) clearanceHit = `${i1} touched ${i2}`; }
     });
     if (support && test.kind === 'grip' && t >= test.supportUntil_s) { world.removeCollider(support, false); support = null; }
     if (baseRb) { const T = rootT(baseRb); const tilt = tiltDeg(T.rotation); maxTilt = Math.max(maxTilt, tilt); minHeight = Math.min(minHeight, T.position[1]); if (!fell && !instById.get(baseId!)!.anchored && (tilt > 60 || T.position[1] < start.position[1] * 0.45)) { fell = true; fellAt = +t.toFixed(2); } }
