@@ -129,6 +129,7 @@ export type DanceController = z.infer<typeof DanceController>;
 export const Assembly = z.object({
   family: z.string(),                 // e.g. "legged_walker"
   familyParams: z.record(z.number()), // parametric family values for display/remix
+  familyConfig: z.record(z.unknown()).default({}), // full family input (part ids + params) so a version can be rebuilt/remixed
   parts: z.array(PartDefinition),
   instances: z.array(Instance),
   joints: z.array(Joint),
