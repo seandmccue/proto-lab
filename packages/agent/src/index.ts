@@ -1,5 +1,5 @@
 import type { Assembly, Decision, Spec, TestResult, ToolLogEntry, VersionRecord } from '@protolab/schema';
-import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
+import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
 import { runPlanner } from './planner.ts';
@@ -147,7 +147,21 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     const driver = specialistRoundsLeft > 0 && specialist ? specialist.model : model;
     setActive(driver.model);
     const testsBefore = rt.tests.length;
-    const res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto' });
+    let res;
+    try {
+      res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto' });
+    } catch (e) {
+      // The specialist being unavailable (overloaded / 5xx / timeout) must not sink the build: hand back to the
+      // primary Muse model and say so. Any other error, or a primary-model outage, is reported verbatim.
+      if (specialistRoundsLeft > 0 && specialist && driver === specialist.model && e instanceof TransientModelError) {
+        specialistRoundsLeft = 0;
+        const reason = /503|overloaded/i.test(e.message) ? 'is overloaded right now (HTTP 503)' : 'did not respond';
+        emit({ type: 'handoff', from: specialist.model.model, to: model.model, message: `${prettyModelName(specialist.model.model)} ${reason}; ${prettyModelName(model.model)} continues the engineering.` });
+        messages.push({ role: 'user', content: `[${prettyModelName(specialist.model.model)} was unavailable: ${e.message.slice(0, 200)}] ${prettyModelName(model.model)} continues as the inventor: diagnose the last failed test yourself, change one thing (drive, geometry, or servo class), and run_test.` });
+        continue;
+      }
+      throw e;
+    }
     const content = res.content && res.content.trim() ? res.content : res.toolCalls.length ? null : '(no output)';
     messages.push(res.toolCalls.length ? { role: 'assistant', content, tool_calls: res.toolCalls } : { role: 'assistant', content: content ?? '(no output)' });
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 300)}` });
