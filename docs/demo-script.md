@@ -23,6 +23,8 @@ The 3D shots replay saved simulator traces in the application. The opening shows
 
 For a short demonstration of passive motion, open the self-leveling tray and scrub to the cradle’s steepest angle. The cradle reached 31.0° while the tray stayed within 3.14° of level. Locking only the inner pivot in a separate simulation raised peak tray tilt to 29.84°. The two-axis comparison shows Spark’s first tray reaching 144.22° and Wonder’s centered tray staying within 1.31°, with both powered sweeps still meeting the target.
 
+The mechanical lotus shows one actuator opening six passive petals. The first test barely moved. In the final revision, Muse refitted all six connecting rods and measured at least 70.1 mm of vertical travel per tip. The difference between the most and least displaced tips stayed within 0.02 mm at any instant in the test. Scrub the replay to watch the opening change from about 269 mm to 171 mm.
+
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
@@ -32,6 +34,7 @@ For a short demonstration of passive motion, open the self-leveling tray and scr
 - Drawing remix comparison · `/i/inv_76b7fae5bdf941c9?replay=1&compare=1`
 - Orrery comparison · `/i/inv_adc081059ea44ab9?replay=1&compare=1`
 - Two-axis gimbal repair · `/i/inv_d3f76fcc393b49d6?replay=1&compare=1`
+- Mechanical lotus · `/i/inv_ba7b3c7716564397?replay=1&compare=1`
 - Self-leveling tray · `/i/inv_f72fb06c611342eb?replay=1`
 - Gravity Clock · `/i/inv_a1f1665e649b41c2`
 - Cargo Crane · `/i/inv_0868f2ea889f4bcc`
