@@ -42,6 +42,7 @@ body {
   top: 0;
   z-index: 20;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: .5rem;
@@ -147,7 +148,7 @@ body {
   .lab-input button { padding-inline: .65rem; }
 }
 @media (max-width: 390px) {
-  .site-header { padding-inline: .65rem; gap: .3rem; flex-wrap: wrap; }
+  .site-header { padding-inline: .65rem; gap: .3rem; }
   .site-attribution { max-width: 10rem; font-size: .64rem; }
   .site-attribution svg { width: .68rem; height: .68rem; }
   .site-nav { flex-basis: 100%; }
