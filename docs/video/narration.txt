@@ -1,0 +1,11 @@
+01|Generative AI makes images and video.
+02|Until now, it has lived on screens.
+03|Introducing ProtoLab. Generative AI for physical, real-world products.
+04|Powered by Meta Muse Spark and Muse Wonder. Spark designs. Wonder fixes what fails.
+05|Step one. Describe it. One sentence is the whole brief.
+06|Step two. Muse picks real parts from a component library, and designs the parts that are missing.
+07|Step three. It assembles the prototype, part by part, at real connectors.
+08|Step four. A physics simulator measures it. When it fails, Muse reads the numbers and revises.
+09|Step five. Until it passes. Every claim is a measured test you can replay.
+10|Step six. 3D print the parts. Coming soon.
+11|Think SolidWorks, powered by AI. Anyone can build physical products. ProtoLab.
