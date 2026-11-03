@@ -52,6 +52,48 @@ test('drive discs, clevises, and bell cranks expose usable pivots in both catalo
   assert.ok(drivePoint.every((coordinate, axis) => Math.abs(coordinate - linkPoint[axis]) < 1e-9));
 });
 
+test('eccentric cam has a colliding dwell core and a raised contact lobe on the drive plane', () => {
+  for (const [id, lift] of [['eccentric-cam-48', 0.013], ['eccentric-cam-74', 0.019]] as const) {
+    const part = getPart(id)!;
+    const [core, lobe] = part.geometry;
+    for (const piece of [core, lobe]) {
+      assert.ok(piece.collide);
+      assert.equal(piece.shape.kind, 'cylinder');
+      assert.equal(piece.shape.axis, 'z');
+      assert.equal(piece.shape.height, part.params.thickness);
+    }
+    assert.ok(core.shape.kind === 'cylinder' && lobe.shape.kind === 'cylinder');
+    assert.deepEqual(core.offset.position, [0, 0, 0]);
+    assert.ok(Math.abs(lobe.offset.position[0] + lobe.shape.radius - core.shape.radius - lift) < 1e-9);
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'drive')?.axis, [0, 0, -1]);
+    assert.equal(part.connectors.find((connector) => connector.id === 'shaft')?.kind, 'fixed');
+  }
+  assert.throws(() => generatePart('eccentric_cam', { eccentricity: 0.004 }), ParamError, 'a hidden lobe cannot lift');
+  assert.throws(() => generatePart('eccentric_cam', { eccentricity: 0.075 }), ParamError, 'a detached lobe cannot turn with the core');
+});
+
+test('follower mounts upright in either matching guide with only the shoe making contact', () => {
+  for (const [followerId, guideId] of [['cam-follower-65', 'follower-guide-6'], ['cam-follower-98', 'follower-guide-9']]) {
+    const follower = getPart(followerId)!;
+    const guide = getPart(guideId)!;
+    const [shoe, stem] = follower.geometry;
+    assert.ok(shoe.collide && !stem.collide);
+    assert.ok(guide.geometry.every((piece) => !piece.collide));
+    const bushing = guide.geometry.find((piece) => piece.shape.kind === 'revolve')?.shape;
+    assert.ok(bushing?.kind === 'revolve');
+    assert.ok(Math.min(...bushing.profile.map(([radius]) => radius)) > Math.SQRT1_2 * follower.params.stemSize, 'bore clears the stem corners');
+    const { assembly } = applyOps(emptyAssembly(), [
+      { op: 'place', id: 'guide', part: guideId, position: [0, 0.16, 0], anchored: true },
+      { op: 'mount', id: 'follower', part: followerId, onto: 'guide', connector: 'guide', via: 'slide', joint: 'prismatic', spin_deg: 0, offset_m: 0 },
+    ], getPart);
+    const mounted = assembly.instances[1].transform;
+    const mount = follower.connectors.find((connector) => connector.id === 'mount')!;
+    assert.deepEqual(assembly.joints[0].axis, [0, 1, 0]);
+    assert.ok(mounted.position[1] < 0.16, 'shoe starts below the guide');
+    assert.ok(transformPoint(mounted, mount.position)[1] > 0.16, 'payload remains above the guide');
+  }
+});
+
 test('pillow blocks and adjustable linkage plates mount shafts and selectable passive pivots', () => {
   const { assembly } = applyOps(emptyAssembly(), [
     { op: 'place', id: 'frame', part: 'plate-120x80', position: [0, 0.02, 0], anchored: true },

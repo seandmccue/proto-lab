@@ -203,6 +203,100 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
       });
     },
   },
+  eccentric_cam: {
+    kind: 'eccentric_cam', name: 'Eccentric contact cam', category: 'cranks',
+    description: 'A colliding eccentric lobe lifts a separate flat-foot follower without a joint between the two. Axis Z, lobe toward +X; use "shaft" for a fixed axle connection or "drive" for a revolute drive.',
+    params: {
+      coreRadius: { min: 0.012, max: 0.09, default: 0.037, unit: 'm', description: 'Concentric dwell radius' },
+      lobeRadius: { min: 0.006, max: 0.07, default: 0.025, unit: 'm', description: 'Radius of the raised lobe' },
+      eccentricity: { min: 0.004, max: 0.075, default: 0.031, unit: 'm', description: 'Offset of the lobe centre from the shaft' },
+      thickness: { min: 0.003, max: 0.03, default: 0.014, unit: 'm', description: 'Thickness along Z' },
+    },
+    generate: (p, id) => {
+      const { coreRadius, lobeRadius, eccentricity, thickness } = p;
+      const lift = eccentricity + lobeRadius - coreRadius;
+      if (lift <= 0 || lobeRadius - eccentricity >= coreRadius || eccentricity >= coreRadius + lobeRadius) {
+        throw new ParamError('Cam lobe must overlap the core and protrude on one side while leaving a dwell region.');
+      }
+      const geometry = [
+        piece({ kind: 'cylinder', radius: coreRadius, height: thickness, axis: 'z' }, [0, 0, 0], '#586c84'),
+        piece({ kind: 'cylinder', radius: lobeRadius, height: thickness, axis: 'z' }, [eccentricity, 0, 0], COLORS.orange),
+      ];
+      return finish({
+        id, kind: 'eccentric_cam', name: `Eccentric contact cam Ø${mm(coreRadius * 2)} mm`, category: 'cranks',
+        description: `Lifts a passive follower by up to ${mm(lift)} mm from the core dwell radius through direct contact. Rotate about Z to set the phase.`,
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [coreRadius * 2 + lift, 2 * Math.max(coreRadius, lobeRadius), thickness],
+        connectors: [
+          fx('shaft', [0, 0, -thickness / 2], [0, 0, -1], 'fixed', 'rear coaxial axle mount'),
+          fx('drive', [0, 0, -thickness / 2], [0, 0, -1], 'revolute', 'rear driven pivot'),
+          fx('shaft_front', [0, 0, thickness / 2], [0, 0, 1], 'fixed', 'front coaxial axle mount'),
+        ],
+        cost_usd: 3,
+      });
+    },
+  },
+  cam_follower: {
+    kind: 'cam_follower', name: 'Flat-foot cam follower', category: 'sliders',
+    description: 'A flat contact shoe centered at the origin with a stem along +Y. Mount "slide" onto a fixed follower guide with a passive prismatic joint; attach a payload to "mount". Gravity or a return spring keeps the shoe against the cam.',
+    params: {
+      shoeLength: { min: 0.026, max: 0.18, default: 0.098, unit: 'm', description: 'Shoe length along X' },
+      shoeWidth: { min: 0.008, max: 0.045, default: 0.019, unit: 'm', description: 'Shoe width along Z' },
+      shoeThickness: { min: 0.003, max: 0.02, default: 0.01, unit: 'm', description: 'Shoe thickness along Y' },
+      stemSize: { min: 0.004, max: 0.02, default: 0.009, unit: 'm', description: 'Width of the square stem' },
+      stemLength: { min: 0.025, max: 0.15, default: 0.057, unit: 'm', description: 'Stem length above the shoe, along Y' },
+    },
+    generate: (p, id) => {
+      const { shoeLength, shoeWidth, shoeThickness, stemSize, stemLength } = p;
+      if (stemSize > shoeWidth) throw new ParamError('Follower stem must fit on the shoe.');
+      const stemCenter = (shoeThickness + stemLength) / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [shoeLength, shoeThickness, shoeWidth] }, [0, 0, 0], '#344661'),
+        piece({ kind: 'box', size: [stemSize, stemLength, stemSize] }, [0, stemCenter, 0], '#586c84', 'structure', undefined, { collide: false }),
+      ];
+      return finish({
+        id, kind: 'cam_follower', name: `Flat-foot cam follower ${mm(shoeLength)} mm`, category: 'sliders',
+        description: 'The lower shoe makes cam contact while the prismatic joint guides the stem. A flag, plunger, or other payload mounts at the top.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [shoeLength, shoeThickness + stemLength, shoeWidth],
+        connectors: [
+          fx('slide', [0, stemCenter, 0], [0, -1, 0], 'prismatic', 'mates with follower_guide.guide'),
+          fx('mount', [0, shoeThickness / 2 + stemLength, 0], [0, 1, 0], 'fixed', 'payload mount at the stem tip'),
+        ],
+        cost_usd: 2,
+      });
+    },
+  },
+  follower_guide: {
+    kind: 'follower_guide', name: 'Cam follower guide', category: 'sliders',
+    description: 'Fixed offset bracket with a hollow vertical bushing. Connect "guide" to a cam follower’s "slide" with a prismatic joint to constrain motion along local Y.',
+    params: {
+      stemSize: { min: 0.004, max: 0.02, default: 0.009, unit: 'm', description: 'Matching square follower stem width' },
+      reach: { min: 0.025, max: 0.12, default: 0.063, unit: 'm', description: 'Distance from support mount to slide axis along X' },
+    },
+    generate: (p, id) => {
+      const sleeveInner = Math.SQRT1_2 * p.stemSize + 0.0004;
+      const sleeveOuter = sleeveInner + 0.002;
+      const sleeveHeight = 0.014;
+      // The prismatic joint represents the sliding bearing. Its housing must not snag the stem.
+      const geometry = [
+        piece({ kind: 'box', size: [p.reach + 0.001, 0.009, 0.011] }, [-(p.reach - 0.001) / 2, 0.004, -0.017], '#586c84', 'structure', undefined, { collide: false }),
+        piece({ kind: 'box', size: [0.013, 0.009, 0.014] }, [0, 0.004, -sleeveInner - 0.006], '#586c84', 'structure', undefined, { collide: false }),
+        piece({ kind: 'revolve', profile: profiles.rim(sleeveOuter, sleeveInner, sleeveHeight), axis: 'y', segments: 24 }, [0, 0.004, 0], '#899ab0', 'structure', undefined, { collide: false }),
+      ];
+      return finish({
+        id, kind: 'follower_guide', name: `Cam follower guide ${mm(p.stemSize)} mm`, category: 'sliders',
+        description: 'A fixed bracket for a passive cam follower. The hollow bushing shows the path enforced by the prismatic joint.',
+        params: p, geometry, material: 'aluminium', mass_kg: vol(geometry) * DENSITY.aluminium,
+        dimensions_m: [p.reach + Math.max(0.0065, sleeveOuter), sleeveHeight, Math.max(0.0225, sleeveInner + 0.013) + sleeveOuter],
+        connectors: [
+          fx('mount', [-p.reach, 0.004, -0.017], [-1, 0, 0]),
+          fx('guide', [0, 0, 0], [0, 1, 0], 'prismatic', 'vertical slide axis; attach the follower here'),
+        ],
+        cost_usd: 3,
+      });
+    },
+  },
   clevis: {
     kind: 'clevis', name: 'Forked clevis', category: 'joints',
     description: 'Forked bracket with a fixed bottom "mount" and a revolute crosswise "pin" along Z, for a rod or linkage.',

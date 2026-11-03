@@ -109,6 +109,35 @@ test('define_test rejects a walk tilt limit tighter than the measured recipes', 
   assert.ok(!ok.error, ok.error);
 });
 
+test('a recorded cam test keeps its follower timing targets across revisions', async () => {
+  const rt = new ToolRuntime(baseSpec('Two-follower camshaft'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  const built = await rt.call('assemble', {
+    rationale: 'One motor turns two opposite cams under passive guided followers',
+    ops: [
+      { op: 'place', id: 'motor', part: 'gearmotor-37', position: [0, 0.085, -0.057], rotation_deg: [0, -90, 0], anchored: true },
+      { op: 'mount', id: 'cam_a', part: 'eccentric-cam-74', onto: 'motor', connector: 'shaft', via: 'drive', joint: 'revolute', motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+      { op: 'mount', id: 'cam_b', part: 'eccentric-cam-74', onto: 'cam_a', connector: 'shaft_front', via: 'shaft', joint: 'fixed', spin_deg: 180, offset_m: 0.03 },
+      ...([['a', 0], ['b', 0.044]] as const).flatMap(([side, z]) => [
+        { op: 'place', id: `guide_${side}`, part: 'follower-guide-9', position: [0, 0.1605, z], anchored: true },
+        { op: 'place', id: `follower_${side}`, part: 'cam-follower-98', position: [0, 0.127, z], free: true },
+        { op: 'connect', a: `guide_${side}`, a_connector: 'guide', b: `follower_${side}`, b_connector: 'slide', joint: 'prismatic' },
+      ]),
+    ],
+  }) as { error?: string };
+  assert.ok(!built.error, built.error);
+  const driven = await rt.call('set_drives', { drives: [{ controlId: 'spin', mode: 'velocity', rampIn_s: 0.5, profile: { kind: 'constant', value: 3 } }] }) as { error?: string };
+  assert.ok(!driven.error, driven.error);
+
+  const followerTiming = { shaft: 'spin', followers: ['follower_a', 'follower_b'], axis: 'y', minCycles: 3, minStroke_m: 0.014, minLowDwell_s: 0.2, minPhaseGap_deg: 140 };
+  const test = { kind: 'motion', id: 'cam_timing', duration_s: 10, measure: { joints: ['spin'], followerTiming }, criteria: { torqueWithinRating: true } };
+  const defined = await rt.call('define_test', { test }) as { error?: string };
+  assert.ok(!defined.error, defined.error);
+  const result = await rt.call('run_test', { test_id: test.id }) as { passed: boolean; failureReasons: string[] };
+  assert.equal(result.passed, true, result.failureReasons?.join('; '));
+  const redefined = await rt.call('define_test', { test: { ...test, measure: { ...test.measure, followerTiming: { ...followerTiming, minPhaseGap_deg: 100 } } } }) as { error?: string };
+  assert.match(redefined.error ?? '', /Keep the measured criteria for "cam_timing" fixed/);
+});
+
 test('define_test rejects dance criteria tighter than a legged machine measures', async () => {
   const rt = new ToolRuntime(baseSpec('Pet robot'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
   await rt.call('assemble', { rationale: 'body + one leg', ops: [

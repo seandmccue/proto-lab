@@ -1,4 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
+import { measureFollowerTiming } from './follower-timing.ts';
 import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
 
@@ -186,6 +187,14 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
     for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
     for (const { instance } of linearTravel) if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
+    if (measure.followerTiming) {
+      const { shaft, followers } = measure.followerTiming;
+      if (!sims.some(({ joint }) => joint.type === 'revolute' && joint.motor?.controlId === shaft)) {
+        failureReasons.push(`Follower timing shaft "${shaft}" must be a motorized revolute joint`);
+      }
+      if (followers[0] === followers[1]) failureReasons.push('Follower timing needs two different instances');
+      for (const id of followers) if (!instById.has(id)) failureReasons.push(`Follower timing instance "${id}" not found`);
+    }
     if (liftThreshold && !liftPayload) failureReasons.push('A payload height threshold needs a payload instance');
     if (retentionThreshold && !liftPayload?.holder) failureReasons.push('A retention threshold needs a payload and holder instance');
     if (liftPayload) {
@@ -196,7 +205,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -333,6 +342,26 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
         const travel = max - min;
         metrics[`${instance}.travel_${axis}_m`] = +travel.toFixed(4);
         if (travel < minTravel_m) failureReasons.push(`${instance} travelled ${travel.toFixed(3)} m along ${axis}, target ${minTravel_m} m`);
+      }
+      const timing = test.measure.followerTiming;
+      if (timing) {
+        const cycles = measureFollowerTiming({ frames, dt: 1 / TRACE_HZ }, timing);
+        metrics.followerCycles = cycles.length;
+        if (cycles.length < timing.minCycles) failureReasons.push(`Follower timing recorded ${cycles.length} complete turns after startup, target ${timing.minCycles}`);
+        if (cycles.length) {
+          const gap = Math.min(...cycles.map(({ phaseGap_deg }) => phaseGap_deg));
+          metrics.followerPhaseGap_deg = +gap.toFixed(2);
+          if (gap < timing.minPhaseGap_deg) failureReasons.push(`Follower peaks were only ${gap.toFixed(1)}° apart, target ${timing.minPhaseGap_deg}°`);
+          for (const [index, id] of timing.followers.entries()) {
+            const readings = cycles.map(({ flags }) => flags[index]);
+            const stroke = Math.min(...readings.map(({ stroke_m }) => stroke_m));
+            const dwell = Math.min(...readings.map(({ lowDwell_s }) => lowDwell_s));
+            metrics[`${id}.cycleStroke_m`] = +stroke.toFixed(4);
+            metrics[`${id}.lowDwell_s`] = +dwell.toFixed(3);
+            if (stroke < timing.minStroke_m) failureReasons.push(`${id} travelled ${stroke.toFixed(3)} m in its shortest stroke, target ${timing.minStroke_m} m`);
+            if (dwell < timing.minLowDwell_s) failureReasons.push(`${id} stayed low ${dwell.toFixed(2)} s in its shortest dwell, target ${timing.minLowDwell_s} s`);
+          }
+        }
       }
       if (uprightTilt.size) {
         metrics.maxInstanceTilt_deg = +Math.max(...uprightTilt.values()).toFixed(2);
