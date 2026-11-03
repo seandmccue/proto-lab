@@ -52,7 +52,7 @@ opens the actual assembly and simulation trace.
   stage stepper (plan → parts → assemble → test → revise), the current step with a reasoning timer,
   and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly
   drops in one part at a time; after that a build strip, pass/fail toasts for each test and an
-  iteration ribbon (v1 ✗ 0.12 m → v2 ✓ 0.47 m) keep the 3–10 minute wait legible.
+  iteration ribbon (v1 ✗ 0.12 m → v2 ✓ 0.47 m) keep the one-to-three-minute wait legible.
 - **Not simulated:** aerodynamics, fluids, deformation, fatigue, manufacturability. A butterfly's
   wings flap with measured stroke and rate; nobody claims it flies.
 
