@@ -69,7 +69,7 @@ function normaliseOp(o: unknown): unknown {
 }
 /** For a missing required field, show which keys the model actually sent on that object so it can fix the name. */
 function describeReceived(args: unknown, path: (string | number)[]): string {
-  if (path.length < 2) return '';
+  if (path.length < 2) return args && typeof args === 'object' ? ` (received keys: ${Object.keys(args as object).join(', ') || 'none'})` : '';
   let o: unknown = args; for (const k of path.slice(0, -1)) { if (!o || typeof o !== 'object') return ''; o = (o as Record<string, unknown>)[k as string]; }
   if (!o || typeof o !== 'object') return '';
   return ` (received keys: ${Object.keys(o as object).join(', ')})`;
@@ -121,7 +121,9 @@ export class ToolRuntime {
     try {
       switch (name) {
         case 'write_plan': {
-          { const r = rawArgs as Record<string, unknown>; if (Array.isArray(r.purpose)) r.purpose = r.purpose.map(String).join(' '); for (const k of ['features', 'motions', 'successCriteria', 'unverified', 'assumptions']) if (typeof r[k] === 'string') r[k] = [r[k]]; }
+          { const r = rawArgs as Record<string, unknown>;
+            if (typeof r.purpose === 'string' && /^\s*\[/.test(r.purpose)) { try { const v = JSON.parse(r.purpose); if (Array.isArray(v)) r.purpose = v.map(String).join(' '); } catch { /* keep as text */ } }
+            if (Array.isArray(r.purpose)) r.purpose = r.purpose.map(String).join(' '); for (const k of ['features', 'motions', 'successCriteria', 'unverified', 'assumptions']) if (typeof r[k] === 'string') r[k] = [r[k]]; }
           const a = PlanArgs.parse(rawArgs);
           const plan = Plan.parse({ purpose: a.purpose, features: a.features, motions: a.motions, subassemblies: a.subassemblies, successCriteria: a.successCriteria, unverified: a.unverified });
           this.spec = { ...this.spec, plan, assumptions: a.assumptions ?? this.spec.assumptions, constraints: { ...this.spec.constraints, maxMass_kg: a.maxMass_kg ?? this.spec.constraints.maxMass_kg } };
@@ -168,6 +170,7 @@ export class ToolRuntime {
           return { part: this.summarisePart(p) };
         }
         case 'assemble': {
+          { const r = rawArgs as Record<string, unknown>; for (const k of ['operations', 'steps', 'assembly_ops', 'actions']) if (r.ops === undefined && Array.isArray(r[k])) { r.ops = r[k]; delete r[k]; } for (const k of ['reason', 'why', 'description', 'note']) if (r.rationale === undefined && typeof r[k] === 'string') { r.rationale = r[k]; delete r[k]; } if (r.rationale === undefined && Array.isArray(r.ops)) r.rationale = 'Assembly step'; }
           const raw = rawArgs as { ops?: unknown[] };
           if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
           const a = AssembleArgs.parse(rawArgs);
