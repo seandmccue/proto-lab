@@ -9,6 +9,7 @@ import ReplayComparison from '../components/ReplayComparison.tsx';
 import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx';
 import FollowerTimingEvidence from '../components/FollowerTimingEvidence.tsx';
 import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
+import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -254,13 +255,26 @@ export default function Workspace() {
     const before = ownBaseline ?? sourceVersion;
     const after = revisionResultId === undefined ? versions[versions.length - 1] : versions.find((v) => v.id === revisionResultId);
     const saved = replayStory(versions);
+    if (replayLink && detail?.invention.id === curatedOrreryId) {
+      const initial = versions.find((version) => version.id === 'ver_39ff127f0f23431a');
+      const revision = versions.at(-1);
+      if (initial && revision && initial.id !== revision.id) {
+        const result = [...revision.tests].reverse().find((test) => test.kind === 'motion' &&
+          initial.tests.some((baseline) => sameTestName(baseline, test)));
+        const baseline = result && initial.tests.find((test) => sameTestName(test, result));
+        if (baseline && result) return [
+          { version: initial, test: baseline, label: 'First assembly' },
+          { version: revision, test: result, label: 'Revised assembly' },
+        ];
+      }
+    }
     if (!ownBaselineId && replayLink && saved.length) return saved;
     if (before && after && before.id !== after.id && (!ownBaseline || before.iteration < after.iteration)) {
       const revision = revisionStory(before, after);
       if (revision.length) return revision;
     }
     return saved;
-  }, [detail?.versions, ownBaselineId, sourceVersion, replayLink, revisionResultId]);
+  }, [detail?.versions, detail?.invention.id, ownBaselineId, sourceVersion, replayLink, revisionResultId]);
 
   const refresh = useCallback(async () => {
     const d = await api.invention(id);
@@ -486,6 +500,7 @@ export default function Workspace() {
     : null;
   const showRevisionHighlights = !showLive && version?.id === versionId && test && storyStep === 1 &&
     prevVersion?.id === story[0]?.version.id && revisionHighlights.size > 0;
+  const preserveOrbitColors = inv?.id === curatedOrreryId && !comparing;
   const diagnosticHighlights = tiltHighlight?.highlights ?? (showRevisionHighlights ? revisionHighlights : undefined);
   const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
   const finalEvent = finalVersion && detail?.latestJob?.versionId === finalVersion.id
@@ -644,7 +659,7 @@ export default function Workspace() {
                 </div>
               </>
             ) : version ? (
-              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={diagnosticHighlights || (comparing && storyStep === 0) ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef}
+              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={diagnosticHighlights || preserveOrbitColors || (comparing && storyStep === 0) ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef}
                 strokeTargets={showStrokeGuides ? strokeTargets : undefined} pathInstanceId={showMotionPath ? penPath : undefined} />
             ) : running ? (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
@@ -686,6 +701,7 @@ export default function Workspace() {
           </div>
           {!showLive && test && <FollowerTimingEvidence time={time.t} test={test} definition={testDefinition} isSemaphore={version?.id === 'ver_cam_semaphore_1' && test.testId === 'cam_semaphore_stroke'} />}
           {!showLive && version && test && <TriplexTimingEvidence version={version} time={time.t} test={test} />}
+          {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
           {running && <SimulationStatus events={events} running replay={replayStatus} />}

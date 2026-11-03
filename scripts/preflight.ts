@@ -4,6 +4,7 @@
  */
 import type { TestResult, VersionRecord } from '@protolab/schema';
 import { measureFollowerTiming } from '@protolab/simulator/follower-timing';
+import { measurePlanarOrbit } from '@protolab/simulator/planar-orbit';
 
 const arg = (name: string, fallback: string) => {
   const index = process.argv.indexOf(name);
@@ -124,6 +125,29 @@ if (judge) checks.push(
       throw new Error('Expected the original phase miss and revised phase and stroke targets');
     }
     return 'three passive pistons measured across three full turns';
+  }],
+  ['Muse tabletop orrery', async () => {
+    const id = 'inv_adc081059ea44ab9';
+    const { invention, versions } = await publicBuild(id);
+    const first = versions.find(({ iteration }) => iteration === 1);
+    if (!first) throw new Error('Expected the original orrery assembly');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, invention.currentVersionId)]);
+    const orbits = (record: VersionRecord) => {
+      const test = record.tests.find(({ testId, passed }) => testId.startsWith('orrery_spin#') && passed);
+      if (!test || test.metrics.clearanceViolation !== 0) return null;
+      const earth = measurePlanarOrbit(test.trace, { body: 'earth', center: 'sun', plane: 'xz' });
+      const moon = measurePlanarOrbit(test.trace, { body: 'moon', center: 'earth', plane: 'xz', reference: { from: 'sun', to: 'earth' } });
+      return earth && moon ? { earth, moon } : null;
+    };
+    const initial = orbits(before);
+    const revised = orbits(after);
+    if (!initial || !revised || Math.abs(initial.moon.signedTurns) >= 3 || Math.abs(revised.earth.signedTurns) < 1
+      || Math.abs(revised.moon.signedTurns) < 3 || revised.earth.minRadius_m <= revised.moon.maxRadius_m
+      || revised.earth.maxRadius_m - revised.earth.minRadius_m >= 0.01
+      || revised.moon.maxRadius_m - revised.moon.minRadius_m >= 0.01) {
+      throw new Error('Expected the original nested orbit miss and the two verified revised paths');
+    }
+    return 'Earth and Moon paths measured separately';
   }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');

@@ -298,6 +298,46 @@
 .workbench-follower-plot polyline[data-line="1"] { stroke-dasharray: 5 3; }
 .workbench-follower-plot polyline[data-line="2"] { stroke-dasharray: 1 3; stroke-linecap: round; }
 .workbench-follower-cursor { stroke: var(--bench-violet); stroke-width: 1.5; }
+.workbench-orbit-evidence {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .65rem 1.15rem;
+  padding: .65rem .75rem;
+  border-top: 1px solid var(--bench-line);
+  background: #f7f4fc;
+}
+.workbench-orbit-evidence > div:first-child { flex: 1 1 15rem; }
+.workbench-orbit-evidence p, .workbench-orbit-plot figcaption span { color: var(--bench-muted); font-size: .75rem; }
+.workbench-orbit-plots {
+  flex: 2 1 20rem;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
+  gap: .45rem;
+}
+.workbench-orbit-plot {
+  --orbit-ink: #205c9b;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
+  gap: .2rem;
+  padding: .4rem .25rem;
+  border: 1px solid var(--bench-line);
+  border-radius: .6rem;
+  background: var(--bench-panel);
+  text-align: center;
+}
+.workbench-orbit-plot[data-orbit="moon"] { --orbit-ink: #694ba1; }
+.workbench-orbit-plot :is(figcaption, p) { display: grid; }
+.workbench-orbit-plot figcaption strong, .workbench-orbit-plot p strong { color: var(--bench-ink); font-size: .8rem; }
+.workbench-orbit-plot svg { display: block; width: min(6.5rem, 100%); }
+.workbench-orbit-crosshair { stroke: var(--bench-line); stroke-width: 1; }
+.workbench-orbit-plot polyline { fill: none; stroke: var(--orbit-ink); stroke-width: 1.6; stroke-linejoin: round; }
+.workbench-orbit-center { fill: #a46514; }
+.workbench-orbit-plot[data-orbit="moon"] .workbench-orbit-center { fill: #205c9b; }
+.workbench-orbit-cursor { fill: var(--orbit-ink); stroke: white; stroke-width: 1; }
+
 
 
 .workbench-control-group {
