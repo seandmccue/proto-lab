@@ -109,3 +109,42 @@ Giving the model simulator-measured application notes (which servo class carries
 the cadence/amplitude slip limits, the in-place dance pattern) cut the hero build from 5–10 minutes with
 frequent failures to about two minutes. These are measured data in the prompt, not a template: the model still
 chooses parts, assembles with the generic operations, defines the tests and revises from results.
+
+## Third pass (variance check, 2026-11-03 06:16 UTC)
+
+Same ten prompts, same engine as the clean pass plus the walker application notes (PR #24/#25).
+
+| Metric | Value |
+| --- | --- |
+| Success rate | 80 % (8/10) |
+| Errors (API/model) | 20 % (2/10, both `HTTP 503 service_overloaded` from muse-wonder-1.0) |
+| Median completion time | 457.5 s |
+| Mean iterations (versions) | 2.3 |
+| Runs creating a custom part | 70 % |
+| Runs escalated to the specialist | 30 % |
+
+| Prompt | Result | Time | Versions | Custom parts | Handoffs | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferris | passed | 113 s | 1 | 0 | 0 | 8-spoke Ø400 wheel front-offset on a 500 mm tower |
+| muse | passed | 185 s | 5 | 0 | 2 | Quadruped with eye dome and shell; walk 0.44 m after a Wonder consult |
+| butterfly | passed | 621 s | 1 | 6 | 0 | Rejected the catalog wings ("hinge parallel to span") and designed flat box wings |
+| crab | error | 458 s | 3 | 3 | 1 | Wonder overloaded (503) mid-consult; build aborted |
+| catapult | error | 604 s | 3 | 2 | 1 | Wonder overloaded (503) mid-consult; build aborted |
+| windmill | passed | 79 s | 2 | 1 | 0 | Custom 4-sail rotor on an A-frame tower |
+| claw | passed | 500 s | 4 | 2 | 0 | Mirrored fingers under a palm bracket, holds the block |
+| crane | passed | 422 s | 1 | 5 | 0 | Luffing jib on a pedestal, lifts the load |
+| novel | passed | 131 s | 2 | 0 | 0 | Pinwheel on a pole with a pendulum below |
+| drawbridge | passed | 1013 s | 1 | 6 | 0 | Hinged deck leaf with a synchronised linear actuator |
+
+Two findings, both fixed before the next pass:
+
+1. **Muse Wonder availability.** Both errors were the specialist returning `503 service_overloaded` after the
+   client's four short retries. The client now retries transient failures six times with backoff up to 30 s,
+   and if the specialist is still unavailable mid-consult the loop hands back to Muse Spark with a visible
+   handoff event ("Muse Wonder is overloaded right now (HTTP 503); Muse Spark continues the engineering")
+   instead of failing the build (PR #27). Nothing is substituted silently: the event is in the activity log.
+2. **The butterfly wings were wrong in the library, not in the model.** Muse was right that the catalog
+   wing's only hinge ran along its span (a twist, not a flap). Wings now carry a real flap hinge, a left/right
+   mirrored outline, and a winged-body part with built-in flap servos; the recipe quotes simulator-measured
+   gains (PR #28). A rebuild of the featured butterfly on the fixed library passed its flap test on the first
+   attempt in 4 minutes and finally looks like a butterfly.
