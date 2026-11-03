@@ -6,8 +6,8 @@ import { piecesBoundingRadius, piecesVerticalExtent } from './geometry.ts';
 /**
  * Generic assembly-operations engine. A model (or a builder) emits structured operations; this
  * module validates and executes them against an assembly: place parts, mount parts onto connectors
- * (which computes the child's pose so the connectors coincide), create joints, mirror/polar patterns,
- * drives. No template knows what a "walker" or a "butterfly" is.
+ * (which computes the child's pose so the connectors coincide), fit rigid bridges between pivots,
+ * create joints, and mirror or repeat parts. No template knows what a "walker" or a "butterfly" is.
  */
 
 export const Euler = z.tuple([z.number(), z.number(), z.number()]); // degrees, XYZ order
@@ -32,6 +32,11 @@ export const ConnectOp = z.object({
   motor: z.object({ controlId: z.string(), stiffness: z.number().positive().default(5), damping: z.number().nonnegative().default(0.2) }).optional(),
   spring: z.object({ stiffness: z.number().positive(), damping: z.number().nonnegative().default(0.5), restLength_m: z.number().nonnegative().default(0) }).optional(),
 });
+export const BridgeOp = z.object({
+  op: z.literal('bridge'), id: z.string(), part: z.string(), label: z.string().optional(), group: z.string().optional(),
+  a: z.string(), a_connector: z.string(), via_a: z.string(),
+  b: z.string(), b_connector: z.string(), via_b: z.string(),
+});
 export const PatternOp = z.object({
   op: z.literal('pattern'), instances: z.array(z.string()).min(1).max(40), kind: z.enum(['mirror', 'polar', 'linear']),
   plane: z.enum(['xy', 'yz', 'xz']).optional(),          // mirror
@@ -43,7 +48,7 @@ export const PatternOp = z.object({
 export const RemoveOp = z.object({ op: z.literal('remove'), id: z.string() });
 export const MoveOp = z.object({ op: z.literal('move'), id: z.string(), position: z.tuple([z.number(), z.number(), z.number()]).optional(), rotation_deg: Euler.optional(), translate: z.tuple([z.number(), z.number(), z.number()]).optional(),
   withAttached: z.boolean().optional() });   // default true: translation also carries everything mounted on this instance (its joint descendants)
-export const AssemblyOp = z.discriminatedUnion('op', [PlaceOp, MountOp, ConnectOp, PatternOp, RemoveOp, MoveOp]);
+export const AssemblyOp = z.discriminatedUnion('op', [PlaceOp, MountOp, ConnectOp, BridgeOp, PatternOp, RemoveOp, MoveOp]);
 export type AssemblyOp = z.infer<typeof AssemblyOp>;
 
 export type PartResolver = (id: string) => PartDefinition | undefined;
@@ -87,6 +92,44 @@ export function mateTransform(parentT: Transform, parentConn: { position: Vec3; 
   return { position: pos, rotation: q };
 }
 
+type Pivot = Pick<PartDefinition['connectors'][number], 'position' | 'axis'>;
+
+function fitBridge(local: [Pivot, Pivot], world: [Pivot, Pivot], i: number): Transform {
+  const localSpan = sub(local[1].position, local[0].position);
+  const worldSpan = sub(world[1].position, world[0].position);
+  const localLength = len(localSpan), worldLength = len(worldSpan);
+  if (localLength < 1e-6 || worldLength < 1e-6) throw new AssemblyError('Bridge needs two distinct pivot centers at both ends', i);
+  if (Math.abs(localLength - worldLength) > 0.0005) {
+    throw new AssemblyError(`Bridge pivot spacing is ${(localLength * 1000).toFixed(2)} mm but the endpoints are ${(worldLength * 1000).toFixed(2)} mm apart. Choose or design a link with the measured endpoint spacing.`, i);
+  }
+
+  const direction = norm(worldSpan);
+  const base = quatFromTo(norm(localSpan), direction);
+  const localAxes = local.map((pivot) => rotate(base, norm(pivot.axis)));
+  const worldAxes = world.map((pivot) => norm(pivot.axis));
+  const project = (axis: Vec3) => sub(axis, scale(direction, dot(axis, direction)));
+  const transverse = localAxes.map(project);
+  const best = len(transverse[1]) > len(transverse[0]) ? 1 : 0;
+  const from = transverse[best], to = project(worldAxes[best]);
+  // Revolute axes are lines. Try facing the target connector first, then the other
+  // direction if the second pivot requires it.
+  let angles = [0];
+  if (len(from) > 1e-6 && len(to) > 1e-6) {
+    const facing = scale(to, -1);
+    const angle = Math.atan2(dot(direction, cross(from, facing)), dot(from, facing));
+    angles = [angle, angle + Math.PI];
+  }
+  for (const angle of angles) {
+    const roll = quatFromAxisAngle(direction, angle);
+    if (localAxes.every((axis, index) => Math.abs(dot(rotate(roll, axis), worldAxes[index])) >= Math.cos(Math.PI / 180))) {
+      const rotation = quatMul(roll, base);
+      const center = (pivots: [Pivot, Pivot]) => scale(add(pivots[0].position, pivots[1].position), 0.5);
+      return { position: sub(center(world), rotate(rotation, center(local))), rotation };
+    }
+  }
+  throw new AssemblyError('Bridge pivot axes cannot both align within 1°. Check the world axes at both endpoints and the link connector axes.', i);
+}
+
 export interface ApplyResult { assembly: Assembly; summary: string[] }
 
 /** Apply a batch of ops. Fails atomically: on error the input assembly is unchanged and the failing op index is reported. */
@@ -103,7 +146,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
     const existing = new Set(a.instances.map((x) => x.id));
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
-      if (op.op !== 'mount' || existing.has(op.onto) || ops.slice(0, i).some((o) => (o.op === 'place' || o.op === 'mount') && o.id === op.onto)) continue;
+      if (op.op !== 'mount' || existing.has(op.onto) || ops.slice(0, i).some((o) => (o.op === 'place' || o.op === 'mount' || o.op === 'bridge') && o.id === op.onto)) continue;
       const j = ops.findIndex((o, k) => k > i && o.op === 'place' && o.id === op.onto);
       if (j < 0) continue;
       const [late] = ops.splice(j, 1); ops.splice(i, 0, late);
@@ -114,7 +157,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
     const placed = new Set(a.instances.map((x) => x.id));
     const refs = new Map<string, Set<string>>();
     for (const op of ops) {
-      if (op.op === 'place' || op.op === 'mount') placed.add(op.id);
+      if (op.op === 'place' || op.op === 'mount' || op.op === 'bridge') placed.add(op.id);
       if (op.op === 'mount' && !placed.has(op.onto)) { if (!refs.has(op.onto)) refs.set(op.onto, new Set()); refs.get(op.onto)!.add(op.connector); }
     }
     let insertAt = 0;
@@ -152,6 +195,18 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
   // Re-using an existing id replaces that instance (and its joints): the model nearly always means "put this there instead".
   const unique = (id: string, i: number) => { if (!/^[a-zA-Z][\w-]{0,40}$/.test(id)) throw new AssemblyError(`Instance id "${id}" must be alphanumeric/underscore, ≤ 40 chars`, i); if (a.instances.some((x) => x.id === id)) { a.instances = a.instances.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.a.instanceId !== id && j.b.instanceId !== id); summary.push(`replaced ${id}`); } };
 
+  const connect = (op: z.infer<typeof ConnectOp>, i: number) => {
+    const ia = inst(op.a, i), ib = inst(op.b, i); const pa = partById.get(ia.partId)!, pb = partById.get(ib.partId)!;
+    const ca = connectorOf(pa, op.a_connector), cb = connectorOf(pb, op.b_connector);
+    const wa = transformPoint(ia.transform, ca.position), wb = transformPoint(ib.transform, cb.position);
+    const gap = len(sub(wa, wb));
+    if (op.joint !== 'spring' && gap > 0.02) throw new AssemblyError(`Connectors ${op.a}.${ca.id} and ${op.b}.${cb.id} are ${(gap * 1000).toFixed(0)} mm apart; move a part so they touch (≤ 20 mm) or use "mount"`, i);
+    const axis = norm(transformDir(ia.transform, ca.axis));
+    const motor: Motor | undefined = op.motor ? { controlId: op.motor.controlId, stiffness: op.motor.stiffness, damping: op.motor.damping, maxTorque_Nm: pa.limits.maxTorque_Nm ?? pb.limits.maxTorque_Nm, maxForce_N: pa.limits.maxForce_N ?? pb.limits.maxForce_N } : undefined;
+    a.joints.push(Joint.parse({ id: `j_${op.a}_${op.b}_${a.joints.length}`, type: op.joint, a: { instanceId: ia.id, connectorId: ca.id }, b: { instanceId: ib.id, connectorId: cb.id }, axis, anchor: wa, limits: op.limits, motor, spring: op.joint === 'spring' ? { stiffness: op.spring?.stiffness ?? 200, damping: op.spring?.damping ?? 0.5, restLength_m: op.spring?.restLength_m ?? gap } : undefined }));
+    summary.push(`connected ${op.a}.${ca.id} ↔ ${op.b}.${cb.id} [${op.joint}]`);
+  };
+
   ops.forEach((op, i) => {
     switch (op.op) {
       case 'place': {
@@ -182,16 +237,29 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
         summary.push(`mounted ${op.id} (${p.name}) on ${op.onto}.${pc.id} [${op.joint}${op.motor ? ` motor ${op.motor.controlId} k${op.motor.stiffness}/d${op.motor.damping}` : ''}]`);
         break;
       }
-      case 'connect': {
-        const ia = inst(op.a, i), ib = inst(op.b, i); const pa = partById.get(ia.partId)!, pb = partById.get(ib.partId)!;
-        const ca = connectorOf(pa, op.a_connector), cb = connectorOf(pb, op.b_connector);
-        const wa = transformPoint(ia.transform, ca.position), wb = transformPoint(ib.transform, cb.position);
-        const gap = len(sub(wa, wb));
-        if (op.joint !== 'spring' && gap > 0.02) throw new AssemblyError(`Connectors ${op.a}.${ca.id} and ${op.b}.${cb.id} are ${(gap * 1000).toFixed(0)} mm apart; move a part so they touch (≤ 20 mm) or use "mount"`, i);
-        const axis = norm(transformDir(ia.transform, ca.axis));
-        const motor: Motor | undefined = op.motor ? { controlId: op.motor.controlId, stiffness: op.motor.stiffness, damping: op.motor.damping, maxTorque_Nm: pa.limits.maxTorque_Nm ?? pb.limits.maxTorque_Nm, maxForce_N: pa.limits.maxForce_N ?? pb.limits.maxForce_N } : undefined;
-        a.joints.push(Joint.parse({ id: `j_${op.a}_${op.b}_${a.joints.length}`, type: op.joint, a: { instanceId: ia.id, connectorId: ca.id }, b: { instanceId: ib.id, connectorId: cb.id }, axis, anchor: wa, limits: op.limits, motor, spring: op.joint === 'spring' ? { stiffness: op.spring?.stiffness ?? 200, damping: op.spring?.damping ?? 0.5, restLength_m: op.spring?.restLength_m ?? gap } : undefined }));
-        summary.push(`connected ${op.a}.${ca.id} ↔ ${op.b}.${cb.id} [${op.joint}]`);
+      case 'connect':
+        connect(op, i);
+        break;
+      case 'bridge': {
+        if (a.instances.some((instance) => instance.id === op.id)) throw new AssemblyError(`Bridge instance "${op.id}" already exists. Choose a new id or remove the old link first.`, i);
+        unique(op.id, i);
+        if (op.a === op.b) throw new AssemblyError('Bridge needs two different endpoint instances', i);
+        const p = usePart(op.part, i);
+        const ends = [inst(op.a, i), inst(op.b, i)] as const;
+        const via = [connectorOf(p, op.via_a), connectorOf(p, op.via_b)] as const;
+        const endpoint = (index: 0 | 1, connector: string): Pivot => {
+          const end = ends[index];
+          const parent = connectorOf(partById.get(end.partId)!, connector);
+          if (![parent.kind, via[index].kind].some((kind) => kind === 'revolute' || kind === 'any')) {
+            throw new AssemblyError(`Neither bridge connector ${end.id}.${parent.id} nor ${p.id}.${via[index].id} supports a revolute joint`, i);
+          }
+          return { position: transformPoint(end.transform, parent.position), axis: transformDir(end.transform, parent.axis) };
+        };
+        const transform = fitBridge([via[0], via[1]], [endpoint(0, op.a_connector), endpoint(1, op.b_connector)], i);
+        a.instances.push(Instance.parse({ id: op.id, partId: p.id, label: op.label ?? p.name, group: op.group, transform, anchored: false, free: false }));
+        connect({ op: 'connect', a: op.a, a_connector: op.a_connector, b: op.id, b_connector: op.via_a, joint: 'revolute' }, i);
+        connect({ op: 'connect', a: op.b, a_connector: op.b_connector, b: op.id, b_connector: op.via_b, joint: 'revolute' }, i);
+        summary.push(`placed ${op.id} (${p.name}) between ${op.a} and ${op.b} with two passive revolute joints`);
         break;
       }
       case 'pattern': {
