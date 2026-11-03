@@ -1,11 +1,11 @@
 import type { Assembly, Decision, Spec, TestResult, ToolLogEntry, VersionRecord } from '@protolab/schema';
 import { type WalkerParams } from '@protolab/parts';
-import { chat, modelConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
+import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { heuristicSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS, WALKER_PARAM_RANGES, DEFAULT_WALKER } from './tools.ts';
 import { runPlanner, applyChangeRequest } from './planner.ts';
 
-export { modelConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, heuristicSpec, ToolRuntime, TOOL_DEFS, applyChangeRequest };
+export { modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, heuristicSpec, ToolRuntime, TOOL_DEFS, applyChangeRequest };
 export type { ModelConfig };
 
 export type AgentEvent =
@@ -15,6 +15,7 @@ export type AgentEvent =
   | { type: 'assembly'; iteration: number; assembly: Assembly; rationale: string }
   | { type: 'test'; iteration: number; result: TestResult }
   | { type: 'version'; version: VersionRecord }
+  | { type: 'handoff'; from: string; to: string; message: string }
   | { type: 'done'; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }
   | { type: 'error'; message: string };
 
@@ -26,6 +27,7 @@ export interface AgentInput {
   maxIterations?: number;
   startIteration?: number;              // continue numbering after existing versions (follow-ups)
   model?: ModelConfig | null;           // explicit; undefined = from env
+  specialist?: { model: ModelConfig; after: number } | null; // undefined = from env
   newVersionId: () => string;
 }
 
@@ -35,7 +37,9 @@ export const DETERMINISTIC_MODEL_ID = 'deterministic-planner';
 
 export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void): Promise<AgentOutput> {
   const model = input.model === undefined ? modelConfigFromEnv() : input.model;
+  const specialist = model ? (input.specialist === undefined ? specialistConfigFromEnv() : input.specialist) : null;
   const modelId = model ? model.model : DETERMINISTIC_MODEL_ID;
+  let activeModelId = modelId; // which model is currently deciding (primary or specialist)
   const maxIterations = input.maxIterations ?? 7;
   const fullPrompt = input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt;
   let spec = heuristicSpec(fullPrompt, input.parent?.spec);
@@ -52,7 +56,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
     onSpec: (s) => { spec = s; emit({ type: 'spec', spec: s }); },
     onAssembly: (assembly, params, rationale, basedOn, changes) => {
       iteration++;
-      pending = { assembly, params, decision: { source: model ? 'model' : 'planner', summary: rationale, basedOn, changes: changes ?? {} }, log: currentLog };
+      pending = { assembly, params, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn, changes: changes ?? {} }, log: currentLog };
       currentLog = [];
       emit({ type: 'status', message: iteration === (input.startIteration ?? 0) + 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
       emit({ type: 'assembly', iteration, assembly, rationale });
@@ -74,7 +78,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       const v: VersionRecord = {
         id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId, iteration,
         prompt: fullPrompt, spec, assembly: pending.assembly, tests: [result],
-        decisions: [pending.decision], toolLog: [...pending.log, ...currentLog], modelId,
+        decisions: [pending.decision], toolLog: [...pending.log, ...currentLog], modelId: pending.decision.modelId ?? modelId,
         status: result.passed ? 'passed' : 'failed', createdAt: new Date().toISOString(),
       };
       currentLog = [];
@@ -85,7 +89,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   }, { maxTests: maxIterations + 2, maxToolCalls: 16 + maxIterations * 6 });
 
   try {
-    if (model) await runModelLoop(model, rt, spec, input, emit, maxIterations);
+    if (model) await runModelLoop(model, specialist, rt, spec, input, emit, maxIterations, (id) => { activeModelId = id; });
     else await runPlanner(rt, spec, { startParams: input.parent ? (input.parent.assembly.familyConfig as unknown as WalkerParams) : undefined, changeRequest: input.changeRequest, maxIterations });
   } catch (e) {
     const message = (e as Error).message;
@@ -127,16 +131,31 @@ Current spec: ${JSON.stringify(spec)}
 Be concise. Rationales are shown to the user; one or two plain sentences each.`;
 }
 
-async function runModelLoop(model: ModelConfig, rt: ToolRuntime, spec: Spec, input: AgentInput, emit: (e: AgentEvent) => void, maxIterations: number): Promise<void> {
+async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, spec: Spec, input: AgentInput, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(spec, input.parent) },
     { role: 'user', content: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt },
   ];
-  const maxRounds = 14 + maxIterations * 4;
+  const maxRounds = 16 + maxIterations * 5;
+  let consults = 0;
+  let specialistRoundsLeft = 0;      // > 0 while the specialist is driving
+  let failsAtLastConsult = 0;
+  const walkFails = () => { let n = 0; for (const t of [...rt.tests].reverse()) { if (t.kind !== 'walk') continue; if (t.passed) break; n++; } return n; };
+
   for (let round = 0; round < maxRounds && !rt.finalized; round++) {
-    const res = await chat(model, messages, TOOL_DEFS, { toolChoice: 'auto' });
+    // Escalate to the engineering specialist after repeated walk failures.
+    if (specialist && specialistRoundsLeft === 0 && consults < 2 && walkFails() >= specialist.after && walkFails() > failsAtLastConsult) {
+      consults++; failsAtLastConsult = walkFails(); specialistRoundsLeft = 6;
+      const msg = `This design needs a little more engineering. Bringing in ${prettyModelName(specialist.model.model)} to help.`;
+      emit({ type: 'handoff', from: model.model, to: specialist.model.model, message: msg });
+      messages.push({ role: 'user', content: `[Engineering specialist ${prettyModelName(specialist.model.model)} takes over for a few steps.] The last ${walkFails()} walk tests failed. Read the full history above: diagnose the mechanical reason it does not walk (support polygon, torque vs mass, stride vs slip, leg geometry), state the diagnosis in one or two sentences, then act: sweep_gait if the gait space is unmeasured, create_parametric_part if the catalog does not fit, revise_walker with one targeted change, and run_test "walk". Hand back after one test.` });
+    }
+    const driver = specialistRoundsLeft > 0 && specialist ? specialist.model : model;
+    setActive(driver.model);
+    const testsBefore = rt.tests.length;
+    const res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto' });
     messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls.length ? res.toolCalls : undefined });
-    if (res.content && res.content.trim()) emit({ type: 'status', message: res.content.trim().slice(0, 240) });
+    if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 240)}` });
     if (!res.toolCalls.length) {
       if (rt.tests.length) { messages.push({ role: 'user', content: 'Call finalize_design to finish, or continue with tools.' }); continue; }
       messages.push({ role: 'user', content: 'Use the tools to build and test the design.' });
@@ -149,7 +168,19 @@ async function runModelLoop(model: ModelConfig, rt: ToolRuntime, spec: Spec, inp
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 6000) });
       if (rt.finalized) break;
     }
+    if (specialistRoundsLeft > 0) {
+      specialistRoundsLeft--;
+      const ranTest = rt.tests.length > testsBefore;
+      if (ranTest || specialistRoundsLeft === 0) {
+        specialistRoundsLeft = 0;
+        const last = rt.tests[rt.tests.length - 1];
+        const back = `${prettyModelName(model.model)} resumes${last ? ` after ${last.testId} (${last.passed ? 'passed' : 'did not pass'})` : ''}.`;
+        emit({ type: 'handoff', from: specialist!.model.model, to: model.model, message: back });
+        messages.push({ role: 'user', content: `[${prettyModelName(model.model)} resumes as the inventor.] Continue from the specialist's result: if the walk passed, run the dance follow-up if the spec asks for it and finalize; otherwise keep iterating.` });
+      }
+    }
   }
+  setActive(model.model);
   if (!rt.finalized) {
     const walkPassed = rt.tests.some((t) => t.kind === 'walk' && t.passed);
     await rt.call('finalize_design', { summary: walkPassed ? 'Model round budget reached after a passing walk test.' : 'Model round budget reached without a passing walk test; the last design is shown.', status: walkPassed ? 'passed' : 'failed' });

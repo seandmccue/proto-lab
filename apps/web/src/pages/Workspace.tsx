@@ -208,7 +208,7 @@ export default function Workspace() {
                 {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} · engine: {version?.tests[0]?.engine}</p>}
                 {version?.decisions.map((d, i) => (
                   <div key={i} className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs">
-                    <div className="font-medium text-slate-800">{d.source === 'model' ? 'Model decision' : 'Planner decision'}</div>
+                    <div className="font-medium text-slate-800">{d.source === 'model' ? `Model decision${d.modelId ? ` · ${d.modelId}` : ''}` : 'Planner decision'}</div>
                     <p className="text-slate-700">{d.summary}</p>
                     {d.basedOn && <p className="mt-1 text-slate-500">Based on: {d.basedOn}</p>}
                     {Object.keys(d.changes).length > 0 && <ul className="mt-1 mono text-slate-600">{Object.entries(d.changes).map(([k, c]) => <li key={k}>{k}: {c.from !== undefined ? `${c.from} → ` : ''}{c.to}</li>)}</ul>}

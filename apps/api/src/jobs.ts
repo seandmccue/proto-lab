@@ -15,6 +15,7 @@ export type PublicEvent =
   | { t: string; type: 'assembly'; iteration: number; rationale: string; instances: number; mass_kg: number }
   | { t: string; type: 'test'; iteration: number; testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] }
   | { t: string; type: 'version'; versionId: string; iteration: number; status: string }
+  | { t: string; type: 'handoff'; from: string; to: string; message: string }
   | { t: string; type: 'done'; status: string; summary: string; modelId: string }
   | { t: string; type: 'error'; message: string };
 
@@ -82,6 +83,7 @@ export class JobRunner {
           update('running', `Version ${v.iteration} recorded`, v.id);
           break;
         }
+        case 'handoff': push({ t, type: 'handoff', from: e.from, to: e.to, message: e.message }); update('running', e.message); break;
         case 'done': push({ t, type: 'done', status: e.status, summary: e.summary, modelId: e.modelId }); break;
         case 'error': push({ t, type: 'error', message: e.message }); break;
       }

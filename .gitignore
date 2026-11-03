@@ -6,3 +6,4 @@ dist/
 apps/api/data/
 *.log
 .DS_Store
+bench-results/

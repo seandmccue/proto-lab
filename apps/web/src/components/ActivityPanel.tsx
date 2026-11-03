@@ -83,6 +83,7 @@ function EventRow({ e }: { e: JobEvent }) {
         </div>
       );
     }
+    case 'handoff': return <div className="rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-violet-900"><span className="font-medium">Model handoff:</span> {String(e.message)} <span className="text-violet-500">({String(e.from)} → {String(e.to)})</span></div>;
     case 'done': return <div className={`rounded-md px-2 py-1 ${e.status === 'passed' ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900'}`}>{String(e.summary)}</div>;
     case 'error': return <div className="rounded-md bg-rose-100 px-2 py-1 text-rose-900">Error: {String(e.message)}</div>;
     default: return null;

@@ -208,6 +208,7 @@ export type ToolLogEntry = z.infer<typeof ToolLogEntry>;
 
 export const Decision = z.object({
   source: z.enum(['model', 'planner']),   // model = LLM decision, planner = deterministic fallback
+  modelId: z.string().optional(),          // which model made this decision (primary or specialist)
   summary: z.string(),
   basedOn: z.string().optional(),          // e.g. "walk_1: distance 0.08 m < 0.4 m"
   changes: z.record(z.object({ from: z.number().optional(), to: z.number() })),
