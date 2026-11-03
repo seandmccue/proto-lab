@@ -4,6 +4,7 @@ Everything below is live. Nothing is pre-rendered; gallery items were built by M
 
 ## 0. Before the demo (2 minutes)
 - `npm run dev` with `MODEL_API_KEY` set. The header badge must read **Powered by Meta Muse Spark 1.3** with a green dot (the API ran a live tool-call smoke test).
+- `npm run preflight` prints a go / no-go: model live, four featured builds passed, a public remix present, web serving.
 - Open the homepage once so the featured cards have loaded.
 
 ## 1. Homepage (20 s)
