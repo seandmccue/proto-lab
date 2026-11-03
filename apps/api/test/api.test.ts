@@ -53,6 +53,19 @@ test('API golden path with the deterministic planner', async () => {
   assert.ok((v.body.version as { tests: Array<{ trace: { frames: unknown[] } }> }).tests[0].trace.frames.length > 50);
   assert.equal((await app.request(`/store/versions/${versions[0].id}.json`)).status, 404);
 
+  const previewPath = `/api/inventions/${inventionId}/preview`;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/j1sAAAAASUVORK5CYII=', 'base64');
+  assert.equal((await app.request(previewPath, { method: 'POST', headers: { 'x-session-id': 'tester', 'content-type': 'image/png' }, body: new Uint8Array(png) })).status, 200);
+  const privatePreview = await app.request(previewPath, { headers: H });
+  assert.equal(privatePreview.status, 200);
+  assert.equal(privatePreview.headers.get('cache-control'), 'private, no-store');
+  assert.deepEqual(Buffer.from(await privatePreview.arrayBuffer()), png);
+  assert.equal((await app.request(previewPath)).status, 404);
+  assert.equal((await app.request(previewPath, { headers: { 'x-session-id': 'other' } })).status, 404);
+  assert.equal((await app.request(`/store/previews/${inventionId}.png`)).status, 404);
+  const privateInv = await j(`/api/inventions/${inventionId}`, { headers: H });
+  assert.equal((privateInv.body.invention as { previewUrl: string }).previewUrl, previewPath);
+
   // not the owner → cannot publish
   const forbidden = await j(`/api/inventions/${inventionId}/publish`, { method: 'POST', headers: { ...H, 'x-session-id': 'other' }, body: '{}' });
   assert.equal(forbidden.status, 403);

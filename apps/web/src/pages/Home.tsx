@@ -139,10 +139,10 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} />}
-        <Section title="Prototype gallery" items={featured} blurb="Explore featured builds, inspect their parts, and replay their physics tests." gallery />
-        <Section title="Recent" items={recent} empty="Nothing published yet. Build something and publish it." />
-        <Section title="Remixes" items={remixes} empty="Open any invention and click Remix to create the first one." />
+        {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} browse={{ to: '/gallery?view=mine', label: 'All your inventions' }} />}
+        <Section title="Prototype gallery" items={featured} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery', label: 'View gallery' }} />
+        <Section title="Recent" items={recent} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
+        <Section title="Remixes" items={remixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />
         <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
           <div className="lab-section-heading">
             <div>
@@ -186,7 +186,7 @@ export default function Home() {
   );
 }
 
-function Section({ title, items, blurb, empty, gallery }: { title: string; items: InventionPublic[]; blurb?: string; empty?: string; gallery?: boolean }) {
+function Section({ title, items, blurb, empty, browse }: { title: string; items: InventionPublic[]; blurb?: string; empty?: string; browse?: { to: string; label: string } }) {
   return (
     <section className="lab-section">
       <div className="lab-section-heading">
@@ -194,7 +194,7 @@ function Section({ title, items, blurb, empty, gallery }: { title: string; items
           <h2>{title}</h2>
           {blurb && <p>{blurb}</p>}
         </div>
-        {gallery && <Link to="/gallery" className="btn-secondary">View gallery <span aria-hidden="true">↗</span></Link>}
+        {browse && <Link to={browse.to} className="btn-secondary">{browse.label} <span aria-hidden="true">↗</span></Link>}
       </div>
       {items.length === 0 ? <p className="lab-empty">{empty ?? 'Loading…'}</p> : (
         <div className="invention-grid">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>

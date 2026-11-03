@@ -19,8 +19,8 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem 2rem;
-  padding: clamp(1rem, 3vw, 1.75rem) clamp(1rem, 3vw, 2rem) 1rem;
+  gap: .6rem 2rem;
+  padding: .75rem clamp(1rem, 3vw, 2rem);
 }
 
 .workbench-label {
@@ -103,16 +103,23 @@
 
 .workbench-stage {
   position: relative;
-  height: clamp(17rem, 53dvh, 32rem);
-  min-height: 17rem;
-  flex: 1 0 auto;
+  height: clamp(10rem, var(--stage-room, 53dvh), 32rem);
+  flex: 0 0 auto;
   background: #eee9fa;
 }
 
+.workbench :is(.prototype-canvas, .prototype-canvas > div, .prototype-canvas canvas) { touch-action: pan-y !important; }
+.workbench-zoom {
+  position: absolute;
+  z-index: 1;
+  top: .65rem;
+  right: .65rem;
+  display: flex;
+  gap: .25rem;
+}
+.workbench-zoom button { min-width: 2.5rem; min-height: 2.5rem; padding: 0; }
 .workbench--stage .workbench-grid { grid-template-columns: minmax(0, 1fr); }
 .workbench--stage :is(.workbench-parts, .workbench-agent, .workbench-mobile-nav) { display: none; }
-.workbench--stage .workbench-heading { padding-block: .75rem; }
-.workbench--stage .workbench-stage { height: clamp(17rem, 48dvh, 32rem); }
 .workbench-stage-toggle { margin-inline-start: auto; }
 .workbench-story { padding: .65rem .9rem; border-bottom: 1px solid var(--bench-line); background: #f9f6ff; }
 .workbench-story-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .65rem; margin-bottom: .5rem; color: var(--bench-muted); font-size: .75rem; }

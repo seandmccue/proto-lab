@@ -53,8 +53,8 @@ export const api = {
   publish: (id: string, body: { title?: string; description?: string }) => req<{ ok: true; invention: InventionPublic }>(`/api/inventions/${id}/publish`, { method: 'POST', body: JSON.stringify(body) }),
   explain: (id: string, vid: string) => req<{ text: string; modelId: string }>(`/api/inventions/${id}/versions/${vid}/explain`, { method: 'POST', body: '{}' }),
   preview: (id: string, png: Blob) => fetch(`/api/inventions/${id}/preview`, { method: 'POST', body: png, headers: { 'x-session-id': sessionId(), 'content-type': 'image/png' } }),
-  gallery: (sort: 'recent' | 'featured' | 'remixes', limit = 12) => req<{ items: InventionPublic[]; nextCursor: number | null }>(`/api/gallery?sort=${sort}&limit=${limit}`),
-  mine: () => req<{ items: InventionPublic[] }>('/api/mine'),
+  gallery: (sort: 'recent' | 'featured' | 'remixes', limit = 12, cursor = 0) => req<{ items: InventionPublic[]; nextCursor: number | null }>(`/api/gallery?sort=${sort}&limit=${limit}&cursor=${cursor}`),
+  mine: (cursor = 0) => req<{ items: InventionPublic[]; nextCursor?: number | null }>(`/api/mine?cursor=${cursor}`),
   report: (inventionId: string, reason: string) => req<{ ok: true }>('/api/reports', { method: 'POST', body: JSON.stringify({ inventionId, reason }) }),
 };
 

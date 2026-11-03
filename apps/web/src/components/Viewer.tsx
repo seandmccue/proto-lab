@@ -29,6 +29,7 @@ export interface ViewerProps {
   seekTo?: number | null;
   autoRotate?: boolean;
   mini?: boolean;
+  zoom?: number;
   captureRef?: MutableRefObject<(() => string | null) | null>;
 }
 
@@ -153,6 +154,11 @@ function Scene(props: ViewerProps) {
   }, [assembly, cameraBounds, followsBody, test]);
   const { camera, size } = useThree();
   const aspect = size.height > 0 ? size.width / size.height : 1;
+  useEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    camera.zoom = props.zoom ?? 1;
+    camera.updateProjectionMatrix();
+  }, [camera, props.zoom]);
   const framed = useRef<string>('');
   useEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera) || aspect <= 0) return;
@@ -163,7 +169,7 @@ function Scene(props: ViewerProps) {
     const back = new THREE.Vector3(0.72, 0.5, 0.78).normalize();
     const right = new THREE.Vector3().crossVectors(camera.up, back).normalize();
     const up = new THREE.Vector3().crossVectors(back, right);
-    const verticalSlope = Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV() / 2)) * 0.88;
+    const verticalSlope = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.88;
     const horizontalSlope = verticalSlope * aspect;
     const corner = new THREE.Vector3();
     let dist = 0.2;
@@ -261,7 +267,7 @@ function Scene(props: ViewerProps) {
           {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-sky-300">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
         </group>
       )}
-      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
+      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={false} />
     </>
   );
 }
@@ -284,6 +290,8 @@ class ViewerBoundary extends Component<{ fallback: ReactNode; children: ReactNod
 
 export default function Viewer(props: ViewerProps) {
   const [ready, setReady] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => setZoom(1), [props.assembly, props.test?.testId]);
   useEffect(() => {
     setReady(true);
     // Nudge the fiber resize observer: some embedded/emulated viewports miss the first measurement.
@@ -302,9 +310,15 @@ export default function Viewer(props: ViewerProps) {
   );
   return (
     <ViewerBoundary fallback={fallback}>
-      <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
-        <Scene {...props} />
+      <Canvas className="prototype-canvas" shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
+        <Scene {...props} zoom={zoom} />
       </Canvas>
+      {!props.mini && !props.cameraBounds && (
+        <div className="workbench-zoom" role="group" aria-label="Zoom controls">
+          <button type="button" className="btn-secondary" aria-label="Zoom out" disabled={zoom <= .6} onClick={() => setZoom((value) => Math.max(.6, value / 1.25))}>−</button>
+          <button type="button" className="btn-secondary" aria-label="Zoom in" disabled={zoom >= 2.5} onClick={() => setZoom((value) => Math.min(2.5, value * 1.25))}>+</button>
+        </div>
+      )}
     </ViewerBoundary>
   );
 }

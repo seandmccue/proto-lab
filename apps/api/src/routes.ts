@@ -20,6 +20,11 @@ const ReportBody = z.object({ inventionId: z.string(), reason: z.string().trim()
 
 const sanitize = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim();
 
+function integerQuery(value: string | undefined, fallback: number) {
+  const parsed = Math.floor(Number(value));
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
 export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   const app = new Hono();
   const jsonLimit = bodyLimit({ maxSize: 16_384, onError: (c) => c.json({ error: 'Request body is too large' }, 413) });
@@ -220,6 +225,16 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     catch (e) { if (explainCache.get(v.id) === pending) explainCache.delete(v.id); return c.json({ error: (e as Error).message }, 502); }
   });
 
+  app.get('/api/inventions/:id/preview', (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const inv = getInvention(c.req.param('id'));
+    if (!inv || inv.owner_id !== session(c.req)) return c.text('Not found', 404);
+    const bytes = store.getBytes(`previews/${inv.id}.png`);
+    if (!bytes) return c.text('Not found', 404);
+    c.header('Content-Type', 'image/png');
+    return c.body(new Uint8Array(bytes));
+  });
+
   app.post('/api/inventions/:id/preview', async (c) => {
     const sid = session(c.req);
     const inv = getInvention(c.req.param('id'));
@@ -234,18 +249,20 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.get('/api/gallery', (c) => {
     const sort = c.req.query('sort') ?? 'recent';
-    const cursor = Number(c.req.query('cursor') ?? 0);
-    const limit = Math.min(24, Number(c.req.query('limit') ?? 12));
+    const cursor = Math.max(0, integerQuery(c.req.query('cursor'), 0));
+    const limit = Math.max(1, Math.min(24, integerQuery(c.req.query('limit'), 12)));
     const where = sort === 'featured' ? 'visibility=\'public\' AND featured=1' : sort === 'remixes' ? 'visibility=\'public\' AND source_invention_id IS NOT NULL' : 'visibility=\'public\'';
-    const rows = db.prepare(`SELECT * FROM inventions WHERE ${where} AND current_version_id IS NOT NULL ORDER BY featured DESC, updated_at DESC LIMIT ? OFFSET ?`).all(limit + 1, cursor) as unknown as InventionRow[];
+    const rows = db.prepare(`SELECT * FROM inventions WHERE ${where} AND current_version_id IS NOT NULL ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`).all(limit + 1, cursor) as unknown as InventionRow[];
     const items = rows.slice(0, limit).map((inv) => publicInvention(inv, session(c.req)));
     return c.json({ items, nextCursor: rows.length > limit ? cursor + limit : null });
   });
 
   app.get('/api/mine', (c) => {
     const sid = session(c.req);
-    const rows = sid ? db.prepare('SELECT * FROM inventions WHERE owner_id=? ORDER BY updated_at DESC LIMIT 30').all(sid) as unknown as InventionRow[] : [];
-    return c.json({ items: rows.map((inv) => publicInvention(inv, sid)) });
+    const cursor = Math.max(0, integerQuery(c.req.query('cursor'), 0));
+    const limit = 30;
+    const rows = sid ? db.prepare('SELECT * FROM inventions WHERE owner_id=? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?').all(sid, limit + 1, cursor) as unknown as InventionRow[] : [];
+    return c.json({ items: rows.slice(0, limit).map((inv) => publicInvention(inv, sid)), nextCursor: rows.length > limit ? cursor + limit : null });
   });
 
   app.get('/api/parts', (c) => {
@@ -282,12 +299,17 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     // Latest walk and dance results across all versions (a dance-only revision does not re-run the walk).
     const rows = db.prepare('SELECT metrics_json FROM versions WHERE invention_id=? ORDER BY iteration DESC, created_at DESC').all(inv.id) as unknown as Array<{ metrics_json: string }>;
     const latest = (kind?: string): T | null => { for (const r of rows) { const t = (JSON.parse(r.metrics_json) as T[]).filter((x) => !kind || x.kind === kind).pop(); if (t) return t; } return null; };
+    const previewKey = `previews/${inv.id}.png`;
+    let previewUrl = null;
+    if ((inv.visibility === 'public' || inv.owner_id === sid) && store.has(previewKey)) {
+      previewUrl = inv.visibility === 'public' ? `/store/${previewKey}` : `/api/inventions/${inv.id}/preview`;
+    }
     return {
       latestWalk: latest('walk'), latestDance: latest('motion'), latestTest: latest(),
       id: inv.id, title: inv.title, description: inv.description, prompt: inv.prompt, visibility: inv.visibility, status: inv.status,
       currentVersionId: inv.current_version_id, featured: !!inv.featured, isOwner: inv.owner_id === sid, ownerLabel: ownerLabel(inv),
       sourceInventionId: inv.source_invention_id, parentVersionId: inv.parent_version_id, modelId: v?.model_id ?? null,
-      tests, previewUrl: inv.visibility === 'public' && store.has(`previews/${inv.id}.png`) ? `/store/previews/${inv.id}.png` : null, createdAt: inv.created_at, updatedAt: inv.updated_at,
+      tests, previewUrl, createdAt: inv.created_at, updatedAt: inv.updated_at,
     };
   }
   return app;

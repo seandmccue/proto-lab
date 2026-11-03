@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { tiltDeg, upVector } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
@@ -418,6 +418,30 @@ export default function Workspace() {
   const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
   const canCompare = !running && !!story[1] && !separateChecks && story[0].version.id !== story[1].version.id;
   const sideBySide = comparisonOpen && canCompare;
+  const stageRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const workbench = stage.closest('.workbench');
+    const heading = stage.parentElement?.querySelector('.workbench-panel-heading');
+    const fit = () => {
+      if (!stage.getClientRects().length) return;
+      const top = stage.getBoundingClientRect().top + window.scrollY;
+      const viewport = window.visualViewport?.height ?? window.innerHeight;
+      stage.style.setProperty('--stage-room', `${Math.floor(viewport - top - 12)}px`);
+    };
+    const observer = new ResizeObserver(fit);
+    workbench?.querySelectorAll(':scope > :not(.workbench-grid)').forEach((element) => observer.observe(element));
+    if (heading) observer.observe(heading);
+    window.addEventListener('resize', fit);
+    window.visualViewport?.addEventListener('resize', fit);
+    fit();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fit);
+      window.visualViewport?.removeEventListener('resize', fit);
+    };
+  }, [sideBySide, mobilePane, running, reconnecting, Boolean(error), jobStatus, stageMode]);
   const canonicalProof = sideBySide && story[0].version.id === crabProofPair.beforeId && story[1].version.id === crabProofPair.afterId;
   const vmeta = detail?.versions.find((v) => v.id === versionId);
   const [earlierTestSpecs, setEarlierTestSpecs] = useState<Record<string, TestSpec>>({});
@@ -589,18 +613,16 @@ export default function Workspace() {
                 <button type="button" className="btn-ghost" aria-pressed={!showLive} onClick={() => setViewMode('tested')}>Tested replay</button>
               </div>
             )}
-            {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
+            {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Use + or − to zoom</span>}
             {finalVersion && <a href="#prototype-explanation" className="btn-ghost">How it works ↓</a>}
             {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setComparisonOpen(false); setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
-          {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
-          {(sideBySide || !stageMode) && storyControls}
           {sideBySide ? <>
+            {storyControls}
             <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} />
             {canonicalProof && <CrabProofPanel />}
           </> : <>
-          {running && <SimulationStatus events={events} running replay={replayStatus} />}
-          <div className="workbench-stage">
+          <div className="workbench-stage" ref={stageRef}>
             {showLive && live ? (
               <>
                 <Viewer assembly={live.assembly} visibleInstanceIds={visibleLiveIds} enteringInstanceIds={reducedMotion ? undefined : live.newIds} test={null} playing={false} speed={1} explode={explode} blueprint={activeBlueprint} follow={false} selectedId={selected} changedIds={liveHighlightIds} onSelect={setSelected} autoRotate={!reducedMotion && !introBlueprint} />
@@ -648,7 +670,9 @@ export default function Workspace() {
               {!showLive && (comparing ? <span className="workbench-view-hint">Camera fits the recorded motion</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
-          {stageMode && storyControls}
+          {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
+          {storyControls}
+          {running && <SimulationStatus events={events} running replay={replayStatus} />}
           {!running && replayStatus && <SimulationStatus events={events} running={false} replay={replayStatus} />}
           </>}
           {finalVersion && (

@@ -1,39 +1,24 @@
 import { useEffect, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { VersionRecord } from '@protolab/schema';
-import { api, type InventionPublic } from '../api.ts';
+import { api, sessionId, type InventionPublic } from '../api.ts';
 import { keyMetric } from './BuildProgress.tsx';
 import IsoPreview from './IsoPreview.tsx';
 import './gallery.css';
 
+const buildDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
 export default function GalleryCard({ item }: { item: InventionPublic }) {
   const summaryId = useId();
   const [hover, setHover] = useState(false);
-  const [version, setVersion] = useState<VersionRecord | null>(null);
-  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const [traced, setTraced] = useState(false);
-  useEffect(() => {
-    if (!item.currentVersionId) return;
-    if (!version) api.version(item.id, item.currentVersionId, false).then((r) => setVersion(r.version)).catch(() => {});
-  }, [version, item]);
-  useEffect(() => {
-    if (!hover || traced || !item.currentVersionId || reduced) return;
-    api.version(item.id, item.currentVersionId, true).then((r) => { setVersion(r.version); setTraced(true); }).catch(() => {});
-  }, [hover, traced, item, reduced]);
   const lastTest = item.latestWalk ?? item.latestTest ?? item.tests[item.tests.length - 1];
   const metric = keyMetric(lastTest);
   const passed = item.status === 'passed';
-  const test = version?.tests.find((t) => t.testId === lastTest?.testId) ?? version?.tests[version.tests.length - 1] ?? null;
+  const createdAt = new Date(item.createdAt);
   return (
     <Link to={`/i/${item.id}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={`Explore ${item.title} in 3D`} aria-describedby={summaryId}>
       <div className="invention-card__preview">
-        {version ? (
-          <IsoPreview assembly={version.assembly} trace={traced ? test?.trace : null} playing={hover && traced && !reduced} className="h-full w-full" />
-        ) : item.previewUrl ? (
-          <img src={item.previewUrl} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <div className="invention-card__placeholder" aria-hidden="true"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" /><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" /></svg></div>
-        )}
+        <GalleryPreview key={item.currentVersionId ?? item.id} item={item} hover={hover} testId={lastTest?.testId} />
         <div className="invention-card__tags">
           {item.featured && <span>Featured</span>}
           {item.sourceInventionId && <span>Remix</span>}
@@ -47,11 +32,73 @@ export default function GalleryCard({ item }: { item: InventionPublic }) {
         </div>
         <h3>{item.title}</h3>
         <p className="line-clamp-2" id={summaryId}>{item.description || item.prompt}</p>
+        {Number.isFinite(createdAt.getTime()) && (
+          <time className="invention-card__date" dateTime={item.createdAt}>Created {buildDate.format(createdAt)}</time>
+        )}
         <div className="invention-card__footer">
           <span>{item.ownerLabel} · {item.modelId === 'deterministic-planner' ? 'planner' : item.modelId}</span>
           <span className="invention-card__explore" aria-hidden="true">Explore in 3D ↗</span>
         </div>
       </div>
     </Link>
+  );
+}
+
+function GalleryPreview({ item, hover, testId }: { item: InventionPublic; hover: boolean; testId?: string }) {
+  const [version, setVersion] = useState<VersionRecord | null>(null);
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const [privateImage, setPrivateImage] = useState<{ url: string; src: string } | null>(null);
+  const [traced, setTraced] = useState(false);
+  const { id, currentVersionId, previewUrl } = item;
+  const [checkedVersion, setCheckedVersion] = useState(!currentVersionId);
+  const hasAssembly = Boolean(version?.assembly.instances.length);
+  const animate = hover && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  useEffect(() => {
+    if (!checkedVersion || hasAssembly || item.visibility !== 'private' || !item.isOwner || previewUrl !== `/api/inventions/${id}/preview`) return;
+    const controller = new AbortController();
+    let src: string | undefined;
+    fetch(previewUrl, { headers: { 'x-session-id': sessionId() }, signal: controller.signal })
+      .then((response) => response.ok ? response.blob() : null)
+      .then((blob) => {
+        if (!blob || controller.signal.aborted) return;
+        src = URL.createObjectURL(blob);
+        setPrivateImage({ url: previewUrl, src });
+      }).catch(() => {});
+    return () => {
+      controller.abort();
+      if (src) URL.revokeObjectURL(src);
+    };
+  }, [checkedVersion, hasAssembly, id, item.visibility, item.isOwner, previewUrl]);
+  useEffect(() => {
+    if (!currentVersionId) return;
+    let cancelled = false;
+    api.version(id, currentVersionId, false).then(({ version }) => {
+      if (!cancelled) setVersion((current) => current ?? version);
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setCheckedVersion(true);
+    });
+    return () => { cancelled = true; };
+  }, [id, currentVersionId]);
+  useEffect(() => {
+    if (!animate || traced || !currentVersionId) return;
+    let cancelled = false;
+    api.version(id, currentVersionId, true).then(({ version }) => {
+      if (cancelled) return;
+      setVersion(version);
+      setTraced(true);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [animate, traced, id, currentVersionId]);
+
+  if (version?.assembly.instances.length) {
+    const test = version.tests.find((test) => test.testId === testId) ?? version.tests.at(-1);
+    return <IsoPreview assembly={version.assembly} trace={traced ? test?.trace : null} playing={animate && traced} className="h-full w-full" />;
+  }
+  const image = item.visibility === 'public' ? previewUrl : item.isOwner && privateImage?.url === previewUrl ? privateImage.src : null;
+  if (image && image !== failedImage) {
+    return <img src={image} alt="" className="h-full w-full object-cover" onError={() => setFailedImage(image)} />;
+  }
+  return (
+    <div className="invention-card__placeholder" aria-hidden="true"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" /><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" /></svg></div>
   );
 }
