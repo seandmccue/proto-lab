@@ -16,8 +16,11 @@ function suggestionsFor(version: VersionRecord | null): string[] {
   const tests = new Set(version.tests.map((t) => t.kind));
   const out: string[] = [];
   if (version.assembly.family === 'legged_walker' || cats.has('legs')) out.push('Give it six legs', 'Walk 30% further', 'Make it dance', 'Use longer legs', 'Make it calmer');
-  if (cats.has('wings')) out.push('Give it four wings like a dragonfly', 'Flap faster', 'Bigger wings', 'Make it a bird instead', 'Slower, gentler flapping');
-  if (kinds.has('big_wheel') || kinds.has('propeller') || kinds.has('wheel')) out.push('Spin faster', 'Make the wheel bigger', 'Reverse the direction', kinds.has('gondola') ? 'Add more gondolas' : 'Add more blades');
+  const rotor = kinds.has('big_wheel') || kinds.has('propeller') || kinds.has('wheel');
+  // Sails and blades are wing parts too (style 3); only count real flapping wings.
+  const flapping = kinds.has('insect_body') || version.assembly.parts.some((p) => p.category === 'wings' && !(p.kind === 'wing' && ((p.params as Record<string, number> | undefined)?.style ?? 0) >= 3) && !rotor);
+  if (flapping) out.push('Give it four wings like a dragonfly', 'Flap faster', 'Bigger wings', 'Make it a bird instead', 'Slower, gentler flapping');
+  if (rotor) out.push('Spin faster', 'Make the wheel bigger', 'Reverse the direction', kinds.has('gondola') ? 'Add more gondolas' : 'Add more blades');
   if (tests.has('launch')) out.push('Throw it twice as far', 'Launch a heavier ball', 'Lower the arc');
   if (tests.has('grip')) out.push('Grip a bigger block', 'Lift the block higher', 'Add a third finger');
   if (kinds.has('linear_actuator') || kinds.has('hinge')) out.push('Open it twice as fast', 'Make the deck longer');
