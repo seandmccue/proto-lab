@@ -620,3 +620,10 @@ grounded-grip message). `bench-results-integration-v13`, concurrency 3:
 
 Across thirteen full passes: 122 of 130 runs passed. The novel gadget, three iterations and 149 s in
 v12, is first-try here: the guard turned a failed test into a rejected definition.
+
+### Public container under concurrent judges (2026-11-03 22:40 UTC)
+
+Three builds started at the same second from three isolated browsers against the deployed site
+(two workers): windmill and Ferris wheel ran at once, the butterfly showed the queue hint at 31 s,
+started when a worker freed up and passed at 101 s; the Ferris wheel passed at 66 s. A second pair
+(windmill, Ferris wheel) passed in 26 s and 49 s. No hangs, no API errors.
