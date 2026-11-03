@@ -9,10 +9,22 @@ export function sessionId(): string {
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, { ...init, headers: { 'x-session-id': sessionId(), ...(init.body && typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) } });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`);
-  return json as T;
+  // Reads retry briefly on network errors and 5xx (the dev proxy returns 500s for a few seconds while the API restarts);
+  // writes are never retried here (callers use idempotency keys instead).
+  const retriable = !init.method || init.method === 'GET';
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(path, { ...init, headers: { 'x-session-id': sessionId(), ...(init.body && typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) } });
+    } catch (e) {
+      if (retriable && attempt < 3) { await new Promise((r) => setTimeout(r, 800 * (attempt + 1))); continue; }
+      throw e;
+    }
+    if (res.status >= 500 && retriable && attempt < 3) { await new Promise((r) => setTimeout(r, 800 * (attempt + 1))); continue; }
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`);
+    return json as T;
+  }
 }
 
 export interface TestSummary { testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[]; notes?: string[] }
