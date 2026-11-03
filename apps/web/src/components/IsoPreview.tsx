@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Assembly, Transform, Trace } from '@protolab/schema';
+import { ensureCCW, extrudePoint, shapeHalfExtents } from './shapeMath.ts';
 
 /**
  * Dependency-free isometric SVG render of an assembly (painter's algorithm). Used for gallery cards so
@@ -44,24 +45,40 @@ export function projectFaces(assembly: Assembly, frame?: Record<string, Transfor
       c[0] = T.position[0] + off[0]; c[1] = T.position[1] + off[1]; c[2] = T.position[2] + off[2];
       const color = piece.color ?? '#aaa';
       const s = piece.shape;
+      const toView = (local: V): V => { const wp = rot(q, local); return view([c[0] + wp[0], c[1] + wp[1], c[2] + wp[2]]); };
+      // Push a lit, front-facing polygon; `normal` is the outward unit normal in piece-local space.
+      const push = (points: V[], normal: V) => {
+        const nv = view(rot(q, normal));
+        if (nv[2] <= 0) return; // back face
+        const depth = points.reduce((d, p) => d + p[2], 0) / points.length;
+        const lit = Math.max(0, nv[0] * LIGHT[0] + nv[1] * LIGHT[1] + nv[2] * LIGHT[2]);
+        faces.push({ depth, points, color: shade(color, lit), kind: 'poly' });
+      };
       if (s.kind === 'sphere') { const vc = view(c); faces.push({ depth: vc[2], points: [vc], color: shade(color, 0.8), kind: 'circle', r: s.radius }); continue; }
-      let half: V = s.kind === 'box' ? [s.size[0] / 2, s.size[1] / 2, s.size[2] / 2] : s.axis === 'x' ? [s.height / 2, s.radius, s.radius] : s.axis === 'y' ? [s.radius, s.height / 2, s.radius] : [s.radius, s.radius, s.height / 2];
+      if (s.kind === 'extrude') { // real silhouette: profile polygon front + back, one quad per profile edge
+        const prof = ensureCCW(s.profile), n = prof.length;
+        const front = prof.map((p) => toView(extrudePoint(s.axis, p, s.depth / 2)));
+        const back = prof.map((p) => toView(extrudePoint(s.axis, p, -s.depth / 2)));
+        const ax = extrudePoint(s.axis, [0, 0], 1);
+        push(front, ax); push([...back].reverse(), [-ax[0], -ax[1], -ax[2]]);
+        for (let i = 0; i < n; i++) {
+          const j = (i + 1) % n; const dx = prof[j][0] - prof[i][0], dy = prof[j][1] - prof[i][1]; const l = Math.hypot(dx, dy) || 1;
+          push([front[i], front[j], back[j], back[i]], extrudePoint(s.axis, [dy / l, -dx / l], 0));
+        }
+        continue;
+      }
+      // Everything else (box, cylinder, capsule, ellipsoid, revolve) draws as a box of its half extents.
+      let half: V = shapeHalfExtents(s);
       if (s.kind === 'cylinder') half = [half[0] * 0.9, half[1] * 0.9, half[2] * 0.9];
       const axes: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
       for (let a = 0; a < 3; a++) for (const sgn of [1, -1]) {
-        const n = rot(q, axes[a].map((v) => v * sgn) as V);
-        const nv = view(n);
-        if (nv[2] <= 0) continue; // back face
         const u = axes[(a + 1) % 3], w = axes[(a + 2) % 3];
         const corners: V[] = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([du, dw]) => {
           const local: V = [0, 0, 0];
           for (let k = 0; k < 3; k++) local[k] = axes[a][k] * sgn * half[a] + u[k] * du * half[(a + 1) % 3] + w[k] * dw * half[(a + 2) % 3];
-          const wp = rot(q, local);
-          return view([c[0] + wp[0], c[1] + wp[1], c[2] + wp[2]]);
+          return toView(local);
         });
-        const depth = corners.reduce((d, p) => d + p[2], 0) / 4;
-        const lit = Math.max(0, nv[0] * LIGHT[0] + nv[1] * LIGHT[1] + nv[2] * LIGHT[2]);
-        faces.push({ depth, points: corners, color: shade(color, lit), kind: 'poly' });
+        push(corners, axes[a].map((v) => v * sgn) as V);
       }
     }
   }

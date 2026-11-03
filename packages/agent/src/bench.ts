@@ -35,12 +35,12 @@ async function one(p: { id: string; prompt: string }, run: number): Promise<Row>
     if (e.type === 'error') error = e.message;
   });
   for (const v of out.versions.slice(1)) if (Object.keys(v.decisions[0]?.changes ?? {}).length > 0 || v.decisions[0]?.basedOn) meaningful++;
-  const walks = out.versions.flatMap((v) => v.tests.filter((t) => t.kind === 'walk'));
+  const walks = out.versions.flatMap((v) => v.tests);
   const firstFailIdx = walks.findIndex((t) => !t.passed);
   const failedThenPassed = firstFailIdx >= 0 && walks.slice(firstFailIdx).some((t) => t.passed);
   return {
     prompt: p.id, run, status: out.status, seconds: +((Date.now() - t0) / 1000).toFixed(1), iterations: out.versions.length, walkTests: walks.length, sweeps, customParts: custom, revisions, meaningfulChanges: meaningful, handoffs,
-    failedThenPassed, bestDistance_m: Math.max(0, ...walks.map((t) => t.metrics.distance_m)), modelId: out.modelId, specialistUsed: handoffs > 0, summary: out.summary.slice(0, 300), error,
+    failedThenPassed, bestDistance_m: Math.max(0, ...walks.map((t) => t.metrics.distance_m ?? t.metrics.landingDistance_m ?? 0)), modelId: out.modelId, specialistUsed: handoffs > 0, summary: out.summary.slice(0, 300), error,
   };
 }
 

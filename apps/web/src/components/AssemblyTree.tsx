@@ -25,7 +25,7 @@ export default function AssemblyTree({ assembly, selectedId, onSelect, changedId
             <ul>
               {items.map((i) => (
                 <li key={i.id}>
-                  <button onClick={() => onSelect(i.id === selectedId ? null : i.id)} className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left hover:bg-slate-100 ${selectedId === i.id ? 'bg-accent-soft text-accent-dark' : ''}`}>
+                  <button aria-pressed={selectedId === i.id} onClick={() => onSelect(i.id === selectedId ? null : i.id)} className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 ${selectedId === i.id ? 'bg-accent-soft text-accent-dark' : ''}`}>
                     <span className="truncate">{i.label}</span>
                     {changedIds?.has(i.id) && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title="Changed in this iteration" />}
                   </button>

@@ -1,22 +1,40 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { Assembly, Controller, Instance, Joint, Spec, TestResult, TestSpec, Trace, Transform, Vec3, Quat } from '@protolab/schema';
-import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len } from '@protolab/parts';
+import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
+import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
 
 export const ENGINE = 'rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace';
 const DT = 1 / 240;
 const TRACE_HZ = 30;
 
 let ready: Promise<void> | null = null;
-export function initSimulator(): Promise<void> {
-  if (!ready) ready = RAPIER.init();
-  return ready;
-}
+export function initSimulator(): Promise<void> { if (!ready) ready = RAPIER.init(); return ready; }
 
 export interface SimEnvironment { gravity_m_s2: number; groundFriction: number }
 
-interface RigidGroup { rootId: string; members: Instance[] }
+// ---------- drive profiles ----------
+export function driveValue(p: DriveProfile, t: number, ramp: number): number {
+  switch (p.kind) {
+    case 'constant': return ramp * p.value;
+    case 'sine': return p.offset + ramp * p.amplitude * Math.sin(2 * Math.PI * p.frequency_hz * t + p.phase);
+    case 'ramp': { const u = Math.max(0, Math.min(1, (t - p.start_s) / p.duration_s)); return p.from + (p.to - p.from) * u; }
+    case 'step': return t < p.at_s ? p.before : p.after;
+    case 'gait': {
+      const d = p.swingDuty; const frac = (((t * p.frequency_hz + p.phase / (2 * Math.PI)) % 1) + 1) % 1;
+      const inSwing = frac < d / 2 || frac > 1 - d / 2; const A = ramp * p.amplitude;
+      if (p.role === 'lift') { if (!inSwing) return p.offset; const u = (frac < d / 2 ? frac + d / 2 : frac - (1 - d / 2)) / d; return p.offset + A * Math.sin(Math.PI * u); }
+      if (inSwing) { const u = (frac < d / 2 ? frac + d / 2 : frac - (1 - d / 2)) / d; return p.offset - A + 2 * A * (0.5 - 0.5 * Math.cos(Math.PI * u)); }
+      const s = (frac - d / 2) / (1 - d); return p.offset + A - 2 * A * s;
+    }
+  }
+}
+export function controlTargets(ctl: Controller, t: number): Record<string, { value: number; mode: 'position' | 'velocity' }> {
+  const out: Record<string, { value: number; mode: 'position' | 'velocity' }> = {};
+  for (const d of ctl.drives) { const ramp = d.rampIn_s > 0 ? Math.min(1, t / d.rampIn_s) : 1; out[d.controlId] = { value: driveValue(d.profile, t, ramp), mode: d.mode }; }
+  return out;
+}
 
-/** Instances connected by fixed joints become one rigid body (compound colliders). */
+// ---------- rigid groups ----------
+interface RigidGroup { rootId: string; members: Instance[]; anchored: boolean }
 function rigidGroups(a: Assembly): RigidGroup[] {
   const parent = new Map<string, string>();
   const find = (x: string): string => { const p = parent.get(x) ?? x; if (p === x) return x; const r = find(p); parent.set(x, r); return r; };
@@ -25,275 +43,240 @@ function rigidGroups(a: Assembly): RigidGroup[] {
   for (const j of a.joints) if (j.type === 'fixed') union(j.a.instanceId, j.b.instanceId);
   const groups = new Map<string, Instance[]>();
   for (const i of a.instances) { const r = find(i.id); if (!groups.has(r)) groups.set(r, []); groups.get(r)!.push(i); }
-  return [...groups.values()].map((members) => ({ rootId: members[0].id, members }));
+  return [...groups.values()].map((members) => ({ rootId: members[0].id, members, anchored: members.some((m) => m.anchored) }));
 }
-
-function shapeVolume(s: Assembly['parts'][number]['geometry'][number]['shape']): number {
-  switch (s.kind) {
-    case 'box': return s.size[0] * s.size[1] * s.size[2];
-    case 'cylinder': return Math.PI * s.radius * s.radius * s.height;
-    case 'sphere': return (4 / 3) * Math.PI * s.radius ** 3;
-  }
-}
-
-function axisRotation(axis: 'x' | 'y' | 'z'): Quat {
-  if (axis === 'y') return [0, 0, 0, 1];
-  if (axis === 'x') return quatFromAxisAngle([0, 0, 1], Math.PI / 2);
-  return quatFromAxisAngle([1, 0, 0], Math.PI / 2);
-}
-
+function axisRotation(axis: 'x' | 'y' | 'z'): Quat { if (axis === 'y') return [0, 0, 0, 1]; if (axis === 'x') return quatFromAxisAngle([0, 0, 1], Math.PI / 2); return quatFromAxisAngle([1, 0, 0], Math.PI / 2); }
 function axisAngle(q: Quat, axis: Vec3): number {
-  // signed rotation angle of q about the given unit axis (twist component)
-  const [x, y, z, w] = q;
-  const proj = x * axis[0] + y * axis[1] + z * axis[2];
-  const twist: Quat = [axis[0] * proj, axis[1] * proj, axis[2] * proj, w];
-  const n = Math.hypot(...twist) || 1;
-  const ang = 2 * Math.atan2(proj / n, w / n);
-  return Math.atan2(Math.sin(ang), Math.cos(ang));
+  const [x, y, z, w] = q; const proj = x * axis[0] + y * axis[1] + z * axis[2];
+  const n = Math.hypot(proj, w) || 1; const ang = 2 * Math.atan2(proj / n, w / n); return Math.atan2(Math.sin(ang), Math.cos(ang));
 }
 
-export interface ControlTargets { [controlId: string]: number }
-
-/** Deterministic open-loop controllers. Returns joint position targets at time t. */
-export function controlTargets(ctl: Controller, t: number): ControlTargets {
-  const out: ControlTargets = {};
-  const w = 2 * Math.PI * ctl.frequency_hz;
-  if (ctl.kind === 'gait') {
-    // Crawl/trot generator: during the swing window the hip sweeps forward on a cosine and the knee
-    // lifts on a raised-cosine bump; during stance the hip sweeps back linearly so all stance feet
-    // move at the same speed relative to the body.
-    const ramp = ctl.rampIn_s > 0 ? Math.min(1, t / ctl.rampIn_s) : 1;
-    const d = ctl.swingDuty;
-    const A = ramp * ctl.hipAmplitude_rad, K = ramp * ctl.kneeAmplitude_rad;
-    for (const [id, phase] of Object.entries(ctl.phases)) {
-      const frac = (((t * ctl.frequency_hz + phase / (2 * Math.PI)) % 1) + 1) % 1;
-      const inSwing = frac < d / 2 || frac > 1 - d / 2;
-      let hip: number, knee: number;
-      if (inSwing) {
-        const u = (frac < d / 2 ? frac + d / 2 : frac - (1 - d / 2)) / d; // 0..1 through the swing
-        hip = -A + 2 * A * (0.5 - 0.5 * Math.cos(Math.PI * u));
-        knee = K * Math.sin(Math.PI * u);
-      } else {
-        const p = (frac - d / 2) / (1 - d);
-        hip = A - 2 * A * p;
-        knee = 0;
-      }
-      if (id.startsWith('hip_')) out[id] = ctl.hipOffset_rad + hip;
-      else if (id.startsWith('knee_')) out[id] = ctl.kneeOffset_rad + knee;
-    }
-  } else {
-    const ramp = ctl.rampIn_s > 0 ? Math.min(1, t / ctl.rampIn_s) : 1;
-    // Bob: all knees flex together; each hip rotates forward by half the extra flex so the foot stays
-    // under the hip (equal leg segments) instead of sliding. Sway adds a small alternating hip motion.
-    const bob = ramp * ctl.bobAmplitude_rad * (0.5 + 0.5 * Math.sin(2 * w * t));
-    for (const [id, phase] of Object.entries(ctl.phases)) {
-      if (id.startsWith('hip_')) out[id] = ctl.hipOffset_rad + 0.5 * bob + ramp * ctl.swayAmplitude_rad * Math.sin(w * t + phase);
-      else if (id.startsWith('knee_')) out[id] = ctl.kneeOffset_rad + bob;
-    }
-  }
-  return out;
-}
-
-export interface RunOptions { env: SimEnvironment; test: TestSpec; controller?: Controller; restOffsets?: ControlTargets }
+export interface RunOptions { env: SimEnvironment; test: TestSpec; controller?: Controller }
 
 export async function runTest(assembly: Assembly, opts: RunOptions): Promise<TestResult> {
   await initSimulator();
   const { env, test } = opts;
   const controller = opts.controller ?? assembly.controller;
-  if (!controller) throw new Error('Assembly has no controller');
-
   const world = new RAPIER.World({ x: 0, y: -Math.abs(env.gravity_m_s2), z: 0 });
-  world.timestep = DT;
-  world.integrationParameters.numSolverIterations = 8;
+  world.timestep = DT; world.integrationParameters.numSolverIterations = 8;
+  const events = new RAPIER.EventQueue(true);
 
-  // Ground
+  // Ground: group 4; structure: group 1; contact pieces: group 2; free bodies: group 8. Parts of the same machine do not collide
+  // with each other except declared clearance pairs (group 16 each side) and free bodies, which collide with everything.
+  const GROUND = 0x0004, STRUCT = 0x0001, CONTACT = 0x0002, FREE = 0x0008, CLEAR = 0x0010;
+  const groups = (mem: number, filt: number) => ((mem & 0xffff) << 16) | (filt & 0xffff);
   const ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.05, 0));
-  world.createCollider(RAPIER.ColliderDesc.cuboid(20, 0.05, 20).setFriction(env.groundFriction).setRestitution(0), ground);
+  const groundCol = world.createCollider(RAPIER.ColliderDesc.cuboid(30, 0.05, 30).setFriction(env.groundFriction).setRestitution(0).setCollisionGroups(groups(GROUND, 0xffff)), ground);
 
   const partById = new Map(assembly.parts.map((p) => [p.id, p]));
   const instById = new Map(assembly.instances.map((i) => [i.id, i]));
-  const groups = rigidGroups(assembly);
-  const bodyOf = new Map<string, RAPIER.RigidBody>();       // instanceId -> body (group root body)
-  const restRoot = new Map<string, Transform>();              // rootId -> root rest transform
-  const localOffset = new Map<string, Transform>();           // instanceId -> transform relative to its root
-  const failureReasons: string[] = [];
+  const rgroups = rigidGroups(assembly);
+  const bodyOf = new Map<string, RAPIER.RigidBody>();
+  const localOffset = new Map<string, Transform>();
+  const colliderOwner = new Map<number, string>(); // collider handle -> instance id
+  const failureReasons: string[] = []; const notes: string[] = [];
+  const clearSet = new Set<string>(test.kind === 'motion' ? test.measure.clearancePairs.flat() : []);
+  const noGround = new Set<string>(test.kind === 'motion' ? test.measure.noGroundContact : []);
 
-  for (const g of groups) {
+  for (const g of rgroups) {
     const root = instById.get(g.rootId)!;
-    const rb = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(...root.transform.position)
-      .setRotation({ x: root.transform.rotation[0], y: root.transform.rotation[1], z: root.transform.rotation[2], w: root.transform.rotation[3] })
-      .setCanSleep(false));
-    restRoot.set(g.rootId, root.transform);
-    const invRoot = invert(root.transform);
+    // Every rigid body starts with an identity rotation (world-aligned frame) so that joint axes are the same in both
+    // bodies' local frames at rest; the instance rotations live in the collider offsets instead.
+    const desc = (g.anchored ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic()).setTranslation(...root.transform.position).setCanSleep(false);
+    const rb = world.createRigidBody(desc);
+    const invRoot = invert({ position: root.transform.position, rotation: [0, 0, 0, 1] });
     for (const inst of g.members) {
-      const part = partById.get(inst.partId);
-      if (!part) throw new Error(`Instance ${inst.id} references unknown part ${inst.partId}`);
+      const part = partById.get(inst.partId); if (!part) throw new Error(`Instance ${inst.id} references unknown part ${inst.partId}`);
       const rel = compose(invRoot, inst.transform);
-      localOffset.set(inst.id, rel);
-      bodyOf.set(inst.id, rb);
+      localOffset.set(inst.id, rel); bodyOf.set(inst.id, rb);
       const totalVol = part.geometry.reduce((s, gp) => s + shapeVolume(gp.shape), 0) || 1;
+      let any = false;
       for (const piece of part.geometry) {
-        if (piece.role === 'decor' || piece.role === 'fastener') continue; // no collision for cosmetics
-        const t = compose(rel, piece.offset);
-        let desc: RAPIER.ColliderDesc;
-        let rot = t.rotation;
-        switch (piece.shape.kind) {
-          case 'box': desc = RAPIER.ColliderDesc.cuboid(piece.shape.size[0] / 2, piece.shape.size[1] / 2, piece.shape.size[2] / 2); break;
-          case 'sphere': desc = RAPIER.ColliderDesc.ball(piece.shape.radius); break;
-          case 'cylinder': desc = RAPIER.ColliderDesc.cylinder(piece.shape.height / 2, piece.shape.radius); rot = quatMul(t.rotation, axisRotation(piece.shape.axis)); break;
+        if (!piece.collide || piece.role === 'decor' || piece.role === 'fastener') continue;
+        const t = compose(rel, piece.offset); let rot = t.rotation; let cd: RAPIER.ColliderDesc | null = null; const s = piece.shape;
+        switch (s.kind) {
+          case 'box': cd = RAPIER.ColliderDesc.cuboid(s.size[0] / 2, s.size[1] / 2, s.size[2] / 2); break;
+          case 'sphere': cd = RAPIER.ColliderDesc.ball(s.radius); break;
+          case 'cylinder': cd = RAPIER.ColliderDesc.cylinder(s.height / 2, s.radius); rot = quatMul(t.rotation, axisRotation(s.axis)); break;
+          case 'capsule': cd = RAPIER.ColliderDesc.capsule(s.height / 2, s.radius); rot = quatMul(t.rotation, axisRotation(s.axis)); break;
+          default: { const pts = hullPoints(s); if (pts.length >= 4) cd = RAPIER.ColliderDesc.convexHull(new Float32Array(pts.flat())); }
         }
-        desc.setTranslation(...t.position).setRotation({ x: rot[0], y: rot[1], z: rot[2], w: rot[3] });
-        desc.setMass(part.mass_kg * (shapeVolume(piece.shape) / totalVol));
-        desc.setFriction(piece.role === 'contact' ? env.groundFriction : 0.4).setRestitution(0);
-        // Legs on the same robot interpenetrate at rest (servo horn vs bar); only collide with ground + feet vs body.
-        desc.setCollisionGroups(piece.role === 'contact' ? 0x00020004 : 0x00010004);
-        world.createCollider(desc, rb);
+        if (!cd) continue;
+        cd.setTranslation(...t.position).setRotation({ x: rot[0], y: rot[1], z: rot[2], w: rot[3] });
+        cd.setMass(Math.max(1e-5, part.mass_kg * (shapeVolume(s) / totalVol)));
+        cd.setFriction(piece.role === 'contact' || piece.role === 'payload' ? env.groundFriction : 0.5).setRestitution(piece.role === 'payload' ? 0.2 : 0);
+        const isFree = inst.free, isClear = clearSet.has(inst.id);
+        const mem = (isFree ? FREE : piece.role === 'contact' ? CONTACT : STRUCT) | (isClear ? CLEAR : 0);
+        const filt = isFree ? 0xffff : GROUND | FREE | (isClear ? CLEAR : 0);   // free bodies collide with everything
+        cd.setCollisionGroups(groups(mem, filt)).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+        const col = world.createCollider(cd, rb); colliderOwner.set(col.handle, inst.id); any = true;
       }
+      if (!any) { const col = world.createCollider(RAPIER.ColliderDesc.ball(0.002).setMass(part.mass_kg).setTranslation(...rel.position).setCollisionGroups(groups(0, 0)), rb); colliderOwner.set(col.handle, inst.id); }
     }
   }
-  // ground collides with everything
-  ground.collider(0).setCollisionGroups(0x00040007);
 
-  // Revolute joints with position motors
-  interface MotorJoint { joint: Joint; raw: RAPIER.RevoluteImpulseJoint; b1: RAPIER.RigidBody; b2: RAPIER.RigidBody; axisWorld: Vec3; axisLocal2: Vec3; q1Rest: Quat; q2Rest: Quat; restAngle: number; peak: number; rating: number }
-  const motors: MotorJoint[] = [];
+  // joints
+  interface SimJoint { joint: Joint; raw: RAPIER.ImpulseJoint; b1: RAPIER.RigidBody; b2: RAPIER.RigidBody; axisL1: Vec3; axisWorld: Vec3; restAngle: number; restOffset: Vec3; peak: number; rating: number; satSteps: number; angle: number; lastAngle: number; revs: number; minA: number; maxA: number }
+  const sims: SimJoint[] = [];
+  const rootT = (b: RAPIER.RigidBody): Transform => { const p = b.translation(), r = b.rotation(); return { position: [p.x, p.y, p.z], rotation: [r.x, r.y, r.z, r.w] }; };
   for (const j of assembly.joints) {
-    if (j.type !== 'revolute') continue;
+    if (j.type === 'fixed') continue;
     const ia = instById.get(j.a.instanceId)!, ib = instById.get(j.b.instanceId)!;
     const b1 = bodyOf.get(ia.id)!, b2 = bodyOf.get(ib.id)!;
-    if (b1 === b2) { failureReasons.push(`Joint ${j.id} connects instances of the same rigid group`); continue; }
+    if (b1 === b2) { notes.push(`Joint ${j.id} connects two instances already rigidly joined; ignored`); continue; }
     const pa = partById.get(ia.partId)!, pb = partById.get(ib.partId)!;
-    const ca = pa.connectors.find((c) => c.id === j.a.connectorId)!;
-    const cb = pb.connectors.find((c) => c.id === j.b.connectorId)!;
-    const wa = transformPoint(ia.transform, ca.position);
-    const wb = transformPoint(ib.transform, cb.position);
-    const gap = len(sub(wa, wb));
-    const anchor = wa;
-    const axisWorld = j.axis ?? rotate(ia.transform.rotation, ca.axis);
-    const rootA = [...restRoot.entries()].find(([, t]) => t === instById.get([...bodyOf.entries()].find(([, b]) => b === b1)![0])!.transform);
-    const t1 = localRootTransform(b1), t2 = localRootTransform(b2);
-    const a1 = transformPoint(invert(t1), anchor), a2 = transformPoint(invert(t2), anchor);
-    const axisLocal1 = rotate(quatConj(t1.rotation), axisWorld);
-    const axisLocal2 = rotate(quatConj(t2.rotation), axisWorld);
-    const data = RAPIER.JointData.revolute({ x: a1[0], y: a1[1], z: a1[2] }, { x: a2[0], y: a2[1], z: a2[2] }, { x: axisLocal1[0], y: axisLocal1[1], z: axisLocal1[2] });
-    const raw = world.createImpulseJoint(data, b1, b2, true) as RAPIER.RevoluteImpulseJoint;
-    const qRel = quatMul(quatConj(t1.rotation), t2.rotation);
-    const restAngle = axisAngle(qRel, axisLocal1);
-    if (j.limits_rad) raw.setLimits(j.limits_rad[0], j.limits_rad[1]);
-    if (j.motor) {
-      raw.configureMotorModel(RAPIER.MotorModel.ForceBased);
-      raw.configureMotorPosition(restAngle, j.motor.stiffness, j.motor.damping);
+    const ca = pa.connectors.find((c) => c.id === j.a.connectorId)!, cb = pb.connectors.find((c) => c.id === j.b.connectorId)!;
+    const wa = j.anchor ?? transformPoint(ia.transform, ca.position), wb = transformPoint(ib.transform, cb.position);
+    const axisWorld = norm(j.axis ?? rotate(ia.transform.rotation, ca.axis));
+    const t1 = rootT(b1), t2 = rootT(b2);   // identity rotations at rest
+    const a1 = sub(wa, t1.position), a2 = sub(j.type === 'spring' ? wb : wa, t2.position);
+    const axisL1 = axisWorld, axisL2 = axisWorld;
+    let data: RAPIER.JointData;
+    if (j.type === 'revolute') data = RAPIER.JointData.revolute({ x: a1[0], y: a1[1], z: a1[2] }, { x: a2[0], y: a2[1], z: a2[2] }, { x: axisL1[0], y: axisL1[1], z: axisL1[2] });
+    else if (j.type === 'prismatic') data = RAPIER.JointData.prismatic({ x: a1[0], y: a1[1], z: a1[2] }, { x: a2[0], y: a2[1], z: a2[2] }, { x: axisL1[0], y: axisL1[1], z: axisL1[2] });
+    else { data = RAPIER.JointData.spring(j.spring?.restLength_m ?? len(sub(wa, wb)), j.spring?.stiffness ?? 200, j.spring?.damping ?? 0.5, { x: a1[0], y: a1[1], z: a1[2] }, { x: a2[0], y: a2[1], z: a2[2] }); }
+    const raw = world.createImpulseJoint(data, b1, b2, true);
+    const restAngle = 0; // joint coordinates are measured from the assembled rest pose
+    const restOffset = sub(t2.position, t1.position);
+    if (j.limits && j.type !== 'spring') (raw as RAPIER.RevoluteImpulseJoint).setLimits(j.limits[0], j.limits[1]);
+    if (j.motor && (j.type === 'revolute' || j.type === 'prismatic')) {
+      const m = raw as RAPIER.RevoluteImpulseJoint; m.configureMotorModel(RAPIER.MotorModel.ForceBased); m.configureMotorPosition(restAngle, j.motor.stiffness, j.motor.damping);
     }
-    motors.push({ joint: j, raw, b1, b2, axisWorld, axisLocal2, q1Rest: t1.rotation, q2Rest: t2.rotation, restAngle, peak: 0, rating: j.motor?.maxTorque_Nm ?? Infinity });
-    void rootA; void axisLocal2; void gap;
+    sims.push({ joint: j, raw, b1, b2, axisL1, axisWorld, restAngle, restOffset, peak: 0, rating: j.motor?.maxTorque_Nm ?? j.motor?.maxForce_N ?? Infinity, satSteps: 0, angle: restAngle, lastAngle: restAngle, revs: 0, minA: restAngle, maxA: restAngle });
+    void axisL2;
   }
-  function localRootTransform(b: RAPIER.RigidBody): Transform {
-    const p = b.translation(), r = b.rotation();
-    return { position: [p.x, p.y, p.z], rotation: [r.x, r.y, r.z, r.w] };
-  }
+  // Note: Rapier's JS revolute takes one local axis for both bodies; valid when both bodies share the axis frame at rest (true for our mates).
 
-  // Simulate
-  const bodyRoot = instById.get('body') ?? assembly.instances[0];
-  const bodyRb = bodyOf.get(bodyRoot.id)!;
-  const start = localRootTransform(bodyRb);
-  const frames: Trace['frames'] = [];
-  const steps = Math.round(test.duration_s / DT);
-  const traceEvery = Math.round(1 / (TRACE_HZ * DT));
-  let maxTilt = 0, minHeight = start.position[1], fell = false, fellAt = -1;
-  let energy = 0;
-  const prevAngle = new Map<string, number>();
-  const settle = 0.25; // seconds of settling with rest targets before the controller starts
+  // measurement setup
+  const baseId = test.kind === 'walk' ? test.base : test.kind === 'motion' ? test.measure.base : test.kind === 'grip' ? test.holder : undefined;
+  const baseRb = baseId ? bodyOf.get(baseId) : undefined;
+  if (baseId && !baseRb) failureReasons.push(`Base instance "${baseId}" not found`);
+  const projRb = test.kind === 'launch' ? bodyOf.get(test.projectile) : undefined;
+  if (test.kind === 'launch' && !projRb) failureReasons.push(`Projectile instance "${test.projectile}" not found`);
+  const payRb = test.kind === 'grip' ? bodyOf.get(test.payload) : undefined;
+  if (test.kind === 'grip' && !payRb) failureReasons.push(`Payload instance "${test.payload}" not found`);
+  let support: RAPIER.Collider | null = null;
+  if (test.kind === 'grip' && payRb) { const p = payRb.translation(); const pi = instById.get(test.payload)!; const pp = partById.get(pi.partId)!; const h = pp.dimensions_m[1] / 2; const sb = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(p.x, p.y - h - 0.005, p.z)); support = world.createCollider(RAPIER.ColliderDesc.cuboid(0.05, 0.005, 0.05).setFriction(0.3).setCollisionGroups(groups(GROUND, FREE)), sb); }
+  if (failureReasons.length) { world.free(); return { testId: test.id, kind: test.kind, passed: false, metrics: {}, failureReasons, notes, engine: ENGINE, trace: { dt: 1 / TRACE_HZ, frames: [] } }; }
 
+  const start = baseRb ? rootT(baseRb) : rootT(bodyOf.get(assembly.instances[0].id)!);
+  const projStart = projRb ? rootT(projRb) : null; const payStart = payRb ? rootT(payRb) : null; const holderStart = test.kind === 'grip' ? rootT(bodyOf.get(test.holder)!) : null;
+  const frames: Trace['frames'] = []; const steps = Math.round(test.duration_s / DT); const traceEvery = Math.round(1 / (TRACE_HZ * DT));
+  let maxTilt = 0, minHeight = start.position[1], fell = false, fellAt = -1, energy = 0;
+  const settle = 0.25;
+  let clearanceHit: string | null = null, groundHit: string | null = null, landing: Vec3 | null = null, maxProjHeight = projStart?.position[1] ?? 0, released = false;
+  const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
   const snapshot = (t: number) => {
-    const bodies: Record<string, Transform> = {};
-    for (const g of groups) {
-      const rb = bodyOf.get(g.rootId)!;
-      const T = localRootTransform(rb);
-      for (const m of g.members) bodies[m.id] = compose(T, localOffset.get(m.id)!);
-    }
-    frames.push({ t: +t.toFixed(4), bodies });
+    const bodies: Record<string, Transform> = {}; const joints: Record<string, number> = {};
+    for (const g of rgroups) { const T = rootT(bodyOf.get(g.rootId)!); for (const m of g.members) bodies[m.id] = compose(T, localOffset.get(m.id)!); }
+    for (const s of sims) if (s.joint.motor) joints[s.joint.motor.controlId] = +s.angle.toFixed(4);
+    frames.push({ t: +t.toFixed(4), bodies, joints });
   };
   snapshot(0);
 
-  for (let s = 1; s <= steps; s++) {
-    const t = s * DT;
-    const ct = t - settle;
+  for (let n = 1; n <= steps; n++) {
+    const t = n * DT, ct = t - settle;
     const targets = ct > 0 ? controlTargets(controller, ct) : null;
-    for (const m of motors) {
-      if (!m.joint.motor) continue;
-      const t1 = localRootTransform(m.b1), t2 = localRootTransform(m.b2);
-      const axisL1 = rotate(quatConj(m.q1Rest), m.axisWorld);
-      const qRel = quatMul(quatConj(t1.rotation), t2.rotation);
-      const angle = axisAngle(qRel, axisL1);
-      const target = targets?.[m.joint.motor.controlId];
-      const tgt = target === undefined ? m.restAngle : target;
-      // relative angular velocity about the axis (world)
-      const w1 = m.b1.angvel(), w2 = m.b2.angvel();
-      const ax = rotate(t1.rotation, axisL1);
-      const relVel = (w2.x - w1.x) * ax[0] + (w2.y - w1.y) * ax[1] + (w2.z - w1.z) * ax[2];
-      const torque = m.joint.motor.stiffness * (tgt - angle) - m.joint.motor.damping * relVel;
-      if (ct > 0) m.peak = Math.max(m.peak, Math.abs(torque));
-      const pa = prevAngle.get(m.joint.id);
-      if (pa !== undefined) energy += Math.abs(torque * (angle - pa));
-      prevAngle.set(m.joint.id, angle);
-      m.raw.configureMotorPosition(tgt, m.joint.motor.stiffness, m.joint.motor.damping);
+    for (const s of sims) {
+      if (s.joint.type === 'spring') continue;
+      const t1 = rootT(s.b1), t2 = rootT(s.b2);
+      let angle: number;
+      if (s.joint.type === 'revolute') { const qRel = quatMul(quatConj(t1.rotation), t2.rotation); const raw = axisAngle(qRel, s.axisL1); let d = raw - (s.lastAngle - 2 * Math.PI * s.revs); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; angle = s.lastAngle + d; }
+      else { const ax = rotate(t1.rotation, s.axisL1); angle = dot(sub(sub(t2.position, t1.position), rotate(t1.rotation, s.restOffset)), ax); }
+      const prevAngle = s.angle;
+      s.lastAngle = angle; s.angle = angle; s.revs = Math.floor((angle - s.restAngle) / (2 * Math.PI)); s.minA = Math.min(s.minA, angle); s.maxA = Math.max(s.maxA, angle);
+      if (!s.joint.motor) continue;
+      const tg = targets?.[s.joint.motor.controlId];
+      const m = s.raw as RAPIER.RevoluteImpulseJoint;
+      const w1 = s.b1.angvel(), w2 = s.b2.angvel(); const ax = rotate(t1.rotation, s.axisL1);
+      const relVel = s.joint.type === 'revolute' ? (w2.x - w1.x) * ax[0] + (w2.y - w1.y) * ax[1] + (w2.z - w1.z) * ax[2] : (() => { const v1 = s.b1.linvel(), v2 = s.b2.linvel(); return (v2.x - v1.x) * ax[0] + (v2.y - v1.y) * ax[1] + (v2.z - v1.z) * ax[2]; })();
+      // Demand = what the controller asks for; the applied effort is saturated at the motor rating (a real servo stalls).
+      let effort: number; const rating = s.rating;
+      if (tg?.mode === 'velocity') {
+        const factor = s.joint.motor.damping + s.joint.motor.stiffness; effort = factor * (tg.value - relVel);
+        const f = Number.isFinite(rating) && Math.abs(effort) > rating ? rating / Math.abs(tg.value - relVel || 1e-6) : factor;
+        m.configureMotorVelocity(tg.value, f);
+      } else {
+        const target = tg ? tg.value : s.restAngle; const err = target - angle;
+        effort = s.joint.motor.stiffness * err - s.joint.motor.damping * relVel;
+        const k = Number.isFinite(rating) && Math.abs(s.joint.motor.stiffness * err) > rating ? rating / Math.max(1e-6, Math.abs(err)) : s.joint.motor.stiffness;
+        m.configureMotorPosition(target, k, s.joint.motor.damping);
+      }
+      if (ct > 0) { s.peak = Math.max(s.peak, Math.abs(effort)); if (Number.isFinite(rating) && Math.abs(effort) > rating) s.satSteps++; }
+      energy += Math.abs(Math.min(Math.abs(effort), rating) * (angle - prevAngle));
     }
-    world.step();
-    const T = localRootTransform(bodyRb);
-    const tilt = tiltDeg(T.rotation);
-    maxTilt = Math.max(maxTilt, tilt);
-    minHeight = Math.min(minHeight, T.position[1]);
-    if (!fell && (tilt > 60 || T.position[1] < start.position[1] * 0.45)) { fell = true; fellAt = +t.toFixed(2); }
-    if (s % traceEvery === 0) snapshot(t);
+    world.step(events);
+    events.drainCollisionEvents((h1, h2, started) => {
+      if (!started) return;
+      const i1 = colliderOwner.get(h1), i2 = colliderOwner.get(h2);
+      const isG = h1 === groundCol.handle || h2 === groundCol.handle;
+      if (isG) { const other = h1 === groundCol.handle ? i2 : i1; if (other && noGround.has(other) && !groundHit) groundHit = other; if (test.kind === 'launch' && other === test.projectile && released && !landing) { const p = projRb!.translation(); landing = [p.x, p.y, p.z]; } }
+      else if (i1 && i2 && !clearanceHit && test.kind === 'motion') { for (const [a, b] of test.measure.clearancePairs) if ((a === i1 && b === i2) || (a === i2 && b === i1)) clearanceHit = `${i1} touched ${i2}`; }
+    });
+    if (support && test.kind === 'grip' && t >= test.supportUntil_s) { world.removeCollider(support, false); support = null; }
+    if (baseRb) { const T = rootT(baseRb); const tilt = tiltDeg(T.rotation); maxTilt = Math.max(maxTilt, tilt); minHeight = Math.min(minHeight, T.position[1]); if (!fell && !instById.get(baseId!)!.anchored && (tilt > 60 || T.position[1] < start.position[1] * 0.45)) { fell = true; fellAt = +t.toFixed(2); } }
+    if (projRb) { const p = projRb.translation(); maxProjHeight = Math.max(maxProjHeight, p.y); if (!released && ct > 0 && len(sub([p.x, p.y, p.z], projStart!.position)) > 0.08) released = true; }
+    if (n % traceEvery === 0) snapshot(t);
   }
 
-  const end = localRootTransform(bodyRb);
-  const distance = end.position[0] - start.position[0];
-  const drift = Math.abs(end.position[2] - start.position[2]);
-  const metrics: Record<string, number> = {
-    distance_m: +distance.toFixed(4),
-    speed_m_s: +(distance / (test.duration_s - settle)).toFixed(4),
-    lateralDrift_m: +drift.toFixed(4),
-    maxTilt_deg: +maxTilt.toFixed(2),
-    finalTilt_deg: +tiltDeg(end.rotation).toFixed(2),
-    minBodyHeight_m: +minHeight.toFixed(4),
-    startBodyHeight_m: +start.position[1].toFixed(4),
-    fell: fell ? 1 : 0,
-    fellAt_s: fellAt,
-    energyProxy_J: +energy.toFixed(4),
-    duration_s: test.duration_s,
-  };
-  const hips = motors.filter((m) => m.joint.id.startsWith('hip_')), knees = motors.filter((m) => m.joint.id.startsWith('knee_'));
-  const peak = (ms: MotorJoint[]) => ms.reduce((x, m) => Math.max(x, m.peak), 0);
-  const rating = (ms: MotorJoint[]) => ms.reduce((x, m) => Math.min(x, m.rating), Infinity);
-  metrics.peakHipTorque_Nm = +peak(hips).toFixed(4);
-  metrics.peakKneeTorque_Nm = +peak(knees).toFixed(4);
-  metrics.hipServoRating_Nm = rating(hips) === Infinity ? 0 : rating(hips);
-  metrics.kneeServoRating_Nm = rating(knees) === Infinity ? 0 : rating(knees);
+  const metrics: Record<string, number> = { duration_s: test.duration_s, energyProxy_J: +energy.toFixed(4) };
+  if (baseRb) { const end = rootT(baseRb); metrics.baseDisplacement_m = +len(sub(end.position, start.position)).toFixed(4); metrics.maxTilt_deg = +maxTilt.toFixed(2); metrics.fell = fell ? 1 : 0; metrics.fellAt_s = fellAt; metrics.minBaseHeight_m = +minHeight.toFixed(4); }
+  const jointStats = (ids: string[]) => ids.map((id) => ctlJoints.get(id)).filter(Boolean) as SimJoint[];
+  const reportJoint = (s: SimJoint, prefix: string) => { const rev = s.joint.type === 'revolute'; metrics[`${prefix}.amplitude_${rev ? 'rad' : 'm'}`] = +(s.maxA - s.minA).toFixed(4); metrics[`${prefix}.revolutions`] = +((s.maxA - s.minA) / (2 * Math.PI)).toFixed(3); metrics[`${prefix}.peak${rev ? 'Torque_Nm' : 'Force_N'}`] = +s.peak.toFixed(4); metrics[`${prefix}.rating`] = s.rating === Infinity ? 0 : s.rating; };
+  const torqueFail: string[] = []; const activeSteps = Math.max(1, steps - Math.round(settle / DT));
+  for (const s of sims) if (s.joint.motor && s.rating !== Infinity && s.peak > s.rating) torqueFail.push(`${s.joint.motor.controlId}: demand ${s.peak.toFixed(3)} > rating ${s.rating} (saturated ${Math.round((100 * s.satSteps) / activeSteps)} % of the time)`);
+  const allMotor = sims.filter((s) => s.joint.motor);
+  metrics.peakMotorEffort = +Math.max(0, ...allMotor.map((s) => s.peak)).toFixed(4);
+  metrics.motorSaturation_fraction = +(allMotor.length ? Math.max(...allMotor.map((s) => s.satSteps / activeSteps)) : 0).toFixed(3);
+  const saturationNote = () => { if (torqueFail.length) notes.push(`Motor saturation (applied torque was capped at the rating): ${torqueFail.slice(0, 3).join('; ')}`); };
 
-  if (fell) failureReasons.push(`Robot fell at t=${fellAt.toFixed(2)} s (tilt ${metrics.maxTilt_deg}°, min body height ${metrics.minBodyHeight_m} m)`);
-  if (maxTilt > test.targets.maxTilt_deg && !fell) failureReasons.push(`Body tilt ${metrics.maxTilt_deg}° exceeds limit ${test.targets.maxTilt_deg}°`);
-  if (test.kind === 'walk' && test.targets.minDistance_m !== undefined && distance < test.targets.minDistance_m) failureReasons.push(`Walked ${distance.toFixed(3)} m, target ${test.targets.minDistance_m} m`);
-  if (test.kind === 'dance' && test.targets.maxDrift_m !== undefined && Math.hypot(distance, drift) > test.targets.maxDrift_m) failureReasons.push(`Drifted ${Math.hypot(distance, drift).toFixed(3)} m while dancing, limit ${test.targets.maxDrift_m} m`);
-  if (metrics.peakHipTorque_Nm > metrics.hipServoRating_Nm) failureReasons.push(`Hip torque demand ${metrics.peakHipTorque_Nm} N·m exceeds servo rating ${metrics.hipServoRating_Nm} N·m`);
-  if (metrics.peakKneeTorque_Nm > metrics.kneeServoRating_Nm) failureReasons.push(`Knee torque demand ${metrics.peakKneeTorque_Nm} N·m exceeds servo rating ${metrics.kneeServoRating_Nm} N·m`);
-
+  switch (test.kind) {
+    case 'walk': {
+      const end = rootT(baseRb!); const ax = test.direction === 'x' ? 0 : test.direction === 'y' ? 1 : 2; const dist = end.position[ax] - start.position[ax];
+      metrics.distance_m = +dist.toFixed(4); metrics.speed_m_s = +(dist / (test.duration_s - settle)).toFixed(4); metrics.lateralDrift_m = +Math.abs(end.position[ax === 0 ? 2 : 0] - start.position[ax === 0 ? 2 : 0]).toFixed(4);
+      const hips = allMotor.filter((s) => /hip/i.test(s.joint.motor!.controlId)), knees = allMotor.filter((s) => /knee/i.test(s.joint.motor!.controlId));
+      if (hips.length) { metrics.peakHipTorque_Nm = +Math.max(...hips.map((s) => s.peak)).toFixed(4); metrics.hipServoRating_Nm = Math.min(...hips.map((s) => s.rating)); }
+      if (knees.length) { metrics.peakKneeTorque_Nm = +Math.max(...knees.map((s) => s.peak)).toFixed(4); metrics.kneeServoRating_Nm = Math.min(...knees.map((s) => s.rating)); }
+      if (fell) failureReasons.push(`Fell at t=${fellAt.toFixed(2)} s (tilt ${metrics.maxTilt_deg}°, min base height ${metrics.minBaseHeight_m} m)`);
+      if (!fell && maxTilt > test.maxTilt_deg) failureReasons.push(`Tilt ${metrics.maxTilt_deg}° exceeds limit ${test.maxTilt_deg}°`);
+      if (dist < test.minDistance_m) failureReasons.push(`Walked ${dist.toFixed(3)} m, target ${test.minDistance_m} m`);
+      if (torqueFail.length) failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`);
+      break;
+    }
+    case 'motion': {
+      const js = jointStats(test.measure.joints.length ? test.measure.joints : [...ctlJoints.keys()]);
+      for (const s of js) reportJoint(s, s.joint.motor!.controlId);
+      const c = test.criteria;
+      if (c.minJointAmplitude_rad !== undefined) for (const s of js) if (s.maxA - s.minA < c.minJointAmplitude_rad) failureReasons.push(`${s.joint.motor!.controlId} amplitude ${(s.maxA - s.minA).toFixed(3)} < ${c.minJointAmplitude_rad}`);
+      if (c.minRevolutions !== undefined) for (const s of js) if ((s.maxA - s.minA) / (2 * Math.PI) < c.minRevolutions) failureReasons.push(`${s.joint.motor!.controlId} turned ${((s.maxA - s.minA) / (2 * Math.PI)).toFixed(2)} rev < ${c.minRevolutions}`);
+      if (c.minJointRate_rad_s !== undefined) for (const s of js) { const rate = (s.maxA - s.minA) / Math.max(0.1, test.duration_s - settle); metrics[`${s.joint.motor!.controlId}.meanRate_rad_s`] = +rate.toFixed(3); if (rate < c.minJointRate_rad_s) failureReasons.push(`${s.joint.motor!.controlId} mean rate ${rate.toFixed(2)} rad/s < ${c.minJointRate_rad_s}`); }
+      if (baseRb && c.maxBaseTilt_deg !== undefined && maxTilt > c.maxBaseTilt_deg) failureReasons.push(`Base tilt ${metrics.maxTilt_deg}° exceeds ${c.maxBaseTilt_deg}°`);
+      if (baseRb && c.maxBaseDrift_m !== undefined && metrics.baseDisplacement_m > c.maxBaseDrift_m) failureReasons.push(`Base drifted ${metrics.baseDisplacement_m} m > ${c.maxBaseDrift_m} m`);
+      if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);
+      if (clearanceHit) { metrics.clearanceViolation = 1; failureReasons.push(`Clearance violated: ${clearanceHit}`); } else metrics.clearanceViolation = 0;
+      if (groundHit) { metrics.groundContactViolation = 1; failureReasons.push(`${groundHit} touched the ground`); } else metrics.groundContactViolation = 0;
+      if (c.torqueWithinRating && torqueFail.length) failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`); else saturationNote();
+      break;
+    }
+    case 'launch': {
+      const ax = test.direction === 'x' ? 0 : test.direction === 'y' ? 1 : 2; const pEnd = projRb!.translation(); const end: Vec3 = [pEnd.x, pEnd.y, pEnd.z];
+      const land = landing ?? end; const dist = land[ax] - projStart!.position[ax];
+      metrics.released = released ? 1 : 0; metrics.landingDistance_m = +dist.toFixed(4); metrics.maxHeight_m = +(maxProjHeight - projStart!.position[1]).toFixed(4); metrics.targetError_m = +Math.abs(dist - test.targetDistance_m).toFixed(4); metrics.landed = landing ? 1 : 0;
+      if (!released) failureReasons.push('Projectile never left the launcher');
+      else if (!landing) failureReasons.push('Projectile had not landed when the test ended');
+      else if (Math.abs(dist - test.targetDistance_m) > test.tolerance_m) failureReasons.push(`Landed at ${dist.toFixed(3)} m; target ${test.targetDistance_m} ± ${test.tolerance_m} m`);
+      saturationNote();
+      break;
+    }
+    case 'grip': {
+      const pe = payRb!.translation(), he = rootT(bodyOf.get(test.holder)!); const sep = len(sub([pe.x, pe.y, pe.z], he.position)) - len(sub(payStart!.position, holderStart!.position));
+      metrics.payloadSeparation_m = +Math.abs(sep).toFixed(4); metrics.payloadHeight_m = +pe.y.toFixed(4); metrics.payloadDrop_m = +(payStart!.position[1] - pe.y).toFixed(4);
+      const js = jointStats([...ctlJoints.keys()]); for (const s of js) reportJoint(s, s.joint.motor!.controlId);
+      if (Math.abs(sep) > test.maxSeparation_m || payStart!.position[1] - pe.y > test.maxSeparation_m) failureReasons.push(`Payload slipped: separation ${Math.abs(sep).toFixed(3)} m, dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m (limit ${test.maxSeparation_m} m)`);
+      saturationNote();
+      break;
+    }
+  }
   world.free();
-  return {
-    testId: test.id,
-    kind: test.kind,
-    passed: failureReasons.length === 0,
-    metrics,
-    failureReasons,
-    engine: ENGINE,
-    trace: { dt: 1 / TRACE_HZ, frames },
-  };
-}
-
-export function walkTest(spec: Spec, id = 'walk_1'): TestSpec {
-  return { id, kind: 'walk', duration_s: spec.targets.duration_s, targets: { minDistance_m: spec.targets.walkDistance_m, maxTilt_deg: spec.targets.maxTilt_deg } };
-}
-export function danceTest(spec: Spec, id = 'dance_1'): TestSpec {
-  return { id, kind: 'dance', duration_s: Math.min(spec.targets.duration_s, 5), targets: { maxTilt_deg: spec.targets.maxTilt_deg, maxDrift_m: 0.08 } };
+  return { testId: test.id, kind: test.kind, passed: failureReasons.length === 0, metrics, failureReasons, notes, engine: ENGINE, trace: { dt: 1 / TRACE_HZ, frames } };
 }

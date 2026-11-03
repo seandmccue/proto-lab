@@ -10,14 +10,24 @@ export default function Gallery() {
   return (
     <div className="min-h-full">
       <Header />
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Gallery</h1>
-          <div className="flex gap-1 rounded-full bg-slate-100 p-1">
-            {(['recent', 'featured', 'remixes'] as const).map((s) => <button key={s} onClick={() => setSort(s)} className={`rounded-full px-3 py-1 text-sm capitalize ${sort === s ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>{s}</button>)}
+      <main className="invention-gallery">
+        <header className="invention-gallery__header">
+          <p className="invention-gallery__eyebrow">The prototype archive</p>
+          <h1>Gallery<span aria-hidden="true">.</span></h1>
+          <p>See what the lab has built. Open a prototype to inspect the parts, replay its tests, or make a remix of your own.</p>
+        </header>
+        <section aria-label="Gallery inventions">
+          <div className="invention-gallery__filters" role="group" aria-label="Filter inventions">
+            {(['recent', 'featured', 'remixes'] as const).map((s) => (
+              <button key={s} type="button" onClick={() => setSort(s)} aria-pressed={sort === s}>{s}</button>
+            ))}
           </div>
-        </div>
-        {items.length === 0 ? <p className="text-slate-400">Nothing here yet.</p> : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>}
+          {items.length === 0 ? (
+            <p className="invention-gallery__empty">{sort === 'remixes' ? 'Open any invention and select Remix to create the first one.' : 'No inventions here yet.'}</p>
+          ) : (
+            <div className="invention-grid">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>
+          )}
+        </section>
       </main>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Header, { useModelInfo } from '../components/Header.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import { api, type Example, type InventionPublic } from '../api.ts';
@@ -34,34 +34,52 @@ export default function Home() {
   return (
     <div className="min-h-full">
       <Header />
-      <main className="mx-auto max-w-6xl px-6">
-        <section className="pt-16 pb-10 text-center">
-          <p className="text-sm font-medium text-accent">AI-powered invention studio</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl">What will you invent?</h1>
-          <p className="mx-auto mt-4 max-w-2xl text-slate-600">Describe a mechanism. An engineering agent picks real parts, assembles them, tests them in a physics simulator, revises from the measurements, and hands you an interactive 3D prototype to remix and share.</p>
-          <form onSubmit={submit} className="mx-auto mt-8 flex max-w-2xl items-center gap-2 rounded-full border border-slate-200 bg-white p-1.5 shadow-sm focus-within:border-accent">
-            <input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Build a small walking robot that…" aria-label="Describe your invention" className="min-w-0 flex-1 bg-transparent px-4 py-2.5 text-base outline-none" maxLength={600} />
-            <button type="submit" className="btn-primary" disabled={busy || prompt.trim().length < 3}>{busy ? 'Starting…' : 'Build this'}</button>
-          </form>
-          {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            {examples.map((ex) => (
-              <button key={ex.id} onClick={() => start({ exampleId: ex.id })} disabled={busy} className={`chip ${ex.id === 'muse' ? 'border-accent text-accent' : ''}`} title={ex.prompt}>
-                {ex.id === 'muse' ? '✦ ' : ''}{ex.title}
-              </button>
-            ))}
+      <main className="home-shell">
+        <section className="lab-hero" aria-labelledby="hero-title">
+          <div className="lab-hero-copy">
+            <p className="lab-label lab-kicker"><span aria-hidden="true">✦</span> AI invention studio</p>
+            <h1 id="hero-title">What will you <em>invent?</em></h1>
+            <p className="lab-intro">Give an AI engineer an idea. Watch it pick real parts, test them in a physics simulator, and hand you a 3D prototype to explore and remix.</p>
+            <form onSubmit={submit} className="lab-form">
+              <label htmlFor="invention-prompt" className="lab-label">Your invention brief</label>
+              <div className="lab-input">
+                <input id="invention-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Build a small walking robot…" maxLength={600} aria-describedby="invention-scope" />
+                <button type="submit" className="btn-primary" disabled={busy || prompt.trim().length < 3}>
+                  {busy ? 'Starting…' : 'Build this'} <span aria-hidden="true">↗</span>
+                </button>
+              </div>
+              <p id="invention-scope">The lab currently builds four- and six-legged walkers. Other prompts are interpreted as walkers.</p>
+            </form>
+            {error && <p className="mt-2 text-sm text-rose-700" role="alert">{error}</p>}
+            {examples.length > 0 && <div className="lab-examples">
+              <span className="lab-label">Try a brief</span>
+              <div className="lab-chips">
+                {examples.map((ex) => (
+                  <button key={ex.id} onClick={() => start({ exampleId: ex.id })} disabled={busy} className={`chip ${ex.id === 'muse' ? 'lab-chip-muse' : ''}`} title={ex.prompt}>
+                    {ex.id === 'muse' && <span aria-hidden="true">✦</span>}{ex.title}
+                  </button>
+                ))}
+              </div>
+            </div>}
           </div>
-          <p className="mt-6 text-xs text-slate-400">
-            {model ? model.label : '…'} · No account needed · Simulation results are measured, not scripted · 3D Print — Coming Soon
-          </p>
-          <p className="mx-auto mt-2 max-w-xl text-[11px] text-slate-400">Today ProtoLab builds one mechanism family (legged walkers with 4 or 6 legs). Other prompts are interpreted into that family.</p>
+          <figure className="lab-art">
+            <img src="/lab-illustration.svg" alt="Illustration of a purple walking robot with its shell lifted above the chassis" width="500" height="414" />
+            <span className="lab-art-tag lab-label" aria-hidden="true">Fig. 01 / Walker</span>
+            <figcaption className="lab-label"><span aria-hidden="true">⊕</span> Assembly sketch <span className="lab-art-caption-end">Exploded view</span></figcaption>
+          </figure>
         </section>
+        <div className="lab-process" aria-label="How ProtoLab works">
+          <span><b>01</b> Describe</span><span><b>02</b> Assemble</span><span><b>03</b> Simulate</span><span><b>04</b> Remix</span>
+        </div>
 
         {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} />}
-        <Section title="Featured" items={featured} blurb="Built live by the agent when this server first started. Every card opens the actual assembly and simulation trace." />
+        <Section title="Featured" items={featured} blurb="Open a prototype to explore its assembly and replay the measured tests." />
         <Section title="Recent" items={recent} empty="Nothing published yet. Build something and publish it." />
         <Section title="Remixes" items={remixes} empty="Open any invention and click Remix to create the first one." />
-        <footer className="py-12 text-center text-xs text-slate-400">ProtoLab · Rigid-body simulation is not engineering certification. No claim of physical buildability or safety is made.</footer>
+        <footer className="lab-footer">
+          <span className="lab-label">ProtoLab{model && ` · ${model.label}`}</span>
+          <p>Rigid-body simulation is not engineering certification. No claim of physical buildability or safety is made.</p>
+        </footer>
       </main>
     </div>
   );
@@ -69,15 +87,16 @@ export default function Home() {
 
 function Section({ title, items, blurb, empty }: { title: string; items: InventionPublic[]; blurb?: string; empty?: string }) {
   return (
-    <section className="py-8">
-      <div className="mb-4 flex items-end justify-between">
+    <section className="lab-section">
+      <div className="lab-section-heading">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {blurb && <p className="text-sm text-slate-500">{blurb}</p>}
+          <h2>{title}</h2>
+          {blurb && <p>{blurb}</p>}
         </div>
+        {title === 'Featured' && <Link to="/gallery" className="btn-secondary">View gallery <span aria-hidden="true">↗</span></Link>}
       </div>
-      {items.length === 0 ? <p className="text-sm text-slate-400">{empty ?? 'Loading…'}</p> : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>
+      {items.length === 0 ? <p className="lab-empty">{empty ?? 'Loading…'}</p> : (
+        <div className="invention-grid">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>
       )}
     </section>
   );
