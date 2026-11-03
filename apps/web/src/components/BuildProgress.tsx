@@ -42,7 +42,7 @@ export default function BuildProgress({ events, running, jobStatus, load }: { ev
         </div>
       </div>
       <PartsBin events={events} />
-      <p className="text-[11px] text-slate-400">Each model round takes 5–60 s; simple mechanisms finish in about a minute, legged or multi-stage ones in 3–10. <Link to="/gallery" className="text-accent hover:underline">Open a finished build in another tab →</Link></p>
+      <p className="text-[11px] text-slate-400">Each model round takes 5–60 s; simple mechanisms finish in under a minute, legged or multi-stage ones in 2–5. <Link to="/gallery" className="text-accent hover:underline">Open a finished build in another tab →</Link></p>
     </div>
   );
 }
