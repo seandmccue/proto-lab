@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWalker, walkerOps, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setDrives, getPart, generatePart, type WalkerParams } from '@protolab/parts';
+import { buildWalker, walkerOps, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setDrives, getPart, generatePart, transformPoint, type WalkerParams } from '@protolab/parts';
 import { runTest, driveValue } from './index.ts';
 
 const env = { gravity_m_s2: 9.81, groundFriction: 0.9 };
@@ -134,4 +134,37 @@ test('quadruped with motor stiffness 8 walks past 45 cm in 6 s (recipe numbers)'
   const r = await runTest(buildWalker(fast), { env, test: { ...walk, id: 'fast_walk', minDistance_m: 0.45 } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics.maxTilt_deg < 8 && r.metrics.motorSaturation_fraction < 0.03, JSON.stringify(r.metrics));
+});
+
+function clawAssembly(blockOffsetX = 0) {
+  const r0 = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'base', part: 'plate-120x80', position: [0, 0.002, 0], anchored: true },
+    { op: 'mount', id: 'post', part: 'beam-100', onto: 'base', connector: 'top', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'palm', part: 'plate-120x80', onto: 'post', connector: 'end_b', via: 'top', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'servo_L', part: 'servo-mg996r', onto: 'palm', connector: 'top_back', via: 'bottom', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'servo_R', part: 'servo-mg996r', onto: 'palm', connector: 'top_front', via: 'bottom', joint: 'fixed', spin_deg: 180, offset_m: 0 },
+    { op: 'mount', id: 'finger_L', part: 'gripper-finger-50', onto: 'servo_L', connector: 'horn', via: 'root', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'grip_L', stiffness: 8, damping: 0.3 } },
+    { op: 'mount', id: 'finger_R', part: 'gripper-finger-50', onto: 'servo_R', connector: 'horn', via: 'root', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'grip_R', stiffness: 8, damping: 0.3 } },
+    { op: 'move', id: 'servo_R', translate: [0, 0, 0.046] },   // the flipped servo's horn sits on the other face; bring both fingers into one plane
+  ], getPart);
+  const inst = (id: string) => r0.assembly.instances.find((i) => i.id === id)!;
+  const tipL = transformPoint(inst('finger_L').transform, [0, -0.05, 0]), tipR = transformPoint(inst('finger_R').transform, [0, -0.05, 0]);
+  const mid: [number, number, number] = [(tipL[0] + tipR[0]) / 2 + blockOffsetX, Math.min(tipL[1], tipR[1]) + 0.012, (tipL[2] + tipR[2]) / 2];
+  return applyOps(r0.assembly, [{ op: 'place', id: 'block', part: 'block-40', position: mid, free: true }], getPart).assembly;
+}
+const gripTest = { kind: 'grip' as const, id: 'grip_1', duration_s: 4, payload: 'block', holder: 'palm', supportUntil_s: 1.2, maxSeparation_m: 0.15 };
+
+test('claw: two mirrored fingers on a palm hold a 40 mm block (recipe numbers)', async () => {
+  const a = setDrives(clawAssembly(), ['grip_L', 'grip_R'].map((c) => ({ controlId: c, mode: 'position' as const, rampIn_s: 0, profile: { kind: 'step' as const, before: 0, after: 0.6, at_s: 0.5 } })));
+  const r = await runTest(a, { env, test: gripTest });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.equal(r.metrics.payloadGrounded, 0);
+  assert.ok(r.metrics.payloadSeparation_m < 0.03, JSON.stringify(r.metrics));
+});
+
+test('grip test fails honestly when the payload lands on the floor', async () => {
+  const a = setDrives(clawAssembly(0.12), ['grip_L', 'grip_R'].map((c) => ({ controlId: c, mode: 'position' as const, rampIn_s: 0, profile: { kind: 'constant' as const, value: 0 } })));
+  const r = await runTest(a, { env, test: gripTest });
+  assert.ok(!r.passed && r.failureReasons[0].includes('fell to the ground'), r.failureReasons.join('; '));
+  assert.equal(r.metrics.payloadGrounded, 1);
 });
