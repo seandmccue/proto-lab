@@ -8,6 +8,23 @@ import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.t
 import { api, fmt, type InventionDetail, type JobEvent } from '../api.ts';
 import './Workspace.css';
 
+/** Change suggestions that fit the mechanism actually built (wings, legs, rotors, launchers, grippers), not just walkers. */
+function suggestionsFor(version: VersionRecord | null): string[] {
+  if (!version) return ['Make it bigger', 'Make it faster', 'Change the colours'];
+  const cats = new Set(version.assembly.parts.map((p) => p.category as string));
+  const kinds = new Set(version.assembly.parts.map((p) => p.kind as string));
+  const tests = new Set(version.tests.map((t) => t.kind));
+  const out: string[] = [];
+  if (version.assembly.family === 'legged_walker' || cats.has('legs')) out.push('Give it six legs', 'Walk 30% further', 'Make it dance', 'Use longer legs', 'Make it calmer');
+  if (cats.has('wings')) out.push('Give it four wings like a dragonfly', 'Flap faster', 'Bigger wings', 'Make it a bird instead', 'Slower, gentler flapping');
+  if (kinds.has('big_wheel') || kinds.has('propeller') || kinds.has('wheel')) out.push('Spin faster', 'Make the wheel bigger', 'Reverse the direction', kinds.has('gondola') ? 'Add more gondolas' : 'Add more blades');
+  if (tests.has('launch')) out.push('Throw it twice as far', 'Launch a heavier ball', 'Lower the arc');
+  if (tests.has('grip')) out.push('Grip a bigger block', 'Lift the block higher', 'Add a third finger');
+  if (kinds.has('linear_actuator') || kinds.has('hinge')) out.push('Open it twice as fast', 'Make the deck longer');
+  if (!out.length) out.push('Make it bigger', 'Make it faster', 'Change the colours', 'Add a decorative shell');
+  return [...new Set(out)].slice(0, 6);
+}
+
 export default function Workspace() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
@@ -229,7 +246,7 @@ export default function Workspace() {
           </div>
           {canFollowUp && (
             <form onSubmit={(e) => { e.preventDefault(); if (request.trim()) void act(() => api.followUp(id, request.trim())); }} className="workbench-followup">
-              <input value={request} onChange={(e) => setRequest(e.target.value)} aria-label="Describe a change" placeholder="Ask for a change: “Make it dance”, “Walk 30% further”, “Give it six legs”" className="min-w-0 flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm outline-none focus:border-accent" maxLength={400} />
+              <input value={request} onChange={(e) => setRequest(e.target.value)} aria-label="Describe a change" placeholder={`Ask for a change: ${suggestionsFor(version).slice(0, 3).map((x) => `“${x}”`).join(', ')}`} className="min-w-0 flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm outline-none focus:border-accent" maxLength={400} />
               <button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>Request change</button>
               {version?.assembly.family === 'legged_walker' && !version?.spec.followUps.includes('dance') && <button type="button" className="btn-secondary" disabled={busy} onClick={() => void act(() => api.followUp(id, 'Make it dance'))}>Make it dance</button>}
             </form>
@@ -313,8 +330,8 @@ export default function Workspace() {
           <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); const r = String(new FormData(e.currentTarget).get('change') || '').trim(); if (r.length >= 2) { setRemixOpen(false); void act(() => api.remix(id, r)); } }}>
             <h2 className="text-lg font-semibold">Remix this invention</h2>
             <p className="mt-1 text-sm text-slate-500">Forks the current version into your own invention, keeps credit to {inv.ownerLabel}, and asks the agent for one change.</p>
-            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus defaultValue="Give it six legs" maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <div className="mt-2 flex flex-wrap gap-1">{['Give it six legs', 'Walk 30% further', 'Make it dance', 'Use longer legs', 'Make it calmer'].map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={(e) => { const f = (e.currentTarget.closest('form') as HTMLFormElement); (f.elements.namedItem('change') as HTMLInputElement).value = s; }}>{s}</button>)}</div>
+            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus defaultValue={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
+            <div className="mt-2 flex flex-wrap gap-1">{suggestionsFor(version).map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={(e) => { const f = (e.currentTarget.closest('form') as HTMLFormElement); (f.elements.namedItem('change') as HTMLInputElement).value = s; }}>{s}</button>)}</div>
             <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setRemixOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>Remix</button></div>
           </form>
         </div>
