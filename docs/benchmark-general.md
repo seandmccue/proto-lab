@@ -570,3 +570,28 @@ part (chassis-quad-160, the measured recipe). Walker set after the fix (`bench-r
 | --- | --- | --- | --- |
 | muse (walk, then dance) | 2 | 2/2, two iterations each | 67 s, 69 s (0.51 m) |
 | sprinter (40 cm) | 2 | 2/2, first try | 46 s, 41 s (0.51 m) |
+
+
+## Eleventh full pass on the integration branch (v12, 2026-11-03 20:58 UTC)
+
+`integration/main-into-codex` (PR #140): main through #142 merged into the tip of the deployed UI
+stack. `bench-results-integration-full`, concurrency 3:
+
+| Metric | Value |
+| --- | --- |
+| Passed | **10 of 10** (third consecutive clean pass) |
+| API/model errors | 0 |
+| Median completion time | **61.1 s** |
+| Specialist escalations | 0 |
+| First-try | 9 of 10 (walker: walk then dance; novel gadget: three iterations) |
+
+| Prompt | Time | Prompt | Time |
+| --- | --- | --- | --- |
+| windmill | 12 s | claw | 73 s |
+| butterfly | 24 s | drawbridge | 111 s |
+| ferris | 27 s | crab | 146 s (first try, 0.39 m) |
+| crane | 45 s | novel | 149 s |
+| muse | 61 s (0.51 m, v2) | catapult | 61 s |
+
+Across twelve full passes: 112 of 120 runs passed. Part of the speed-up is time of day on the Meta
+Model API; the round counts match the previous pass.
