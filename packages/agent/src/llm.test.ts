@@ -14,8 +14,10 @@ test('chat retries a 503 service_overloaded reply and then succeeds', async () =
   await new Promise<void>((r) => server.listen(0, r));
   const port = (server.address() as { port: number }).port;
   try {
-    const res = await chat({ baseUrl: `http://127.0.0.1:${port}`, model: 'muse-wonder-1.0', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 }, [{ role: 'user', content: 'hi' }], [], { toolChoice: 'auto' });
+    const retries: number[] = [];
+    const res = await chat({ baseUrl: `http://127.0.0.1:${port}`, model: 'muse-wonder-1.0', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 }, [{ role: 'user', content: 'hi' }], [], { toolChoice: 'auto', onRetry: (r) => { retries.push(r.attempt); assert.match(r.reason, /503/); } });
     assert.equal(hits, 3);
+    assert.deepEqual(retries, [1, 2], 'caller is told about each retry');
     assert.equal(res.toolCalls[0]?.function.name, 'write_plan');
   } finally { server.close(); }
 });

@@ -48,7 +48,7 @@ export class TransientModelError extends Error {
   constructor(message: string) { super(message); this.name = 'TransientModelError'; }
 }
 
-export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: ToolDef[], opts: { toolChoice?: 'auto' | 'required' | { name: string }; temperature?: number; signal?: AbortSignal } = {}): Promise<ChatResult> {
+export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: ToolDef[], opts: { toolChoice?: 'auto' | 'required' | { name: string }; temperature?: number; signal?: AbortSignal; onRetry?: (info: { attempt: number; maxAttempts: number; delayMs: number; reason: string }) => void } = {}): Promise<ChatResult> {
   const body: Record<string, unknown> = {
     model: cfg.model,
     messages,
@@ -79,7 +79,9 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
       lastErr = `Meta Model API request failed (${cfg.model}): ${(e as Error).name === 'TimeoutError' ? `no response within ${cfg.timeoutMs / 1000} s` : (e as Error).message}`;
       if ((e as Error).name === 'TimeoutError' && attempt >= 1) break; // one retry for timeouts, not four
     }
-    await new Promise((r) => setTimeout(r, DELAYS_MS[attempt] ?? 30000));
+    const delayMs = DELAYS_MS[attempt] ?? 30000;
+    if (attempt + 1 < MAX_ATTEMPTS) opts.onRetry?.({ attempt: attempt + 1, maxAttempts: MAX_ATTEMPTS, delayMs, reason: lastErr });
+    await new Promise((r) => setTimeout(r, delayMs));
   }
   if (!res) throw new TransientModelError(`${lastErr} (after ${tries} attempt${tries === 1 ? '' : 's'})`);
   if (process.env.MODEL_DEBUG) console.error(`[llm] ← ${cfg.model} in ${((Date.now() - started) / 1000).toFixed(1)} s`);

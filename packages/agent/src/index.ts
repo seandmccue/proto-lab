@@ -158,7 +158,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     const testsBefore = rt.tests.length;
     let res;
     try {
-      res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto' });
+      res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto', onRetry: (r) => emit({ type: 'status', message: `${prettyModelName(driver.model)} did not answer (${/HTTP (\d+)/.exec(r.reason)?.[0] ?? r.reason.replace(/^Meta Model API (error from [^:]+|request failed \([^)]+\)): ?/, '').slice(0, 80)}); retrying in ${Math.round(r.delayMs / 1000)} s (attempt ${r.attempt + 1} of ${r.maxAttempts}).` }) });
     } catch (e) {
       // The specialist being unavailable (overloaded / 5xx / timeout) must not sink the build: hand back to the
       // primary Muse model and say so. Any other error, or a primary-model outage, is reported verbatim.
