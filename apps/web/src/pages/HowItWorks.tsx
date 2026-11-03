@@ -11,7 +11,7 @@ const steps = [
   {
     title: 'Pick parts and assemble',
     label: 'Muse Spark + parts catalog',
-    detail: 'Spark searches a 100-part component library (frames, gears, shafts, hinges, sliders, cranks, servos, gearmotors, springs, wings, propellers, grippers…) and designs missing parts itself from profiles, extrusions and revolves. It then mounts parts at real connectors with structured assembly operations; every op is validated before it runs.',
+    detail: 'Spark searches a 100-part component library (frames, gears, shafts, hinges, sliders, cranks, servos, gearmotors, springs, wings, propellers, grippers…) and designs missing parts itself from profiles, extrusions and revolves. It then mounts parts at real connectors with structured assembly operations; every op is validated before it runs, and the 3D view shows the assembly taking shape before the first simulation.',
   },
   {
     title: 'Run the physics tests',
