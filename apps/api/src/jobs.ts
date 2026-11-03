@@ -108,7 +108,8 @@ export class JobRunner {
         worker.on('error', (e) => reject(e));
         worker.on('exit', (code) => { if (code !== 0) reject(new Error(`agent worker exited with code ${code}`)); });
       });
-      this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN description=\'\' THEN ? ELSE description END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
+      // The description follows the latest build's summary until the owner publishes (publishing stores their own text).
+      this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN visibility=\'public\' AND description<>\'\' THEN description ELSE ? END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
       update(out.status === 'error' ? 'error' : 'done', out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
     } catch (e) {
       push({ t: now(), type: 'error', message: (e as Error).message });
