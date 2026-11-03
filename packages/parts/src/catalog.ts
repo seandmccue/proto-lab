@@ -40,6 +40,8 @@ const PRESETS: Preset[] = [
   { id: 'cam-follower-98', kind: 'cam_follower', params: {} },
   { id: 'follower-guide-6', kind: 'follower_guide', params: { stemSize: 0.006, reach: 0.044 } },
   { id: 'follower-guide-9', kind: 'follower_guide', params: {} },
+  { id: 'gimbal-frame-100', kind: 'gimbal_frame', params: { opening: 0.084, rim: 0.008, thickness: 0.01 } },
+  { id: 'gimbal-frame-74', kind: 'gimbal_frame', params: { opening: 0.062, rim: 0.006, thickness: 0.008 } },
   { id: 'clevis-12', kind: 'clevis', params: { gap: 0.012, rise: 0.016, wall: 0.003 } },
   { id: 'clevis-20', kind: 'clevis', params: { gap: 0.02, rise: 0.026, wall: 0.004 } },
   { id: 'bell-crank-30x40', kind: 'bell_crank', params: { input: 0.03, output: 0.04, width: 0.01, thickness: 0.004 } },
@@ -66,6 +68,7 @@ const PRESETS: Preset[] = [
   { id: 'orrery-earth-44', kind: 'orrery_globe', params: { radius: 0.022, style: 1 } },
   { id: 'orrery-moon-20', kind: 'orrery_globe', params: { radius: 0.01, style: 2 } },
   { id: 'foam-ball-60', kind: 'ball', params: { radius: 0.03, density: 40 } }, { id: 'wood-ball-40', kind: 'ball', params: { radius: 0.02, density: 600 } }, { id: 'block-40', kind: 'block', params: { length: 0.04, width: 0.04, height: 0.04, density: 600 } }, { id: 'foam-pizza-80', kind: 'disc', params: { radius: 0.04, thickness: 0.008, density: 60 } },
+  { id: 'counterweight-40g', kind: 'counterweight', params: { mass: 0.04 } },
   { id: 'tray-45', kind: 'tray', params: { radius: 0.045, depth: 0.012 } }, { id: 'counterweight-500g', kind: 'counterweight', params: { mass: 0.5 } }, { id: 'counterweight-2kg', kind: 'counterweight', params: { mass: 2 } },
 ];
 

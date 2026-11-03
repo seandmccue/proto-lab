@@ -53,6 +53,20 @@ test('motion test: a motor spins a propeller on an anchored tower and reports re
   const r = await runTest(a, { env, test: { kind: 'motion', id: 'spin_1', duration_s: 4, measure: { joints: ['spin'], base: 'base', clearancePairs: [], noGroundContact: ['prop'] }, criteria: { minRevolutions: 2, torqueWithinRating: true } } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics['spin.revolutions'] >= 2);
+
+  const swingTest = {
+    kind: 'motion' as const, id: 'swing', duration_s: 5,
+    measure: { joints: ['spin'], jointSwing: [{ joint: 'spin', minEachWay_rad: 0.4 }], clearancePairs: [], noGroundContact: [] },
+    criteria: { torqueWithinRating: true },
+  };
+  const swing = (offset: number) => runTest(a, { env, test: swingTest, controller: {
+    drives: [{ controlId: 'spin', mode: 'position', rampIn_s: 0.5, profile: { kind: 'sine', amplitude: 0.65, frequency_hz: 0.4, offset, phase: 0 } }],
+  } });
+  const centered = await swing(0);
+  assert.ok(centered.passed, centered.failureReasons.join(', '));
+  const oneSided = await swing(0.65);
+  assert.ok(oneSided.metrics['spin.amplitude_rad'] >= 0.8);
+  assert.ok(oneSided.failureReasons.some((reason) => reason.includes('target ±0.4 rad')));
 });
 
 test('Ferris motion checks every cabin against world upright over two revolutions', async () => {

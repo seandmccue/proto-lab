@@ -168,6 +168,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   if (test.kind === 'launch' && !projRb) failureReasons.push(`Projectile instance "${test.projectile}" not found`);
   const payRb = test.kind === 'grip' ? bodyOf.get(test.payload) : undefined;
   if (test.kind === 'grip' && !payRb) failureReasons.push(`Payload instance "${test.payload}" not found`);
+  const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
   const motionMeasure = test.kind === 'motion' ? test.measure : undefined;
   const uprightTilt = new Map((motionMeasure?.uprightInstances ?? []).map((id) => [id, 0]));
   const linearTravel = (motionMeasure?.linearTravel ?? []).map((target) => ({
@@ -184,6 +185,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     const retentionThreshold = criteria.maxPayloadSeparation_m !== undefined;
     const tiltThreshold = criteria.maxInstanceTilt_deg !== undefined;
     if (jointThreshold && !measured.length) failureReasons.push('A joint threshold needs a measurable motorized joint');
+    for (const { joint } of measure.jointSwing ?? []) {
+      if (ctlJoints.get(joint)?.joint.type !== 'revolute') {
+        failureReasons.push(`Swing joint "${joint}" must be a motorized revolute joint`);
+      }
+    }
     if (baseThreshold && !baseRb) failureReasons.push('A base threshold needs a base instance');
     if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
     for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
@@ -224,7 +230,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !orbits.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !orbits.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -256,7 +262,6 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     }
   };
   let clearanceHit: string | null = null, groundHit: string | null = null, landing: Vec3 | null = null, maxProjHeight = projStart?.position[1] ?? 0, released = false;
-  const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
   const snapshot = (t: number) => {
     const bodies: Record<string, Transform> = {}; const joints: Record<string, number> = {};
     for (const g of rgroups) { const T = rootT(bodyOf.get(g.rootId)!); for (const m of g.members) bodies[m.id] = compose(T, localOffset.get(m.id)!); }
@@ -351,6 +356,14 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const js = jointStats(test.measure.joints.length ? test.measure.joints : [...ctlJoints.keys()]);
       for (const s of js) reportJoint(s, s.joint.motor!.controlId);
       const c = test.criteria;
+      for (const { joint, minEachWay_rad } of test.measure.jointSwing ?? []) {
+        const { minA, maxA } = ctlJoints.get(joint)!;
+        metrics[`${joint}.minSwing_rad`] = +minA.toFixed(4);
+        metrics[`${joint}.maxSwing_rad`] = +maxA.toFixed(4);
+        if (minA > -minEachWay_rad || maxA < minEachWay_rad) {
+          failureReasons.push(`${joint} swung from ${minA.toFixed(3)} to ${maxA.toFixed(3)} rad, target ±${minEachWay_rad} rad`);
+        }
+      }
       if (c.minJointAmplitude_rad !== undefined) for (const s of js) if (s.maxA - s.minA < c.minJointAmplitude_rad) failureReasons.push(`${s.joint.motor!.controlId} amplitude ${(s.maxA - s.minA).toFixed(3)} < ${c.minJointAmplitude_rad}`);
       if (c.minRevolutions !== undefined) for (const s of js) if ((s.maxA - s.minA) / (2 * Math.PI) < c.minRevolutions) failureReasons.push(`${s.joint.motor!.controlId} turned ${((s.maxA - s.minA) / (2 * Math.PI)).toFixed(2)} rev < ${c.minRevolutions}`);
       if (c.minJointRate_rad_s !== undefined) for (const s of js) if (s.peakRate < c.minJointRate_rad_s) failureReasons.push(`${s.joint.motor!.controlId} peak rate ${s.peakRate.toFixed(2)} rad/s < ${c.minJointRate_rad_s}`);

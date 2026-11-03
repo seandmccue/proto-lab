@@ -297,6 +297,39 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
       });
     },
   },
+  gimbal_frame: {
+    kind: 'gimbal_frame', name: 'Open gimbal frame', category: 'joints',
+    description: 'Open horizontal frame with outer pivots along X and inward pivots along Z. Nest a smaller frame on the perpendicular axis for a two-axis gimbal.',
+    params: {
+      opening: { min: 0.025, max: 0.3, default: 0.084, unit: 'm', description: 'Clear width of the square opening' },
+      rim: { min: 0.004, max: 0.02, default: 0.008, unit: 'm', description: 'Rail width' },
+      thickness: { min: 0.004, max: 0.025, default: 0.01, unit: 'm', description: 'Frame thickness along Y' },
+    },
+    generate: (p, id) => {
+      const { opening, rim, thickness } = p;
+      const span = opening + 2 * rim;
+      const railCenter = (opening + rim) / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [rim, thickness, span] }, [-railCenter, 0, 0], '#304962'),
+        piece({ kind: 'box', size: [rim, thickness, span] }, [railCenter, 0, 0], '#304962'),
+        piece({ kind: 'box', size: [opening, thickness, rim] }, [0, 0, railCenter], COLORS.aluminium),
+        piece({ kind: 'box', size: [opening, thickness, rim] }, [0, 0, -railCenter], COLORS.aluminium),
+      ];
+      return finish({
+        id, kind: 'gimbal_frame', name: `Open gimbal frame ${mm(span)} mm`, category: 'joints',
+        description: `Aluminium frame with a ${mm(opening)} mm clear opening and perpendicular bearing axes.`,
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [span, thickness, span],
+        material: 'aluminium', geometry, connectors: [
+          fx('outer_left', [-span / 2, 0, 0], [-1, 0, 0], 'revolute', 'Outer pivot along X'),
+          fx('outer_right', [span / 2, 0, 0], [1, 0, 0], 'revolute', 'Outer pivot along X'),
+          fx('inner_front', [0, 0, opening / 2], [0, 0, -1], 'revolute', 'Inward pivot along Z'),
+          fx('inner_back', [0, 0, -opening / 2], [0, 0, 1], 'revolute', 'Inward pivot along Z'),
+          fx('top', [0, thickness / 2, railCenter], [0, 1, 0]),
+          fx('bottom', [0, -thickness / 2, railCenter], [0, -1, 0]),
+        ], cost_usd: 4,
+      });
+    },
+  },
   clevis: {
     kind: 'clevis', name: 'Forked clevis', category: 'joints',
     description: 'Forked bracket with a fixed bottom "mount" and a revolute crosswise "pin" along Z, for a rod or linkage.',

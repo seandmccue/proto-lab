@@ -10,6 +10,7 @@ import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx'
 import FollowerTimingEvidence from '../components/FollowerTimingEvidence.tsx';
 import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
+import TrayTiltEvidence from '../components/TrayTiltEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -702,6 +703,7 @@ export default function Workspace() {
           {!showLive && test && <FollowerTimingEvidence time={time.t} test={test} definition={testDefinition} isSemaphore={version?.id === 'ver_cam_semaphore_1' && test.testId === 'cam_semaphore_stroke'} />}
           {!showLive && version && test && <TriplexTimingEvidence version={version} time={time.t} test={test} />}
           {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}
+          {!showLive && version && test && <TrayTiltEvidence inventionId={version.inventionId} versionId={version.id} time={time.t} test={test} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
           {running && <SimulationStatus events={events} running replay={replayStatus} />}

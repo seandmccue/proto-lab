@@ -298,6 +298,8 @@
 .workbench-follower-plot polyline[data-line="1"] { stroke-dasharray: 5 3; }
 .workbench-follower-plot polyline[data-line="2"] { stroke-dasharray: 1 3; stroke-linecap: round; }
 .workbench-follower-cursor { stroke: var(--bench-violet); stroke-width: 1.5; }
+.workbench-follower-legend .workbench-chart-limit-label::before { border-top: 2px dashed #a62e47; }
+.workbench-chart-limit { stroke: #a62e47; stroke-width: 1.5; stroke-dasharray: 6 3 1 3; }
 .workbench-orbit-evidence {
   display: flex;
   align-items: center;

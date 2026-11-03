@@ -149,6 +149,23 @@ if (judge) checks.push(
     }
     return 'Earth and Moon paths measured separately';
   }],
+  ['Muse self-leveling tray', async () => {
+    const id = 'inv_f72fb06c611342eb';
+    const { invention } = await publicBuild(id);
+    const replay = await version(id, invention.currentVersionId);
+    const drive = replay.assembly.controller.drives[0]?.controlId;
+    if (replay.assembly.controller.drives.length !== 1 || !drive
+      || !replay.assembly.joints.some(({ id, type, motor }) => id === 'j_inner_bracket' && type === 'revolute' && !motor)) {
+      throw new Error('Expected one drive and a separate passive pivot');
+    }
+    const target = 25 * Math.PI / 180;
+    if (!recorded(replay, (test) => {
+      const angles = test.trace.frames.map(({ joints }) => joints[drive]).filter(Number.isFinite);
+      return test.passed && test.metrics['tray.maxTilt_deg'] <= 8 && test.metrics.groundContactViolation === 0
+        && Math.min(...angles) <= -target && Math.max(...angles) >= target;
+    })) throw new Error('Expected the recorded swing on both sides and a level tray');
+    return 'one drive, a passive pivot, and a measured swing in both directions';
+  }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
     if (!invention.featured) throw new Error('Expected the clock to be featured');
