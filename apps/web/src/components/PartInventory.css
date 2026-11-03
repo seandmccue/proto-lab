@@ -1,12 +1,56 @@
 .part-inventory { scroll-margin-top: 8rem; }
 .part-inventory-kicker { color: var(--violet-dark); }
 .part-inventory .lab-section-heading p { max-width: 64ch; line-height: 1.55; }
+.part-inventory-panel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+.part-inventory-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: .75rem;
+  padding: .9rem;
+  border-bottom: 1px solid var(--line);
+}
+.part-inventory-controls label { display: grid; flex: 1 1 11rem; gap: .25rem; min-width: 0; }
+.part-inventory-controls label:first-child { flex-grow: 2; }
+.part-inventory-controls :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: .45rem .65rem;
+  border: 1px solid #b5a7c6;
+  border-radius: .5rem;
+  background: var(--surface);
+  color: var(--ink);
+}
+.part-inventory-count {
+  flex: none;
+  padding-bottom: .65rem;
+  font-variant-numeric: tabular-nums;
+}
+.part-inventory-results {
+  min-height: 4.5rem;
+  max-height: clamp(22rem, 64vh, 36rem);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  background: var(--paper);
+}
+.part-inventory-results:focus-visible { outline-offset: -3px; }
+.part-inventory-message { padding: 1rem; }
+.part-inventory-retry { margin: .85rem; }
 .part-inventory-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: .75rem;
+  padding: .85rem;
 }
 .part-inventory-card {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: .85rem;
@@ -23,11 +67,11 @@
   color: #e4d6ff;
 }
 .part-inventory-illustration svg { width: 100%; height: 100%; }
-.part-inventory-marker { place-self: center; font-size: 1.5rem; color: #cab8f3; }
-.part-inventory-detail { padding: .7rem .75rem .85rem; }
+.part-inventory-detail { padding: .7rem .75rem .85rem; overflow-wrap: anywhere; }
 .part-inventory-detail h3 { font-weight: 750; letter-spacing: -.02em; line-height: 1.3; }
 .part-inventory-detail p { margin-top: .3rem; line-height: 1.45; }
 
 @media (max-width: 650px) {
   .part-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .part-inventory-count { padding-bottom: 0; }
 }

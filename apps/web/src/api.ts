@@ -35,11 +35,13 @@ export type JobEvent = { t: string; type: string; [k: string]: unknown };
 export interface JobStatus { id: string; inventionId: string; status: 'queued' | 'running' | 'done' | 'error'; step: string; versionId: string | null; errorCode: string | null; events: JobEvent[]; eventCount: number }
 export interface ModelInfo { modelId: string; label: string; live: boolean; detail: string }
 export interface Example { id: string; title: string; prompt: string; blurb: string }
+export type CatalogPart = Omit<PartDefinition, 'connectors' | 'decorative' | 'meshUrl'>;
 
 export const api = {
   model: () => req<ModelInfo>('/api/model'),
   load: () => req<{ active: number; queued: number; maxConcurrent: number }>('/api/load'),
   part: (id: string) => req<{ part: PartDefinition }>(`/api/parts/${encodeURIComponent(id)}`),
+  parts: () => req<{ parts: CatalogPart[] }>('/api/parts'),
   examples: () => req<{ examples: Example[] }>('/api/examples'),
   create: (body: { prompt?: string; exampleId?: string }) => req<{ inventionId: string; jobId: string }>('/api/inventions', { method: 'POST', body: JSON.stringify(body), headers: { 'idempotency-key': Math.random().toString(36).slice(2, 18) } }),
   job: (id: string, since = 0) => req<JobStatus>(`/api/jobs/${id}?since=${since}`),
