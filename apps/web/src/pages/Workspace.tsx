@@ -36,6 +36,7 @@ export default function Workspace() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [remixOpen, setRemixOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean } | null>(null);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
@@ -219,6 +220,15 @@ export default function Workspace() {
             {tab === 'tests' && (
               <div className="overflow-auto p-3 space-y-3">
                 {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} · engine: {version?.tests[0]?.engine}</p>}
+                {version && !running && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
+                    {explain?.vid === version.id && !explain.loading ? (
+                      <><p className="text-slate-800 whitespace-pre-wrap">{explain.text}</p><p className="mt-1 text-[10px] text-slate-400">Explained by {explain.modelId} from this version's recorded decisions and measurements.</p></>
+                    ) : (
+                      <button className="btn-secondary !px-3 !py-1 !text-xs" disabled={explain?.loading} onClick={async () => { setExplain({ vid: version.id, text: '', modelId: '', loading: true }); try { const r = await api.explain(id, version.id); setExplain({ vid: version.id, ...r }); } catch (e) { setExplain({ vid: version.id, text: (e as Error).message, modelId: '' }); } }}>{explain?.loading ? 'Asking Muse…' : 'Ask Muse to explain this design'}</button>
+                    )}
+                  </div>
+                )}
                 {version?.decisions.map((d, i) => (
                   <div key={i} className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs">
                     <div className="font-medium text-slate-800">{d.source === 'model' ? `Model decision${d.modelId ? ` · ${d.modelId}` : ''}` : 'Planner decision'}</div>
