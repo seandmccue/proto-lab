@@ -32,6 +32,12 @@ test('tool runtime: a Ferris wheel from generic ops passes a motion test with cl
   console.log('ferris', r.passed, JSON.stringify(r.metrics).slice(0, 200), r.failureReasons);
   assert.ok(r.metrics['spin.revolutions'] >= 1, 'wheel turned');
   assert.equal(r.metrics.groundContactViolation, 0);
+  assert.deepEqual(rt.pendingChecks(), []);
+  await rt.call('define_test', { test: { kind: 'motion', id: 'unstable', duration_s: 1, measure: { joints: ['missing-motor'], clearancePairs: [['cab', 'missing-base']] }, criteria: { minRevolutions: 1 } } });
+  const invalid = await rt.call('run_test', { test_id: 'unstable' }) as { passed: boolean; failureReasons: string[] };
+  assert.equal(invalid.passed, false);
+  assert.match(invalid.failureReasons.join(' '), /missing-motor.*missing-base/);
+  assert.match((await rt.call('finalize_design', { summary: 'Everything passed', status: 'passed' }) as { error: string }).error, /unstable: latest test failed/);
 });
 
 test('tool runtime: design_part + wings with sine drives report stroke amplitude', async () => {

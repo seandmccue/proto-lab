@@ -38,12 +38,22 @@ export class JobRunner {
   private active = 0;
   /** Builds run in parallel worker threads (model calls are network-bound); several judges can build at once. */
   private readonly maxConcurrent = Math.max(1, Number(process.env.JOB_CONCURRENCY) || 3);
+  private readonly maxQueued = Math.max(1, Number(process.env.JOB_MAX_QUEUED) || 12);
   private live = new Map<string, PublicEvent[]>();
+  private checkpoints = new Map<string, Promise<void>>();
   private liveAssembly = new Map<string, { assembly: Assembly; iteration: number; rationale: string; at: string }>(); // latest in-progress assembly per job, for "watch it assemble"
-  constructor(private db: DatabaseSync, private store: ObjectStore) {}
+  constructor(private db: DatabaseSync, private store: ObjectStore, private options: { persist?: () => Promise<void> } = {}) {}
 
   events(jobId: string): PublicEvent[] | null { return this.live.get(jobId) ?? null; }
   assemblySnapshot(jobId: string) { return this.liveAssembly.get(jobId) ?? null; }
+  waitForCheckpoint(jobId: string) { return this.checkpoints.get(jobId); }
+
+  private async checkpoint(jobId: string) {
+    if (!this.options.persist) return;
+    const pending = this.options.persist();
+    this.checkpoints.set(jobId, pending);
+    try { await pending; } finally { this.checkpoints.delete(jobId); }
+  }
 
   enqueue(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     this.queue.push(() => this.run(job, invention, opts));
@@ -58,6 +68,7 @@ export class JobRunner {
   }
   /** Queue depth + running jobs, for the UI's "N builds ahead of you" hint. */
   load() { return { active: this.active, queued: this.queue.length, maxConcurrent: this.maxConcurrent }; }
+  hasCapacity() { return this.queue.length < this.maxQueued; }
 
   private async run(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     const events: PublicEvent[] = [];
@@ -108,17 +119,30 @@ export class JobRunner {
       // The agent (model calls + Rapier simulation) runs in a worker thread so HTTP polling stays responsive.
       const out = await new Promise<{ status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }>((resolve, reject) => {
         const worker = new Worker(fileURLToPath(new URL('./agentWorker.ts', import.meta.url)), { workerData: { prompt: invention.prompt, inventionId: invention.id, parent: opts.parent, changeRequest: opts.changeRequest, startIteration, versionIds: Array.from({ length: 40 }, () => newId('ver')) }, env: process.env as Record<string, string> });
-        worker.on('message', (m: { kind: 'event'; event: AgentEvent } | { kind: 'result'; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }) => { if (m.kind === 'event') onEvent(m.event); else resolve(m); });
-        worker.on('error', (e) => reject(e));
-        worker.on('exit', (code) => { if (code !== 0) reject(new Error(`agent worker exited with code ${code}`)); });
+        let pending = Promise.resolve();
+        let returned = false;
+        worker.on('message', (m: { kind: 'event'; event: AgentEvent } | { kind: 'result'; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }) => {
+          if (m.kind === 'result') { returned = true; void pending.then(() => resolve(m), reject); return; }
+          pending = pending.then(async () => {
+            onEvent(m.event);
+            if (m.event.type === 'version') await this.checkpoint(job.id);
+          });
+          void pending.catch((e) => { reject(e); void worker.terminate(); });
+        });
+        worker.on('error', (e) => { void pending.then(() => reject(e), reject); });
+        worker.on('exit', (code) => {
+          if (!returned) void pending.then(() => reject(new Error(`Agent worker exited before returning a result (code ${code})`)), reject);
+        });
       });
       // The description follows the latest build's summary until the owner publishes (publishing stores their own text).
       this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN visibility=\'public\' AND description<>\'\' THEN description ELSE ? END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
       update(out.status === 'error' ? 'error' : 'done', out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
+      await this.checkpoint(job.id);
     } catch (e) {
       push({ t: now(), type: 'error', message: (e as Error).message });
       this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('error', now(), invention.id);
       update('error', 'Error', lastVersionId, 'agent_error');
+      await this.checkpoint(job.id);
     } finally {
       setTimeout(() => { this.live.delete(job.id); this.liveAssembly.delete(job.id); }, 5 * 60_000).unref();
     }

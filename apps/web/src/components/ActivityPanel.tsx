@@ -6,8 +6,10 @@ import type { Spec } from '@protolab/schema';
 const LABELS: Record<string, string> = { distance_m: 'Distance', speed_m_s: 'Speed', lateralDrift_m: 'Lateral drift', maxTilt_deg: 'Peak tilt', fell: 'Fell', fellAt_s: 'Fell at', minBaseHeight_m: 'Min base height', baseDisplacement_m: 'Base drift', peakHipTorque_Nm: 'Hip torque', peakKneeTorque_Nm: 'Knee torque', energyProxy_J: 'Energy proxy', landingDistance_m: 'Landing distance', maxHeight_m: 'Peak height', targetError_m: 'Target error', released: 'Released', landed: 'Landed', payloadSeparation_m: 'Payload separation', payloadDrop_m: 'Payload drop', clearanceViolation: 'Clearance hit', groundContactViolation: 'Ground contact', motorSaturation_fraction: 'Motor saturation', peakMotorEffort: 'Peak motor effort' };
 const HIDE = new Set(['duration_s', 'startBodyHeight_m', 'hipServoRating_Nm', 'kneeServoRating_Nm']);
 function fmtMetric(k: string, v: number): string {
+  if (k.endsWith('_m_s')) return `${v.toFixed(3)} m/s`;
+  if (k.endsWith('_rad_s')) return `${v.toFixed(2)} rad/s`;
   if (k.endsWith('_m')) return fmt.m2(v); if (k.endsWith('_deg')) return fmt.deg(v); if (k.endsWith('_Nm')) return fmt.nm(v); if (k.endsWith('_s')) return `${v.toFixed(2)} s`; if (k.endsWith('_J')) return `${v.toFixed(2)} J`;
-  if (k.endsWith('_rad')) return `${v.toFixed(3)} rad (${((v * 180) / Math.PI).toFixed(0)}°)`; if (k.endsWith('_rad_s')) return `${v.toFixed(2)} rad/s`; if (k.endsWith('_fraction')) return fmt.pct(v); if (k.endsWith('_N')) return `${v.toFixed(2)} N`;
+  if (k.endsWith('_rad')) return `${v.toFixed(3)} rad (${((v * 180) / Math.PI).toFixed(0)}°)`; if (k.endsWith('_fraction')) return fmt.pct(v); if (k.endsWith('_N')) return `${v.toFixed(2)} N`;
   if (k === 'fell' || k === 'released' || k === 'landed' || k.endsWith('Violation')) return v ? 'yes' : 'no'; if (k.endsWith('revolutions')) return `${v.toFixed(2)} rev`; return `${v}`;
 }
 export function Metrics({ metrics, kind }: { metrics: Record<string, number>; kind: string }) {

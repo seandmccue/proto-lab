@@ -64,10 +64,8 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       if (!pending || testedThisIteration) {
         // First build, or the first change after a test: a new iteration begins and its decision is this rationale.
         iteration = Math.max(iteration + (pending ? 1 : 0), (input.startIteration ?? 0) + 1);
-        // A revision that follows a failed test is, by construction, based on that measurement; record it if the model did not.
         const lastTest = rt.tests[rt.tests.length - 1];
-        const cited = basedOn ?? (lastTest && !lastTest.passed ? `${lastTest.testId}: ${lastTest.failureReasons[0] ?? 'did not pass'}` : undefined);
-        pending = { assembly, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn: cited, changes: {} }, log: currentLog };
+        pending = { assembly, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn, previousTestId: lastTest?.testId, changes: {} }, log: currentLog };
         currentLog = [];
         emit({ type: 'status', message: iteration === (input.startIteration ?? 0) + 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
       } else {
@@ -95,9 +93,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
     const message = (e as Error).message; emit({ type: 'error', message });
     return { versions, status: 'error', summary: message, modelId, spec: rt.spec };
   }
-  const anyTest = rt.tests.length > 0;
-  const lastPassed = anyTest && [...rt.tests].slice(-3).some((t) => t.passed) && rt.tests[rt.tests.length - 1].passed;
-  const status: 'passed' | 'failed' = rt.finalized ? rt.finalized.status : lastPassed ? 'passed' : 'failed';
+  const status: 'passed' | 'failed' = rt.finalized?.status ?? (rt.pendingChecks().length ? 'failed' : 'passed');
   const summary = rt.finalized?.summary ?? (status === 'passed' ? 'Design passed its tests.' : 'Prototype did not pass its tests. The design is inspectable; try a change request.');
   // Keep the spec's unverified list in sync with the final statement.
   if (versions.length) versions[versions.length - 1].spec = rt.spec;
@@ -117,7 +113,7 @@ function systemPrompt(parent?: VersionRecord | null): string {
 
 Procedure (follow it, briefly narrating each step in one sentence for the user):
 1. Understand the invention and its purpose. 2. Identify its recognisable physical features and required motions. 3. Break it into sub-assemblies and components → write_plan (include honest "unverified" items such as aerodynamic lift, fluid flow, or anything this simulator cannot measure).
-4. search_catalog for each sub-assembly (use categories; read connector ids/axes from results). 5. create_part (parametric) or design_part (primitives/extrusions/revolves) for anything missing — custom chassis sizes, wings, shells, curved silhouettes, brackets. 6. assemble with "mount" ops so parts connect at real connectors (axis = parent connector axis; spin_deg orients the child; use pattern for mirrored or polar repeats), set_drives for every motorised joint. 7. define_test with measurable criteria (motion: amplitudes/revolutions/clearances/base tilt; walk: distance & tilt; launch: landing distance; grip: payload retention). 8. run_test. 9. Read failure reasons and metrics; sweep_drive to measure before changing; revise with assemble (move/remove/mount) or set_drives, then re-test. 10. finalize_design with an honest summary and the unverified behaviours.
+4. search_catalog for each sub-assembly (use categories; results carry every connector's id, position and axis, so mount straight from them; get_part only when you need the geometry pieces). 5. create_part (parametric) or design_part (primitives/extrusions/revolves) for anything missing — custom chassis sizes, wings, shells, curved silhouettes, brackets. 6. assemble with "mount" ops so parts connect at real connectors (axis = parent connector axis; spin_deg orients the child; use pattern for mirrored or polar repeats), set_drives for every motorised joint. 7. define_test with measurable criteria (motion: amplitudes/revolutions/clearances/base tilt; walk: distance & tilt; launch: landing distance; grip: payload retention). 8. run_test. 9. Read failure reasons and metrics; sweep_drive to measure before changing; revise with assemble (move/remove/mount) or set_drives, then re-test. 10. finalize_design with an honest summary and the unverified behaviours.
 
 Rules of thumb:
 - Make it look like the thing: use the recognisable silhouette (butterfly = body + 2 or 4 large shaped wings; Ferris wheel = tower + spoked wheel + hanging gondolas; crab = wide body + 6–8 legs; catapult = base + pivot arm + tray + counterweight/spring; windmill = tower + rotor blades; crane = base + boom + winch/line stand-in; drawbridge = deck on a hinge + tower + actuator). Choose colours (create_part color) and shells for appeal, but every motion must come from real joints and drives.
@@ -159,17 +155,13 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     { role: 'user', content: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt },
   ];
   const maxRounds = 24 + maxIterations * 6;
-  // Wall-clock budget: Meta Model API rounds take 5–60 s, so 66 rounds could run for an hour. After the budget the
-  // model gets two more rounds to finalize honestly, then the loop finalizes with the best result so far.
+  // The same deadline bounds model requests and retry delays across all rounds.
   const timeBudgetMs = Math.max(60, Number(process.env.AGENT_TIME_BUDGET_S) || 1200) * 1000;
-  const startedAt = Date.now(); let overtimeRounds = 0; let researchNudged = false;
+  const deadline = AbortSignal.timeout(timeBudgetMs);
+  let researchNudged = false;
   let consults = 0, specialistRoundsLeft = 0, failsAtLastConsult = 0;
   const fails = () => { let n = 0; for (const t of [...rt.tests].reverse()) { if (t.passed) break; n++; } return n; };
-  for (let round = 0; round < maxRounds && !rt.finalized; round++) {
-    if (Date.now() - startedAt > timeBudgetMs) {
-      if (overtimeRounds === 0) { emit({ type: 'status', message: `Time budget (${Math.round(timeBudgetMs / 60000)} min) reached; asking ${prettyModelName(model.model)} to finalize with the best result so far.` }); messages.push({ role: 'user', content: 'Time budget reached. Call finalize_design now: honest summary of what passed and what did not, status by the last test, and list every behaviour that remains unverified.' }); specialistRoundsLeft = 0; }
-      if (overtimeRounds++ >= 2) break;
-    }
+  for (let round = 0; round < maxRounds && !rt.finalized && !deadline.aborted; round++) {
     if (specialist && specialistRoundsLeft === 0 && consults < 2 && fails() >= specialist.after && fails() > failsAtLastConsult) {
       consults++; failsAtLastConsult = fails(); specialistRoundsLeft = 6;
       const msg = `This design needs a little more engineering. Bringing in ${prettyModelName(specialist.model.model)} to help.`;
@@ -183,8 +175,9 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     const testsBefore = rt.tests.length;
     let res;
     try {
-      res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto', onRetry: (r) => emit({ type: 'status', message: `${prettyModelName(driver.model)} did not answer (${/HTTP (\d+)/.exec(r.reason)?.[0] ?? r.reason.replace(/^Meta Model API (error from [^:]+|request failed \([^)]+\)): ?/, '').slice(0, 80)}); retrying in ${Math.round(r.delayMs / 1000)} s (attempt ${r.attempt + 1} of ${r.maxAttempts}).` }) });
+      res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto', signal: deadline, onRetry: (r) => emit({ type: 'status', message: `${prettyModelName(driver.model)} did not answer (${/HTTP (\d+)/.exec(r.reason)?.[0] ?? r.reason.replace(/^Meta Model API (error from [^:]+|request failed \([^)]+\)): ?/, '').slice(0, 80)}); retrying in ${Math.round(r.delayMs / 1000)} s (attempt ${r.attempt + 1} of ${r.maxAttempts}).` }) });
     } catch (e) {
+      if (deadline.aborted) break;
       // The specialist being unavailable (overloaded / 5xx / timeout) must not sink the build: hand back to the
       // primary Muse model and say so. Any other error, or a primary-model outage, is reported verbatim.
       if (specialistRoundsLeft > 0 && specialist && driver === specialist.model && e instanceof TransientModelError) {
@@ -204,6 +197,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.' }); continue;
     }
     for (const call of res.toolCalls) {
+      if (deadline.aborted) break;
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
       const result = await rt.call(call.function.name, args);
@@ -222,9 +216,9 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
   }
   setActive(model.model);
   if (!rt.finalized) {
-    const ok = rt.tests.length > 0 && rt.tests[rt.tests.length - 1].passed;
-    const why = Date.now() - startedAt > timeBudgetMs ? 'Time budget' : 'Round budget';
-    await rt.call('finalize_design', { summary: ok ? `${why} reached after a passing test.` : `${why} reached without a passing test; the last design is shown.`, status: ok ? 'passed' : 'failed' });
+    const why = deadline.aborted ? 'Time budget' : 'Round budget';
+    const pending = rt.pendingChecks();
+    await rt.call('finalize_design', { summary: `${why} reached before Muse completed its review. ${pending.length ? pending.join('; ').slice(0, 900) : 'Recorded checks are available for review.'}`, status: 'failed' });
   }
 }
 

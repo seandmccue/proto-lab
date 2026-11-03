@@ -2,6 +2,7 @@
  * Chat client for the Meta Model API (https://api.meta.ai/v1, OpenAI-compatible chat completions
  * with tool calling). Serves Muse Spark / Muse Wonder. Any other OpenAI-compatible endpoint also works.
  */
+import { setTimeout as delay } from 'node:timers/promises';
 export interface ModelConfig { baseUrl: string; model: string; apiKey: string; maxTokens: number; timeoutMs: number }
 
 export const DEFAULT_BASE_URL = 'https://api.meta.ai/v1';
@@ -64,6 +65,7 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
   if (process.env.MODEL_DEBUG) console.error(`[llm] → ${cfg.model}: ${messages.length} msgs, ~${Math.round(approxChars / 4)} tokens`);
   const MAX_ATTEMPTS = 6; const DELAYS_MS = [1500, 3000, 6000, 12000, 20000, 30000];
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    opts.signal?.throwIfAborted();
     tries = attempt + 1;
     try {
       const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(cfg.timeoutMs)]) : AbortSignal.timeout(cfg.timeoutMs);
@@ -75,13 +77,15 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
       res = null;
       if (process.env.MODEL_DEBUG) console.error(`[llm] ${lastErr.slice(0, 140)}; retrying (${attempt + 1}/${MAX_ATTEMPTS})`);
     } catch (e) {
+      opts.signal?.throwIfAborted();
       if ((e as Error).message.startsWith('Meta Model API error')) throw e;
       lastErr = `Meta Model API request failed (${cfg.model}): ${(e as Error).name === 'TimeoutError' ? `no response within ${cfg.timeoutMs / 1000} s` : (e as Error).message}`;
       if ((e as Error).name === 'TimeoutError' && attempt >= 1) break; // one retry for timeouts, not four
     }
     const delayMs = DELAYS_MS[attempt] ?? 30000;
-    if (attempt + 1 < MAX_ATTEMPTS) opts.onRetry?.({ attempt: attempt + 1, maxAttempts: MAX_ATTEMPTS, delayMs, reason: lastErr });
-    await new Promise((r) => setTimeout(r, delayMs));
+    if (attempt + 1 === MAX_ATTEMPTS) break;
+    opts.onRetry?.({ attempt: attempt + 1, maxAttempts: MAX_ATTEMPTS, delayMs, reason: lastErr });
+    await delay(delayMs, undefined, { signal: opts.signal });
   }
   if (!res) throw new TransientModelError(`${lastErr} (after ${tries} attempt${tries === 1 ? '' : 's'})`);
   if (process.env.MODEL_DEBUG) console.error(`[llm] ← ${cfg.model} in ${((Date.now() - started) / 1000).toFixed(1)} s`);

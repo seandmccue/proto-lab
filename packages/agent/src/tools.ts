@@ -108,6 +108,8 @@ export class ToolRuntime {
   assembly: Assembly = emptyAssembly();
   tests: TestResult[] = [];
   testSpecs = new Map<string, TestSpec>();
+  private testEvidence = new Map<string, { spec: TestSpec; result: TestResult }>();
+  private lastTestedAssembly: Assembly | null = null;
   testCount = 0; sweeps = 0; calls = 0;
   finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
   private events: ToolEvents;
@@ -115,19 +117,30 @@ export class ToolRuntime {
   constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 9, maxToolCalls: 60 }) { this.spec = spec; this.events = events; this.budget = budget; }
   resolve = (id: string) => this.customParts.get(id) ?? getPart(id);
 
+  pendingChecks(): string[] {
+    if (!this.tests.length) return ['No simulation test has run'];
+    const pending = [...this.testSpecs].flatMap(([id, spec]) => {
+      const evidence = this.testEvidence.get(id);
+      if (!evidence || evidence.spec !== spec) return [`${id}: current criteria have not been tested`];
+      return evidence.result.passed ? [] : [`${id}: latest test failed`];
+    });
+    if (this.lastTestedAssembly !== this.assembly) pending.push('The latest assembly or drive settings have not been tested');
+    return pending;
+  }
+
   summarisePart(p: PartDefinition) {
-    return { id: p.id, kind: p.kind, name: p.name, category: p.category, params: p.params, mass_kg: +p.mass_kg.toFixed(4), dimensions_m: p.dimensions_m.map((v) => +v.toFixed(4)), limits: p.limits, connectors: p.connectors.map((c) => `${c.id} (${c.kind}, axis ${c.axis.map((v) => +v.toFixed(2)).join(',')})`) };
+    return { id: p.id, kind: p.kind, name: p.name, category: p.category, params: p.params, mass_kg: +p.mass_kg.toFixed(4), dimensions_m: p.dimensions_m.map((v) => +v.toFixed(4)), limits: p.limits, connectors: p.connectors.map((c) => `${c.id} (${c.kind}, at ${c.position.map((v) => +v.toFixed(3)).join(',')}, axis ${c.axis.map((v) => +v.toFixed(2)).join(',')})`) }; // positions in the search result: a round of get_part per part was the commonest detour in the v10 pass (22 calls)
   }
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
     // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
     if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
     this.calls++;
-    if (this.calls > this.budget.maxToolCalls) throw new Error(`Tool-call budget (${this.budget.maxToolCalls}) exhausted; call finalize_design.`);
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
     const log = (ok: boolean, summary: string, parts?: ReturnType<typeof picked>[]) => this.events.onLog({ t, tool: name, args: rawArgs, ok, summary, parts });
     try {
+      if (this.calls > this.budget.maxToolCalls && name !== 'finalize_design') throw new Error(`Tool-call budget (${this.budget.maxToolCalls}) exhausted; call finalize_design.`);
       switch (name) {
         case 'write_plan': {
           { const r = rawArgs as Record<string, unknown>;
@@ -197,7 +210,7 @@ export class ToolRuntime {
           this.assembly = setDrives(this.assembly, a.drives);
           const brief = (d: (typeof a.drives)[number]) => { const q = d.profile as Record<string, unknown>; const f = ['amplitude', 'offset', 'frequency_hz', 'swingDuty', 'value', 'from', 'to', 'after'].filter((k) => q[k] !== undefined).map((k) => `${k.replace('frequency_hz', 'f').replace('amplitude', 'a').replace('swingDuty', 'duty').replace('offset', 'o')}=${q[k]}`).join(','); return `${d.controlId}=${d.profile.kind}(${f})`; };
           log(true, `Drives: ${a.drives.slice(0, 4).map(brief).join('; ')}${a.drives.length > 4 ? ` … (+${a.drives.length - 4} more)` : ''}`);
-          if (a.rationale) this.events.onAssembly(this.assembly, a.rationale, a.based_on);
+          this.events.onAssembly(this.assembly, a.rationale ?? 'Updated motor drive settings', a.based_on);
           return { drives: this.assembly.controller.drives };
         }
         case 'inspect_assembly': { log(true, 'Inspected'); return summarize(this.assembly); }
@@ -208,7 +221,19 @@ export class ToolRuntime {
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.maxTilt_deg === 'number' && raw.test.maxTilt_deg < 8) throw new Error(`maxTilt_deg ${raw.test.maxTilt_deg}° is tighter than this simulator measures for the recipes (3–5° bare, 6–8° with a shell or claws on top); a limit that tight burns the whole test budget chasing noise. Use 10–15° unless the user asked for a stability figure.`);
           const a = DefineTestArgs.parse(rawArgs);
-          this.testSpecs.set(a.test.id, a.test);
+          const previous = this.testSpecs.get(a.test.id);
+          if (previous && this.testEvidence.get(a.test.id)?.result.trace.frames.length) {
+            const criteria = (test: TestSpec) => {
+              switch (test.kind) {
+                case 'motion': return [test.kind, test.duration_s, test.criteria];
+                case 'walk': return [test.kind, test.duration_s, test.minDistance_m, test.maxTilt_deg, test.direction, test.signed];
+                case 'launch': return [test.kind, test.duration_s, test.targetDistance_m, test.tolerance_m, test.direction];
+                case 'grip': return [test.kind, test.duration_s, test.supportUntil_s, test.maxSeparation_m];
+              }
+            };
+            if (JSON.stringify(criteria(a.test)) !== JSON.stringify(criteria(previous))) throw new Error(`Keep the measured criteria for "${a.test.id}" fixed when comparing revisions.`);
+          }
+          if (!previous || JSON.stringify(previous) !== JSON.stringify(a.test)) this.testSpecs.set(a.test.id, a.test);
           log(true, `Test ${a.test.id} (${a.test.kind}) defined`);
           return { ok: true, test: a.test };
         }
@@ -218,9 +243,11 @@ export class ToolRuntime {
           if (!this.assembly.instances.length) throw new Error('No assembly yet');
           if (this.testCount >= this.budget.maxTests) throw new Error(`Test budget (${this.budget.maxTests}) exhausted; call finalize_design with the best result so far.`);
           this.testCount++;
-          const n = this.tests.filter((x) => x.testId.startsWith(a.test_id)).length + 1;
+          const n = this.tests.filter((x) => x.testId.slice(0, x.testId.lastIndexOf('#')) === a.test_id).length + 1;
           const result = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: `${a.test_id}#${n}` } });
           this.tests.push(result);
+          this.testEvidence.set(a.test_id, { spec, result });
+          this.lastTestedAssembly = this.assembly;
           log(true, `${result.testId}: ${result.passed ? 'PASS' : 'FAIL'} — ${Object.entries(result.metrics).filter(([k]) => /distance|revolutions|landing|separation|maxTilt|amplitude/.test(k)).slice(0, 4).map(([k, v]) => `${k}=${v}`).join(', ')}${result.failureReasons.length ? ' — ' + result.failureReasons.join('; ') : ''}`);
           this.events.onTest(result);
           return { testId: result.testId, kind: result.kind, passed: result.passed, metrics: result.metrics, failureReasons: result.failureReasons, notes: result.notes };
@@ -243,7 +270,10 @@ export class ToolRuntime {
           return { results };
         }
         case 'finalize_design': {
-          const a = FinalizeArgs.parse(rawArgs); this.finalized = a;
+          const a = FinalizeArgs.parse(rawArgs);
+          const pending = this.pendingChecks();
+          if (a.status === 'passed' && pending.length) throw new Error(`Cannot mark this build passed: ${pending.join('; ')}. Finish those checks or report the build as incomplete.`);
+          this.finalized = a;
           if (a.unverified && this.spec.plan) this.spec = { ...this.spec, plan: { ...this.spec.plan, unverified: a.unverified } };
           log(true, `Finalized (${a.status})`);
           return { ok: true };

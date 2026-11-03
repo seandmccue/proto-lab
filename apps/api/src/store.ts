@@ -1,12 +1,13 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { dirname, join, normalize } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 /** Local object store standing in for R2. Keys are relative paths; served under /store/. */
 export class ObjectStore {
   constructor(private root: string) { mkdirSync(root, { recursive: true }); }
   private path(key: string) {
-    const p = normalize(join(this.root, key));
-    if (!p.startsWith(normalize(this.root))) throw new Error('bad key');
+    const p = resolve(this.root, key);
+    const rel = relative(this.root, p);
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('bad key');
     return p;
   }
   putJson(key: string, value: unknown) { const p = this.path(key); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(value)); }

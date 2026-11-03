@@ -5,8 +5,8 @@ import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
-import BuildProgress, { BuildStrip, IterationRibbon } from '../components/BuildProgress.tsx';
-import { api, fmt, type InventionDetail, type JobEvent } from '../api.ts';
+import BuildProgress, { BuildStrip, IterationRibbon, keyMetric } from '../components/BuildProgress.tsx';
+import { api, fmt, type InventionDetail, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
 import './Workspace.css';
 
 /** Change suggestions that fit the mechanism actually built (wings, legs, rotors, launchers, grippers), not just walkers. */
@@ -29,6 +29,27 @@ function suggestionsFor(version: VersionRecord | null): string[] {
   return [...new Set(out)].slice(0, 6);
 }
 
+function replayStory(versions: VersionMeta[]) {
+  const results = versions.flatMap((version) => version.tests.map((test) => ({ version, test })));
+  const testName = (test: TestSummary) => test.testId.replace(/#\d+$/, '');
+  for (let i = results.length - 1; i >= 1; i--) {
+    const passed = results[i];
+    if (!passed.test.passed) continue;
+    const failed = results.slice(0, i).reverse().find((result) =>
+      !result.test.passed && result.version.iteration < passed.version.iteration &&
+      result.test.kind === passed.test.kind && testName(result.test) === testName(passed.test)
+    );
+    if (!failed) continue;
+    const dance = results.slice(i + 1).find((result) => result.test.passed && /^dance\b/i.test(result.test.testId));
+    return [
+      { ...failed, label: 'First test' },
+      { ...passed, label: 'Revised test' },
+      ...(dance ? [{ ...dance, label: 'Dance' }] : []),
+    ];
+  }
+  return [];
+}
+
 export default function Workspace() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
@@ -38,6 +59,7 @@ export default function Workspace() {
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [jobStatus, setJobStatus] = useState<string>(params.get('job') ? 'queued' : ''); // only a fresh ?job= link is known to be running; otherwise wait for the invention's latest job
   const [jobStep, setJobStep] = useState<string>('');
+  const [reconnecting, setReconnecting] = useState(false);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
   const [load, setLoad] = useState<{ active: number; queued: number; maxConcurrent: number } | null>(null); // queue hint while this build waits for a worker
@@ -77,9 +99,11 @@ export default function Workspace() {
   const [copied, setCopied] = useState(false);
   const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean } | null>(null);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
+  const [stageMode, setStageMode] = useState(params.get('replay') === '1');
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
   const running = jobStatus === 'queued' || jobStatus === 'running';
+  const story = useMemo(() => replayStory(detail?.versions ?? []), [detail?.versions]);
 
   const refresh = useCallback(async () => {
     const d = await api.invention(id);
@@ -94,31 +118,47 @@ export default function Workspace() {
   // Poll the job while it runs
   useEffect(() => {
     if (!jobId) return;
-    let since = 0, stop = false;
+    let since = 0, stop = false, retries = 0;
+    let timer: ReturnType<typeof setTimeout>;
     setEvents([]);
+    setReconnecting(false);
     const tick = async () => {
       try {
         const j = await api.job(jobId, since);
         if (stop) return;
+        retries = 0;
+        setReconnecting(false);
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
-        if (j.status === 'queued') api.load().then(setLoad).catch(() => {}); else setLoad(null);
+        if (j.status === 'queued') api.load().then((next) => { if (!stop) setLoad(next); }).catch(() => {}); else setLoad(null);
         if (j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {});
         if (j.events.some((e) => e.type === 'version' || e.type === 'done')) await refresh();
-        if (j.status === 'queued' || j.status === 'running') setTimeout(tick, 700);
+        if (j.status === 'queued' || j.status === 'running') { if (!stop) timer = setTimeout(tick, 700); }
         else await refresh();
-      } catch (e) { if (!stop) { setError((e as Error).message); } }
+      } catch (e) {
+        if (stop) return;
+        if (/not found|forbidden|unauthorized|HTTP (400|401|403|404)/i.test((e as Error).message)) {
+          setError((e as Error).message);
+          return;
+        }
+        setReconnecting(true);
+        timer = setTimeout(tick, Math.min(10_000, 1000 * 2 ** retries++));
+      }
     };
     void tick();
-    return () => { stop = true; };
+    return () => { stop = true; clearTimeout(timer); };
   }, [jobId, refresh]);
 
   // Follow the newest version while running, otherwise keep the user's pick
   useEffect(() => {
     if (!detail) return;
     const latest = detail.versions[detail.versions.length - 1]?.id ?? null;
-    if (!versionId || running) setVersionId(latest);
-  }, [detail, running, versionId]);
+    if (!versionId || running) {
+      const first = !running && stageMode ? story[0] : undefined;
+      setVersionId(first?.version.id ?? latest);
+      if (first) setTestId(first.test.testId);
+    }
+  }, [detail, running, stageMode, story, versionId]);
 
   useEffect(() => {
     if (!versionId || !detail) return;
@@ -171,6 +211,9 @@ export default function Workspace() {
     finally { setBusy(false); }
   };
   const inv = detail?.invention;
+  const storyStep = story.findIndex((step) => step.version.id === versionId && step.test.testId === testId);
+  const currentStep = story[storyStep];
+  const stepDecision = version?.id === currentStep?.version.id ? version?.decisions.slice().reverse().find((decision) => decision.source === 'model' && decision.basedOn) : undefined;
   const canFollowUp = !!inv?.isOwner && !running && !!inv.currentVersionId;
   const vmeta = detail?.versions.find((v) => v.id === versionId);
 
@@ -191,7 +234,7 @@ export default function Workspace() {
     );
   }
   return (
-    <div className="workbench">
+    <div className={`workbench${stageMode ? ' workbench--stage' : ''}`}>
       <Header compact />
       <div className="workbench-heading">
         <div className="min-w-0">
@@ -211,6 +254,7 @@ export default function Workspace() {
         </div>
       </div>
       {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
+      {reconnecting && <div role="status" className="bg-amber-50 px-4 py-2 text-sm text-amber-800">Reconnecting to the build. The last recorded simulation is still available.</div>}
       {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'The versions recorded so far are shown below; use “Request change” or Remix to continue from them.' : 'Nothing was recorded; start a new build.'}</div>}
 
       <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">
@@ -224,10 +268,38 @@ export default function Workspace() {
 
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
           <div className="workbench-panel-heading">
-            <span className="workbench-label">3D simulation</span>
-            <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={setVersionId} />
+            <span className="workbench-label">{running ? 'Live build' : '3D simulation'}</span>
+            {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={setVersionId} />}
             {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
+            {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
+          {!running && story.length > 0 && (
+            <div className="workbench-story">
+              <div className="workbench-story-heading">
+                <span className="workbench-label">Saved simulation</span>
+                <span>Follow the design from its failed test to the result.</span>
+              </div>
+              <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
+                {story.map((step, index) => (
+                  <button key={step.test.testId} type="button" aria-pressed={storyStep === index} onClick={() => {
+                    setVersionId(step.version.id);
+                    setTestId(step.test.testId);
+                    setExplode(0);
+                    setBlueprint(false);
+                    setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+                  }}>
+                    <span className="workbench-story-number">{index + 1}</span>
+                    <span><strong>{step.label}</strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {step.label === 'Dance' && step.test.metrics.maxTilt_deg !== undefined ? `tilt ${fmt.deg(step.test.metrics.maxTilt_deg)}` : keyMetric(step.test)}</small></span>
+                  </button>
+                ))}
+              </div>
+              {currentStep && (
+                <p className="workbench-story-caption" aria-live="polite">
+                  {currentStep.test.failureReasons[0] ?? (stepDecision ? `Muse’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.passed ? 'The revised mechanism passed the recorded test.' : 'The first test did not meet its target.')}
+                </p>
+              )}
+            </div>
+          )}
           <div className="workbench-stage">
             {!version && live ? (
               <>
@@ -245,7 +317,7 @@ export default function Workspace() {
             {version && (
               <div className="workbench-readout">
                 <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{changedIds.size > 0 && <span className="ml-2 text-warn">● {changedIds.size} parts changed</span>}</span>
-                {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.testId}: {test.passed ? 'passed' : 'did not pass'}{test.metrics.distance_m !== undefined ? ` · ${fmt.m2(test.metrics.distance_m)}` : test.metrics.landingDistance_m !== undefined ? ` · landed ${fmt.m2(test.metrics.landingDistance_m)}` : ''}{test.metrics.maxTilt_deg !== undefined ? ` · tilt ${fmt.deg(test.metrics.maxTilt_deg)}` : ''}</span>}
+                {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
               </div>
             )}
           </div>
