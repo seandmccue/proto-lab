@@ -21,7 +21,8 @@ publish and remix. Nothing in the gallery is canned: every card is a real build 
 **Numbers (current engine, Meta Model API).** Latest full ten-prompt pass: 10 of 10, median 96 s, 0 API
 errors, no specialist escalation (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker 81 s). Three more full passes went 10 of 10 (median 102 s, then 61 s and 56 s on the branch
 slated for deployment). Thirteen passes in all: 122 of 130 runs, every miss traced to a measurable cause and written into a recipe or an
-engine rule with a locking simulator test. 20-run walker reliability set on
+engine rule with a locking simulator test. The public site paints in under a second (home 0.9 s, gallery 0.6 s,
+a replay page 0.5 s; about 360 KB of JavaScript), so a judge is looking at a prototype, not a spinner. 20-run walker reliability set on
 the same engine: 20 of 20, median 81 s.
 
 **What to try in two minutes.** Open the homepage, pick "Mechanical butterfly" or type "Build a windmill
