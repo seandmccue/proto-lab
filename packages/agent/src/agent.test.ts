@@ -164,3 +164,13 @@ test('define_test rejects minRevolutions on a swinging joint, and the dance floo
   const ok = await rt.call('define_test', { test: { kind: 'motion', id: 't2', duration_s: 4, measure: { joints: ['swing'], base: 'pole' }, criteria: { minJointAmplitude_rad: 0.3, maxBaseTilt_deg: 5, torqueWithinRating: true } } }) as { error?: string };
   assert.ok(!ok.error, `one leg-bar pendulum is not a legged machine: ${ok.error}`);
 });
+
+test('define_test accepts its test object sent as a JSON string', async () => {
+  const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'tower + rotor', ops: [
+    { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0.25, 0], anchored: true },
+    { op: 'mount', id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ] });
+  const r = await rt.call('define_test', { test: JSON.stringify({ kind: 'motion', id: 'spin_test', duration_s: 6, measure: { joints: ['spin'], base: 'tower' }, criteria: { minRevolutions: 1, torqueWithinRating: true } }) }) as { error?: string };
+  assert.ok(!r.error, r.error);
+});
