@@ -286,6 +286,55 @@
 }
 
 /* Build progress (waiting view before the first assembly) */
+.build-heartbeat {
+  --heartbeat-accent: #e4f784;
+  display: grid;
+  gap: .55rem;
+  margin: 0 clamp(.75rem, 2vw, 1.5rem) .75rem;
+  padding: .85rem 1rem;
+  border: 1px solid #5e4983;
+  border-radius: .85rem;
+  background: #201735;
+  color: #f7f1ff;
+}
+.build-heartbeat[data-state="queued"], .build-heartbeat[data-state="reconnecting"] { --heartbeat-accent: #ffd993; }
+.build-heartbeat-main { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .45rem .8rem; }
+.build-heartbeat-signal {
+  flex: none;
+  width: .65rem;
+  height: .65rem;
+  margin-top: .38rem;
+  border-radius: 50%;
+  background: var(--heartbeat-accent);
+  animation: build-heartbeat-pulse 1.7s ease-out infinite;
+}
+.build-heartbeat-copy { flex: 1 1 15rem; min-width: 0; }
+.build-heartbeat-copy strong { display: block; font-size: 1rem; }
+.build-heartbeat-copy p, .build-heartbeat-copy > span, .build-heartbeat-event {
+  color: #e1d4f1;
+  font-size: .8rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.build-heartbeat-meta { display: flex; flex-wrap: wrap; gap: .3rem .75rem; color: #e1d4f1; font: .7rem/1.5 var(--font-mono); }
+.build-heartbeat-track { height: .25rem; overflow: hidden; border-radius: 999px; background: #594775; }
+.build-heartbeat-track::after {
+  display: block;
+  width: 34%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--heartbeat-accent);
+  content: "";
+  animation: build-heartbeat-sweep 1.8s ease-in-out infinite alternate;
+}
+@keyframes build-heartbeat-pulse {
+  from { box-shadow: 0 0 0 0 #e4f78470; }
+  to { box-shadow: 0 0 0 .45rem #e4f78400; }
+}
+@keyframes build-heartbeat-sweep { to { transform: translateX(194%); } }
+@media (prefers-reduced-motion: reduce) {
+  .build-heartbeat-signal, .build-heartbeat-track::after { animation: none; }
+}
 .build-progress { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 0.65rem; padding: 0.8rem; overflow: auto; }
 .build-progress-stages { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; font: 600 0.72rem/1 var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; text-transform: uppercase; }
 .build-progress-stages li { display: inline-flex; align-items: center; gap: 0.35rem; color: #94a3b8; }

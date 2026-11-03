@@ -4,7 +4,7 @@ import { STAGES, stageOf, useElapsed } from './ActivityPanel.tsx';
 import PartsBin, { pickedParts } from './PartsBin.tsx';
 import { fmt, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
 
-/** Seconds since the last event, ticking: long model rounds read as "reasoning", not as a hang. */
+/** Seconds since the last recorded event. */
 function useSinceLast(events: JobEvent[], running: boolean): number {
   const [, tick] = useState(0);
   useEffect(() => { if (!running) return; const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, [running]);
@@ -21,10 +21,67 @@ const STAGE_BLURB: Record<number, string> = {
   5: 'Finished.',
 };
 
+const ACTIVE_PHASES = ['Planning the design', 'Choosing parts', 'Assembling the prototype', 'Testing the design', 'Revising the design', 'Saving the result'];
+
+function formatBuildTime(seconds: number) {
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+export function LiveBuildHeartbeat({ events, jobStatus, reconnecting, load, startedAt }: {
+  events: JobEvent[];
+  jobStatus: string | null;
+  reconnecting: boolean;
+  load: { active: number; queued: number; maxConcurrent: number } | null;
+  startedAt?: string;
+}) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const lastEvent = events.at(-1);
+  const startTime = Date.parse(startedAt ?? events[0]?.t ?? '');
+  const lastTime = Date.parse(lastEvent?.t ?? '');
+  const elapsed = Number.isFinite(startTime) ? Math.max(0, Math.floor((now - startTime) / 1000)) : null;
+  const since = Number.isFinite(lastTime) ? Math.max(0, Math.floor((now - lastTime) / 1000)) : null;
+  const state = reconnecting ? 'reconnecting' : jobStatus === 'queued' ? 'queued' : (since ?? elapsed ?? 0) >= 12 ? 'waiting' : 'running';
+  const stage = stageOf(events);
+  const phase = stage === 3 && latestPhysicsEvent(events)?.type === 'test' ? 'Test results recorded' : ACTIVE_PHASES[stage];
+  const latest = [...events].reverse().find((event) => event.type === 'status' || event.type === 'tool');
+  const lastActivity = latest?.type === 'status' ? latest.message : latest?.summary;
+  const title = state === 'reconnecting' ? 'Reconnecting to the build'
+    : state === 'queued' ? 'Build queued'
+    : 'Build in progress';
+  const detail = state === 'reconnecting' ? 'Trying to restore live updates.'
+    : state === 'queued' ? (load && load.active >= load.maxConcurrent ? 'All build workers are busy. Your build will start when one is free.' : 'Waiting for a build worker to pick up your design.')
+    : state === 'waiting' ? `${phase} · waiting for the next update`
+    : phase;
+  return (
+    <section className="build-heartbeat" data-state={state} aria-label="Live build progress">
+      <div className="build-heartbeat-main">
+        <span className="build-heartbeat-signal" aria-hidden="true" />
+        <div className="build-heartbeat-copy" role="status">
+          <strong>{title}</strong>
+          <span>{detail}</span>
+        </div>
+        <div className="build-heartbeat-meta">
+          {elapsed !== null && <span>{formatBuildTime(elapsed)} elapsed</span>}
+          {since !== null && <span>Last update {since < 2 ? 'just now' : `${formatBuildTime(since)} ago`}</span>}
+        </div>
+      </div>
+      <div className="build-heartbeat-track" aria-hidden="true" />
+      {state !== 'queued' && typeof lastActivity === 'string' && lastActivity.trim() && (
+        <p className="build-heartbeat-event" title={lastActivity}>{lastActivity}</p>
+      )}
+    </section>
+  );
+}
+
 export default function BuildProgress({ events, running, jobStatus, load, brief }: { brief?: string; events: JobEvent[]; running: boolean; jobStatus: string | null; load: { active: number; queued: number; maxConcurrent: number } | null }) {
   const stage = stageOf(events); const elapsed = useElapsed(events, running); const since = useSinceLast(events, running);
   const last = [...events].reverse().find((e) => e.type === 'status' || e.type === 'tool');
-  const line = last ? String(last.type === 'status' ? last.message : last.summary) : 'Starting the engineering agent…';
+  const queued = jobStatus === 'queued';
+  const line = queued ? 'Waiting for a build worker…' : last ? String(last.type === 'status' ? last.message : last.summary) : 'Starting the engineering agent…';
   const parts = useMemo(() => pickedParts(events), [events]);
   const plan = [...events].reverse().find((e) => e.type === 'spec' && (e.spec as Spec | undefined)?.plan)?.spec as Spec | undefined;
   const thinking = running && since >= 8;
@@ -37,7 +94,7 @@ export default function BuildProgress({ events, running, jobStatus, load, brief 
       <div className="build-progress-now">
         <div className="min-w-0">
           <div className="truncate text-sm text-slate-700" title={line}>{line}</div>
-          <div className="mono text-[11px] text-slate-500">{elapsed ? `${elapsed} elapsed · ` : ''}{jobStatus === 'queued' && load && load.queued > 0 ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : thinking ? `Muse is reasoning · ${since} s on this step` : STAGE_BLURB[stage]}</div>
+          <div className="mono text-[11px] text-slate-500">{elapsed ? `${elapsed} elapsed · ` : ''}{queued ? load ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : 'Queued' : thinking ? `Waiting for the next update · ${since} s since last event` : STAGE_BLURB[stage]}</div>
         </div>
       </div>
     </div>
@@ -181,7 +238,7 @@ export function BuildStrip({ events, running }: { events: JobEvent[]; running: b
           <span className={`build-progress-spinner build-strip-spinner${thinking ? ' is-thinking' : ''}`} aria-hidden="true" />
           <div className="min-w-0">
             <div className="truncate text-xs text-slate-700" title={line}>{line}</div>
-            <div className="mono text-[10px] text-slate-500">{elapsed && <span>{elapsed} elapsed</span>}{tools > 0 && <span> · {tools} tool calls</span>}{parts > 0 && <span> · {parts} parts</span>}{thinking && <span className="text-accent"> · Muse is reasoning, {since} s</span>}</div>
+            <div className="mono text-[10px] text-slate-500">{elapsed && <span>{elapsed} elapsed</span>}{tools > 0 && <span> · {tools} tool calls</span>}{parts > 0 && <span> · {parts} parts</span>}{thinking && <span className="text-accent"> · Last update {since} s ago</span>}</div>
           </div>
         </div>
       </div>

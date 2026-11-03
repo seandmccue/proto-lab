@@ -9,7 +9,7 @@ import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx'
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
-import BuildProgress, { BuildStrip, IterationRibbon, SimulationStatus, keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
+import BuildProgress, { BuildStrip, IterationRibbon, LiveBuildHeartbeat, SimulationStatus, keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
 import { api, fmt, type InventionDetail, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
 import './Workspace.css';
 
@@ -322,6 +322,8 @@ export default function Workspace() {
       } catch (e) {
         if (stop) return;
         if (/not found|forbidden|unauthorized|HTTP (400|401|403|404)/i.test((e as Error).message)) {
+          setJobStatus('');
+          setReconnecting(false);
           setError((e as Error).message);
           return;
         }
@@ -566,7 +568,7 @@ export default function Workspace() {
         </div>
       </div>
       {error && !changeMode && <div role="alert" className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
-      {reconnecting && <div role="status" className="bg-amber-50 px-4 py-2 text-sm text-amber-800">Reconnecting to the build.{version && ' The last recorded simulation is still available.'}</div>}
+      {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} />}
       {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'Choose “Request a change” to continue from a recorded version.' : 'Start a new build to try again.'}</div>}
 
       <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">
