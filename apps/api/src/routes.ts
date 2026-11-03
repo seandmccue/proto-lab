@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import type { VersionRecord } from '@protolab/schema';
 import { catalog, generatorInfo } from '@protolab/parts';
-import { modelConfigFromEnv, DETERMINISTIC_MODEL_ID, prettyModelName } from '@protolab/agent';
+import { modelConfigFromEnv, DETERMINISTIC_MODEL_ID, prettyModelName, explainDesign } from '@protolab/agent';
 import type { ObjectStore } from './store.ts';
 import { JobRunner, newId, now, stripTrace, versionSummary } from './jobs.ts';
 import type { InventionRow, JobRow, VersionRow } from './db.ts';
@@ -134,6 +134,19 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     db.prepare('UPDATE inventions SET visibility=?, title=COALESCE(?, title), description=COALESCE(?, description), updated_at=? WHERE id=?')
       .run('public', body.data.title ? sanitize(body.data.title) : null, body.data.description ? sanitize(body.data.description) : null, now(), inv.id);
     return c.json({ ok: true, invention: publicInvention(getInvention(inv.id)!, sid) });
+  });
+
+  const explainCache = new Map<string, { text: string; modelId: string }>();
+  app.post('/api/inventions/:id/versions/:vid/explain', async (c) => {
+    const sid = session(c.req);
+    if (limited(`explain:${sid}`, 20, 10 * 60_000)) return c.json({ error: 'Rate limited' }, 429);
+    const inv = getInvention(c.req.param('id'));
+    if (!inv || !canSee(inv, sid)) return c.json({ error: 'Not found' }, 404);
+    const v = loadVersion(c.req.param('vid'));
+    if (!v || v.inventionId !== inv.id) return c.json({ error: 'Not found' }, 404);
+    const cached = explainCache.get(v.id); if (cached) return c.json(cached);
+    try { const r = await explainDesign(v); explainCache.set(v.id, r); return c.json(r); }
+    catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
 
   app.post('/api/inventions/:id/preview', async (c) => {

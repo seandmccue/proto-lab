@@ -34,6 +34,7 @@ export const api = {
   remix: (id: string, changeRequest: string) => req<{ inventionId: string; jobId: string }>(`/api/inventions/${id}/remix`, { method: 'POST', body: JSON.stringify({ changeRequest }) }),
   followUp: (id: string, changeRequest: string) => req<{ inventionId: string; jobId: string }>(`/api/inventions/${id}/follow-up`, { method: 'POST', body: JSON.stringify({ changeRequest }) }),
   publish: (id: string, body: { title?: string; description?: string }) => req<{ ok: true; invention: InventionPublic }>(`/api/inventions/${id}/publish`, { method: 'POST', body: JSON.stringify(body) }),
+  explain: (id: string, vid: string) => req<{ text: string; modelId: string }>(`/api/inventions/${id}/versions/${vid}/explain`, { method: 'POST', body: '{}' }),
   preview: (id: string, png: Blob) => fetch(`/api/inventions/${id}/preview`, { method: 'POST', body: png, headers: { 'x-session-id': sessionId(), 'content-type': 'image/png' } }),
   gallery: (sort: 'recent' | 'featured' | 'remixes', limit = 12) => req<{ items: InventionPublic[]; nextCursor: number | null }>(`/api/gallery?sort=${sort}&limit=${limit}`),
   mine: () => req<{ items: InventionPublic[] }>('/api/mine'),

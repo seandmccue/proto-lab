@@ -173,3 +173,18 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     await rt.call('finalize_design', { summary: ok ? 'Round budget reached after a passing test.' : 'Round budget reached without a passing test; the last design is shown.', status: ok ? 'passed' : 'failed' });
   }
 }
+
+/** One model call: explain a finished version's engineering to a non-engineer, grounded in its recorded decisions and measurements. */
+export async function explainDesign(version: VersionRecord, model: ModelConfig | null = modelConfigFromEnv()): Promise<{ text: string; modelId: string }> {
+  if (!model) return { text: 'No model configured; explanations need MODEL_API_KEY.', modelId: DETERMINISTIC_MODEL_ID };
+  const facts = {
+    task: version.prompt, plan: version.spec.plan, parts: version.assembly.parts.map((p) => ({ id: p.id, name: p.name, source: p.source.kind, mass_g: Math.round(p.mass_kg * 1000) })),
+    instances: version.assembly.instances.length, joints: version.assembly.joints.map((j) => ({ type: j.type, motor: j.motor?.controlId })).filter((j) => j.type !== 'fixed'),
+    drives: version.assembly.controller.drives, decisions: version.decisions, tests: version.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics, failureReasons: t.failureReasons, notes: t.notes })),
+  };
+  const res = await chat(model, [
+    { role: 'system', content: 'You are the ProtoLab engineering agent explaining a prototype you built. Write for a curious non-engineer in under 180 words: what the mechanism is, how it moves (which joints and drives), what the simulator measured, what you changed and why, and what remains unverified by rigid-body physics. Only state facts present in the data; no invented numbers; plain language; no markdown headers.' },
+    { role: 'user', content: JSON.stringify(facts).slice(0, 12000) },
+  ], [], { temperature: 0.3 });
+  return { text: (res.content ?? '').trim() || 'The model returned no explanation.', modelId: model.model };
+}
