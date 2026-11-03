@@ -1,5 +1,5 @@
 import type { Spec, VersionRecord } from '@protolab/schema';
-import { searchCatalog, DEFAULT_WALKER, DEFAULT_DANCE, walkerOps, danceDrives, type WalkerParams } from '@protolab/parts';
+import { searchCatalog, DEFAULT_WALKER, DEFAULT_DANCE, walkerOps, danceDrives, flattenWalkerParams, type WalkerParams } from '@protolab/parts';
 import type { ToolRuntime } from './tools.ts';
 
 /**
@@ -24,7 +24,7 @@ export async function runPlanner(rt: ToolRuntime, spec: Spec, opts: { parent: Ve
     const foot = rt.resolve(params.footPartId)!; const lowest = Math.min(...rt.assembly.instances.filter((x) => x.partId === foot.id).map((x) => x.transform.position[1] - foot.params.radius));
     if (Math.abs(lowest) > 1e-6) await rt.call('assemble', { ops: rt.assembly.instances.map((i) => ({ op: 'move', id: i.id, translate: [0, -lowest, 0] })), rationale: 'Resting the feet on the ground' });
     await rt.call('set_drives', { drives });
-    rt.assembly.family = 'legged_walker'; rt.assembly.familyConfig = { ...params };
+    rt.assembly.family = 'legged_walker'; rt.assembly.familyConfig = { ...params }; rt.assembly.familyParams = flattenWalkerParams(params);
   };
   await build(`Starting from catalog defaults: ${params.chassisPartId}, ${params.hipServoPartId} servos, ${params.upperLegPartId} leg bars, ${params.gait.gaitType} gait at ${params.gait.frequency_hz} Hz.`);
   await rt.call('define_test', { test: { kind: 'walk', id: 'walk', duration_s: 6, base: 'body', minDistance_m: walkDistance, maxTilt_deg: 25, direction: 'x' } });

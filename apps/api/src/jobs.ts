@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { runAgent, type AgentEvent } from '@protolab/agent';
+import { type AgentEvent } from '@protolab/agent';
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
 import type { VersionRecord } from '@protolab/schema';
 import type { ObjectStore } from './store.ts';
 import type { JobRow, InventionRow } from './db.ts';
@@ -90,7 +92,13 @@ export class JobRunner {
     };
     try {
       const startIteration = (this.db.prepare('SELECT COALESCE(MAX(iteration), 0) AS n FROM versions WHERE invention_id=?').get(invention.id) as { n: number }).n;
-      const out = await runAgent({ prompt: invention.prompt, inventionId: invention.id, parent: opts.parent, changeRequest: opts.changeRequest, startIteration, newVersionId: () => newId('ver') }, onEvent);
+      // The agent (model calls + Rapier simulation) runs in a worker thread so HTTP polling stays responsive.
+      const out = await new Promise<{ status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }>((resolve, reject) => {
+        const worker = new Worker(fileURLToPath(new URL('./agentWorker.ts', import.meta.url)), { workerData: { prompt: invention.prompt, inventionId: invention.id, parent: opts.parent, changeRequest: opts.changeRequest, startIteration, versionIds: Array.from({ length: 40 }, () => newId('ver')) }, env: process.env as Record<string, string> });
+        worker.on('message', (m: { kind: 'event'; event: AgentEvent } | { kind: 'result'; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }) => { if (m.kind === 'event') onEvent(m.event); else resolve(m); });
+        worker.on('error', (e) => reject(e));
+        worker.on('exit', (code) => { if (code !== 0) reject(new Error(`agent worker exited with code ${code}`)); });
+      });
       this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN description=\'\' THEN ? ELSE description END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
       update(out.status === 'error' ? 'error' : 'done', out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
     } catch (e) {
