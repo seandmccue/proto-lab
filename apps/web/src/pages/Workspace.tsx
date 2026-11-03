@@ -11,6 +11,7 @@ import FollowerTimingEvidence from '../components/FollowerTimingEvidence.tsx';
 import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
 import TrayTiltEvidence from '../components/TrayTiltEvidence.tsx';
+import LotusReplayEvidence from '../components/LotusReplayEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -256,6 +257,20 @@ export default function Workspace() {
     const before = ownBaseline ?? sourceVersion;
     const after = revisionResultId === undefined ? versions[versions.length - 1] : versions.find((v) => v.id === revisionResultId);
     const saved = replayStory(versions);
+    if (replayLink && detail?.invention.id === 'inv_ba7b3c7716564397') {
+      const initial = versions.find((version) => version.id === 'ver_3989ed3cf2374987');
+      const baseline = initial?.tests.find((test) => test.kind === 'motion' && test.testId === 'lotus_cycle#1');
+      if (initial && baseline) {
+        const revisions = versions.filter((version) => version.iteration > initial.iteration)
+          .flatMap((version) => version.tests.filter((test) => sameTestName(baseline, test))
+            .map((test) => ({ version, test }))).reverse();
+        const revision = revisions.find(({ test }) => test.passed) ?? revisions[0];
+        if (revision) return [
+          { version: initial, test: baseline, label: 'Before revision' },
+          { ...revision, label: 'After revision' },
+        ];
+      }
+    }
     if (replayLink && detail?.invention.id === 'inv_d3f76fcc393b49d6' && saved[1]) {
       const initial = versions.find((version) => version.id === 'ver_26bf003825cd48d9');
       const failure = initial?.tests.find((test) => !test.passed && sameTestName(test, saved[1].test));
@@ -712,6 +727,7 @@ export default function Workspace() {
           {!showLive && version && test && <TriplexTimingEvidence version={version} time={time.t} test={test} />}
           {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}
           {!showLive && version && test && <TrayTiltEvidence version={version} time={time.t} test={test} />}
+          {!showLive && version && test && <LotusReplayEvidence version={version} time={time.t} test={test} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
           {running && <SimulationStatus events={events} running replay={replayStatus} />}

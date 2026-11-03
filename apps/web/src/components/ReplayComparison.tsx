@@ -1,6 +1,7 @@
 import TriplexTimingEvidence from './TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence from './OrbitReplayEvidence.tsx';
 import TrayTiltEvidence from './TrayTiltEvidence.tsx';
+import LotusReplayEvidence from './LotusReplayEvidence.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { tiltDeg } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
@@ -147,13 +148,14 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         <div className="workbench-comparison-canvas">
           <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} pathInstanceId={recordedPenPath(version.assembly, test)} />
         </div>
-        <div className={`workbench-comparison-note${index === 0 ? ' is-failure' : ''}`}>
-          {index === 0 ? <><strong>{tilt ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
+        <div className={`workbench-comparison-note${index === 0 || !test.passed ? ' is-failure' : ''}`}>
+          {index === 0 || !test.passed ? <><strong>{tilt && index === 0 ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt && index === 0 ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
         </div>
         <TriplexTimingEvidence version={version} time={time} test={test} />
         <OrbitReplayEvidence inventionId={version.inventionId} iteration={version.iteration} time={time} test={test}
           definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
         <TrayTiltEvidence version={version} iteration={version.iteration} time={time} test={test} />
+        <LotusReplayEvidence version={version} iteration={version.iteration} time={time} test={test} />
       </article>)}
     </div>
     <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />
