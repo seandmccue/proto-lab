@@ -12,7 +12,7 @@ const DesignPartArgs = z.object({
   name: z.string().min(2).max(60), category: PartCategory, description: z.string().max(300).default(''), material: z.string().max(40).default('PLA'), mass_kg: z.number().positive().max(20).optional(),
   pieces: z.array(GeometryPiece).min(1).max(16), connectors: z.array(Connector).max(16).default([]), rationale: z.string().optional(),
 });
-const AssembleArgs = z.object({ ops: z.array(AssemblyOp).min(1).max(60), rationale: z.string(), based_on: z.string().optional() });
+const AssembleArgs = z.object({ ops: z.array(AssemblyOp).min(1).max(120), rationale: z.string(), based_on: z.string().optional() });
 const DrivesArgs = z.object({ drives: z.array(Drive).min(1).max(40), rationale: z.string().optional(), based_on: z.string().optional() });
 const DefineTestArgs = z.object({ test: TestSpec });
 const RunTestArgs = z.object({ test_id: z.string() });

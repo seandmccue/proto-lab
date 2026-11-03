@@ -92,3 +92,10 @@ test('flapping: catalog butterfly wings on the winged body rise together with on
   let maxDiff = 0; for (const f of frames.slice(-60)) maxDiff = Math.max(maxDiff, Math.abs(tipY(f, 'wingL') - tipY(f, 'wingR')));
   assert.ok(maxDiff < 0.02, `wing tips should move together, max height difference ${maxDiff.toFixed(3)} m`);
 });
+
+test('hexapod walks with the measured wave gait (recipe numbers)', async () => {
+  const hex: WalkerParams = { ...TUNED, legCount: 6, chassisPartId: 'chassis-hex-200', gait: { ...TUNED.gait, swingDuty: 0.3 } };
+  const r = await runTest(buildWalker(hex), { env, test: { ...walk, id: 'hex_walk' } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.ok(r.metrics.distance_m >= 0.3 && r.metrics.maxTilt_deg < 10, JSON.stringify(r.metrics));
+});
