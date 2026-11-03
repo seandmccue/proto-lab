@@ -450,3 +450,15 @@ Two runs, concurrency 2 (`bench-results-crab-tilt`):
 | crab #2 | **passed, first test** | 204 s | 0.37 m | 5.16° |
 
 Both from the recipe (chassis-hex-200 yawed 90°, servo-ds3218 stiffness 8, swingDuty 0.3), no handoff.
+
+### Windmill and Ferris wheel after the tower auto-place and lowest-point fixes (v9e, 2026-11-03 15:13 UTC)
+
+A live windmill build had spent two rounds mounting onto an unplaced `tower` and then doubting a
+bounding-sphere `lowestPoint_m` that put the tower below ground. Auto-place now takes the tallest
+tower for a family-named structure id, and the summary's vertical extent is tight.
+`bench-results-tower-autoplace`:
+
+| Prompt | v9 | Re-run | Note |
+| --- | --- | --- | --- |
+| windmill | 41 s | **passed, 25 s** | `tower.axle` auto-placed as tower-500 in the first batch |
+| ferris | 74 s | **passed, 71 s** | the model placed its tower later in the same batch; auto-place guessed first and the model's own place orphaned the wheel (one rebuild round). Fixed since: a batch's own later `place` is hoisted ahead of the mounts that use it |
