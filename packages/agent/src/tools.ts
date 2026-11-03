@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
-import { searchCatalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, AssemblyOp, AssemblyError, ParamError, shapeVolume, piecesBoundingRadius, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
+import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, AssemblyOp, AssemblyError, ParamError, shapeVolume, piecesBoundingRadius, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
 import { runTest } from '@protolab/simulator';
 import type { ToolDef } from './llm.ts';
 
@@ -118,6 +118,8 @@ export class ToolRuntime {
   }
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
+    // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
+    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
     this.calls++;
     if (this.calls > this.budget.maxToolCalls) throw new Error(`Tool-call budget (${this.budget.maxToolCalls}) exhausted; call finalize_design.`);
     const t = new Date().toISOString();
@@ -178,7 +180,7 @@ export class ToolRuntime {
           const raw = rawArgs as { ops?: unknown[] };
           if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
           const a = AssembleArgs.parse(rawArgs);
-          const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m });
+          const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog(), ...this.customParts.values()]);
           this.assembly = r.assembly;
           const s = summarize(this.assembly);
           log(true, `${a.ops.length} ops: ${r.summary.slice(0, 4).join('; ')}${r.summary.length > 4 ? ` … (+${r.summary.length - 4})` : ''} → ${this.assembly.instances.length} components, ${s.totalMass_kg} kg`);

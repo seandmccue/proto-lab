@@ -90,10 +90,35 @@ export function mateTransform(parentT: Transform, parentConn: { position: Vec3; 
 export interface ApplyResult { assembly: Assembly; summary: string[] }
 
 /** Apply a batch of ops. Fails atomically: on error the input assembly is unchanged and the failing op index is reported. */
-export function applyOps(input: Assembly, ops: AssemblyOp[], resolve: PartResolver, limits: Limits = DEFAULT_LIMITS): ApplyResult {
+export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartResolver, limits: Limits = DEFAULT_LIMITS, library?: () => PartDefinition[]): ApplyResult {
   const a: Assembly = structuredClone(input);
   const summary: string[] = [];
   const partById = new Map(a.parts.map((p) => [p.id, p]));
+  // First-batch recovery: a batch that mounts onto an instance nobody placed (typically "body" or "base") gets that
+  // instance placed automatically when the referenced connectors identify exactly one library part.
+  const ops: AssemblyOp[] = [...inputOps];
+  if (library) {
+    const placed = new Set(a.instances.map((x) => x.id));
+    const refs = new Map<string, Set<string>>();
+    for (const op of ops) {
+      if (op.op === 'place' || op.op === 'mount') placed.add(op.id);
+      if (op.op === 'mount' && !placed.has(op.onto)) { if (!refs.has(op.onto)) refs.set(op.onto, new Set()); refs.get(op.onto)!.add(op.connector); }
+    }
+    let insertAt = 0;
+    for (const [id, conns] of refs) {
+      const cands = library().filter((p) => !p.decorative && [...conns].every((c) => p.connectors.some((k) => k.id === c)));
+      // One match: take it. A few matches (e.g. hex vs octo chassis both carry hip_R2): take the smallest part that fits,
+      // unless two are equally small. Many matches (generic connectors like "top"): do not guess.
+      let best: PartDefinition | null = null;
+      if (cands.length === 1) best = cands[0];
+      else if (cands.length > 1 && cands.length <= 6) { const sorted = [...cands].sort((x, y) => x.connectors.length - y.connectors.length || x.mass_kg - y.mass_kg); if (sorted[0].connectors.length < sorted[1].connectors.length) best = sorted[0]; }
+      if (!best) continue;
+      const anchored = /base|stand|ground|floor|plate|pedestal|tower/i.test(id) || best.category === 'plates';
+      const y = anchored ? best.dimensions_m[1] / 2 : Math.max(0.1, best.dimensions_m[1]);
+      ops.splice(insertAt++, 0, { op: 'place', id, part: best.id, position: [0, +y.toFixed(4), 0], anchored });
+      summary.push(`auto-placed ${id} as ${best.id}${anchored ? ' (anchored)' : ''} because nothing by that name existed — move or replace it if that is not the part you meant`);
+    }
+  }
   const usePart = (id: string, i: number) => {
     let p = partById.get(id);
     if (!p) { p = resolve(id); if (!p) throw new AssemblyError(`Unknown part "${id}"`, i); if (p.decorative) throw new AssemblyError(`Part "${id}" is decorative (no mechanical properties); it can be mounted with joint "fixed" onto structure but cannot carry joints or loads`, i); partById.set(id, p); a.parts.push(p); }
@@ -104,7 +129,8 @@ export function applyOps(input: Assembly, ops: AssemblyOp[], resolve: PartResolv
     if (!x) throw new AssemblyError(`Unknown instance "${id}". ${a.instances.length ? `Existing instances: ${a.instances.slice(0, 12).map((y) => y.id).join(', ')}${a.instances.length > 12 ? ', …' : ''}.` : 'Nothing has been placed yet.'} Place it first in this batch ({op:"place", id:"${id}", part:<part id>, position:[x,y,z], anchored?}) before mounting onto it.`, i);
     return x;
   };
-  const unique = (id: string, i: number) => { if (a.instances.some((x) => x.id === id)) throw new AssemblyError(`Instance id "${id}" already exists`, i); if (!/^[a-zA-Z][\w-]{0,40}$/.test(id)) throw new AssemblyError(`Instance id "${id}" must be alphanumeric/underscore, ≤ 40 chars`, i); };
+  // Re-using an existing id replaces that instance (and its joints): the model nearly always means "put this there instead".
+  const unique = (id: string, i: number) => { if (!/^[a-zA-Z][\w-]{0,40}$/.test(id)) throw new AssemblyError(`Instance id "${id}" must be alphanumeric/underscore, ≤ 40 chars`, i); if (a.instances.some((x) => x.id === id)) { a.instances = a.instances.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.a.instanceId !== id && j.b.instanceId !== id); summary.push(`replaced ${id}`); } };
 
   ops.forEach((op, i) => {
     switch (op.op) {

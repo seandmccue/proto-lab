@@ -223,7 +223,7 @@ export const TestSpec = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('walk'), id: z.string(), duration_s: z.number().positive().max(15), base: z.string().default('body'),
-    minDistance_m: z.number().positive(), maxTilt_deg: z.number().positive().default(25), direction: Axis.default('x'),
+    minDistance_m: z.number().nonnegative(), maxTilt_deg: z.number().positive().default(25), direction: Axis.default('x'),
     signed: z.boolean().default(false),   // false: travel in either sense along the axis counts (a backward walk is still a walk)
   }),
   z.object({
