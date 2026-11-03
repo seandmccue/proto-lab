@@ -25,6 +25,32 @@ const fx = (id: string, position: Vec3, axis: Vec3, kind: Connector['kind'] = 'f
 // OUT of the part; mating connectors face each other. Revolute connectors spin about their axis.
 // ------------------------------------------------------------------------------------------------
 export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
+  marker_tip: {
+    kind: 'marker_tip', name: 'Drawing marker', category: 'misc',
+    description: 'Fixed-mount marker for a plotter or drawing linkage. Its working point is the local origin, facing +Z.',
+    params: {
+      diameter: { min: 0.004, max: 0.025, default: 0.008, unit: 'm', description: 'Barrel diameter' },
+      length: { min: 0.008, max: 0.06, default: 0.016, unit: 'm', description: 'Length from rear to tip' },
+    },
+    generate: (p, id) => {
+      const radius = p.diameter / 2;
+      const barrelLength = p.length * 0.75;
+      const tipRadius = radius * 0.3;
+      const geometry = [
+        piece({ kind: 'cylinder', radius, height: barrelLength, axis: 'z' }, [0, 0, -p.length + barrelLength / 2], COLORS.red),
+        piece({ kind: 'cylinder', radius: radius * 0.55, height: p.length - barrelLength, axis: 'z' }, [0, 0, -(p.length - barrelLength) / 2], COLORS.brass),
+        piece({ kind: 'sphere', radius: tipRadius }, [0, 0, 0], COLORS.red),
+      ];
+      return finish({
+        id, kind: 'marker_tip', name: `Drawing marker Ø${mm(p.diameter)} mm`, category: 'misc',
+        description: 'Carries a visible tip on a passive drawing linkage or plotter.',
+        params: p, mass_kg: vol(geometry) * DENSITY.pla, dimensions_m: [p.diameter, p.diameter, p.length + tipRadius],
+        material: 'polymer', geometry, connectors: [
+          fx('mount', [0, 0, -p.length * 0.6875], [0, 0, -1], 'fixed', 'Attach to a linkage or carriage'),
+        ], cost_usd: 2,
+      });
+    },
+  },
   // ---------- structural ----------
   beam: { kind: 'beam', name: 'Beam', category: 'beams', description: 'Rectangular aluminium beam along X with fixed mounts at both ends and on each face centre.', params: { length: { min: 0.02, max: 1.2, default: 0.1, unit: 'm', description: 'Length (X)' }, width: { min: 0.003, max: 0.08, default: 0.01, unit: 'm', description: 'Width (Z)' }, height: { min: 0.003, max: 0.08, default: 0.01, unit: 'm', description: 'Height (Y)' } },
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.length, p.height, p.width] }, [0, 0, 0], COLORS.aluminium)]; return finish({ id, kind: 'beam', name: `Beam ${mm(p.length)}×${mm(p.width)}×${mm(p.height)} mm`, category: 'beams', description: 'Rigid aluminium beam.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.length, p.height, p.width], material: 'aluminium 6061', geometry: g,

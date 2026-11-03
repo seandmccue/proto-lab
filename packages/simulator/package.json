@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts", "./triplex-pump": "./src/triplex-pump.ts", "./twin-drawbridge": "./src/twin-drawbridge.ts" },
+  "exports": { ".": "./src/index.ts", "./triplex-pump": "./src/triplex-pump.ts", "./twin-drawbridge": "./src/twin-drawbridge.ts", "./drawing-automaton": "./src/drawing-automaton.ts" },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test src/**/*.test.ts"

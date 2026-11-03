@@ -204,6 +204,8 @@ export default function Workspace() {
   const [playing, setPlaying] = useState(!reducedMotion);
   const [explode, setExplode] = useState(0);
   const [blueprint, setBlueprint] = useState(false);
+  const [showStrokeGuides, setShowStrokeGuides] = useState(id !== 'inv_drawing_automaton');
+  const [showMotionPath, setShowMotionPath] = useState(true);
   const [follow, setFollow] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
@@ -449,6 +451,8 @@ export default function Workspace() {
   const testDefinition = test && version
     ? recordedTestSpec(test.testId, [version, prevVersion?.id === version.parentVersionId ? prevVersion : null]) ?? (testSpecKey ? earlierTestSpecs[testSpecKey] : undefined)
     : undefined;
+  const strokeTargets = testDefinition?.kind === 'motion' && test?.trace.frames.length ? testDefinition.measure.linearTravel : undefined;
+  const penPath = id === 'inv_drawing_automaton' && test?.trace.frames.some((frame) => frame.bodies.pen_tip) ? 'pen_tip' : undefined;
   const sourceParentId = detail?.source?.versionId;
   useEffect(() => {
     if (!version || !test || !testSpecKey || testDefinition || !version.parentVersionId) return;
@@ -635,7 +639,8 @@ export default function Workspace() {
                 </div>
               </>
             ) : version ? (
-              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={diagnosticHighlights || (comparing && storyStep === 0) ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
+              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={diagnosticHighlights || (comparing && storyStep === 0) ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef}
+                strokeTargets={showStrokeGuides ? strokeTargets : undefined} pathInstanceId={showMotionPath ? penPath : undefined} />
             ) : running ? (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
             ) : (
@@ -669,6 +674,8 @@ export default function Workspace() {
             <div className="workbench-control-group" role="group" aria-label="View controls">
               <label>Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-16" aria-label="Explode view" /></label>
               <button className="btn-ghost" aria-pressed={activeBlueprint} onClick={() => { setIntroBlueprint(false); setBlueprint(!activeBlueprint); }}>Blueprint</button>
+              {!showLive && !!strokeTargets?.length && <button type="button" className="btn-ghost" aria-pressed={showStrokeGuides && !explode} disabled={explode > 0} onClick={() => setShowStrokeGuides((show) => !show)}>Stroke guides</button>}
+              {!showLive && penPath && <button type="button" className="btn-ghost" aria-pressed={showMotionPath && !explode} disabled={explode > 0} onClick={() => setShowMotionPath((show) => !show)}>Pen path</button>}
               {!showLive && (comparing ? <span className="workbench-view-hint">Camera fits the recorded motion</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>

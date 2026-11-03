@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, Html, Line } from '@react-three/drei';
 import { Component, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
-import type { Assembly, Axis, Instance, Shape, TestResult, Transform } from '@protolab/schema';
+import type { Assembly, Axis, Instance, Shape, TestResult, TestSpec, Transform } from '@protolab/schema';
 import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
 import IsoPreview from './IsoPreview.tsx';
 import { diagnosticColors, type DiagnosticTone } from './diagnosticColors.ts';
@@ -30,6 +30,8 @@ export interface ViewerProps {
   autoRotate?: boolean;
   mini?: boolean;
   zoom?: number;
+  strokeTargets?: NonNullable<Extract<TestSpec, { kind: 'motion' }>['measure']['linearTravel']>;
+  pathInstanceId?: string;
   captureRef?: MutableRefObject<(() => string | null) | null>;
 }
 
@@ -38,6 +40,7 @@ const diagnosticOutlines = {
   change: new THREE.MeshBasicMaterial({ color: diagnosticColors.change.outline, side: THREE.BackSide }),
 };
 const ignoreRaycast = () => {};
+const strokeColors = ['#6526d6', '#0e766e', '#a13453', '#1d58b8'];
 
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 function material(color: string, role: string, blueprint: boolean, selected: boolean, changed: boolean, diagnostic?: DiagnosticTone) {
@@ -132,6 +135,8 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 function Scene(props: ViewerProps) {
   const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, cameraBounds, playbackTime, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
+  const strokeMarkers = useRef<Record<string, THREE.Mesh>>({});
+  const pathMarker = useRef<THREE.Mesh>(null);
   const enteredAt = useRef(new Map<string, number>());
   const entering = useMemo(() => new Set(enteringInstanceIds), [enteringInstanceIds]);
   const tRef = useRef(0);
@@ -152,6 +157,34 @@ function Scene(props: ViewerProps) {
       radius: Math.max(0.08, halfSize.length()),
     };
   }, [assembly, cameraBounds, followsBody, test]);
+  const strokes = useMemo(() => {
+    if (!test || !props.strokeTargets?.length || explode) return [];
+    const offset = THREE.MathUtils.clamp(radius * 0.075, 0.012, 0.034);
+    return props.strokeTargets.flatMap(({ instance, axis }, index) => {
+      const coordinate = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+      let first: Transform['position'] | undefined;
+      let min = Infinity, max = -Infinity;
+      for (const frame of test.trace.frames) {
+        const point = frame.bodies[instance]?.position;
+        if (!point) continue;
+        first ??= point;
+        min = Math.min(min, point[coordinate]);
+        max = Math.max(max, point[coordinate]);
+      }
+      if (!first) return [];
+      const from = vec(first).setComponent(coordinate, min);
+      from.setComponent(coordinate === 0 ? 2 : 0, from.getComponent(coordinate === 0 ? 2 : 0) + offset);
+      const to = from.clone().setComponent(coordinate, max);
+      const label = to.clone();
+      label.y += offset * 0.45;
+      return [{ key: `${instance}:${axis}:${index}`, instance, coordinate, from, to, label, number: index + 1, color: strokeColors[index % strokeColors.length] }];
+    });
+  }, [test, props.strokeTargets, radius, explode]);
+  const path = useMemo(() => {
+    if (!test || !props.pathInstanceId || explode) return [];
+    const id = props.pathInstanceId;
+    return test.trace.frames.flatMap((frame) => frame.bodies[id] ? [vec(frame.bodies[id].position)] : []);
+  }, [test, props.pathInstanceId, explode]);
   const { camera, size } = useThree();
   const aspect = size.height > 0 ? size.width / size.height : 1;
   useEffect(() => {
@@ -227,6 +260,14 @@ function Scene(props: ViewerProps) {
       g.position.copy(p); g.quaternion.copy(q);
       if (inst.id === 'body') bodyPos.copy(p);
     }
+    for (const stroke of strokes) {
+      const marker = strokeMarkers.current[stroke.key];
+      const tracked = groups.current[stroke.instance];
+      if (!marker || !tracked) continue;
+      marker.position.copy(stroke.from).setComponent(stroke.coordinate, tracked.position.getComponent(stroke.coordinate));
+    }
+    const tracedPart = props.pathInstanceId && groups.current[props.pathInstanceId];
+    if (pathMarker.current && tracedPart) pathMarker.current.position.copy(tracedPart.position);
     if (follow && controls.current && frames.length && assembly.instances.some((i) => i.id === 'body') && bodyPos.lengthSq() > 0) {
       controls.current.target.lerp(new THREE.Vector3(bodyPos.x, Math.max(bodyPos.y * 0.6, center.y * 0.5), bodyPos.z), 0.15);
       controls.current.update();
@@ -259,6 +300,35 @@ function Scene(props: ViewerProps) {
           );
         })}
       </group>
+      {strokes.map((stroke) => (
+        <group key={stroke.key}>
+          <Line points={[stroke.from, stroke.to]} color={stroke.color} lineWidth={3} depthTest={false} raycast={ignoreRaycast} />
+          {[stroke.from, stroke.to].map((point, i) => (
+            <mesh key={i} position={point} renderOrder={8} raycast={ignoreRaycast}>
+              <sphereGeometry args={[radius * 0.008, 8, 8]} />
+              <meshBasicMaterial color={stroke.color} depthTest={false} />
+            </mesh>
+          ))}
+          <mesh ref={(node) => { if (node) strokeMarkers.current[stroke.key] = node; else delete strokeMarkers.current[stroke.key]; }} renderOrder={9} raycast={ignoreRaycast}>
+            <sphereGeometry args={[radius * 0.016, 12, 12]} />
+            <meshBasicMaterial color={stroke.color} depthTest={false} />
+          </mesh>
+          <Html position={stroke.label} center style={{ pointerEvents: 'none' }}>
+            <span className="grid h-4 w-4 place-items-center rounded-full text-[10px] font-bold text-white shadow-sm" style={{ background: stroke.color }} aria-hidden="true">
+              {stroke.number}
+            </span>
+          </Html>
+        </group>
+      ))}
+      {path.length >= 2 && (
+        <group>
+          <Line points={path} color={blueprint ? '#facc15' : '#b45309'} lineWidth={3} depthTest={false} raycast={ignoreRaycast} />
+          <mesh ref={pathMarker} renderOrder={9} raycast={ignoreRaycast}>
+            <sphereGeometry args={[radius * 0.014, 12, 12]} />
+            <meshBasicMaterial color="#f59e0b" depthTest={false} />
+          </mesh>
+        </group>
+      )}
       {blueprint && chassis && body && !mini && (
         <group>
           <Dim from={[body.transform.position[0] - chassis.params.length / 2, body.transform.position[1] + chassis.params.height / 2 + 0.03, body.transform.position[2] + chassis.params.width / 2 + 0.02]} to={[body.transform.position[0] + chassis.params.length / 2, body.transform.position[1] + chassis.params.height / 2 + 0.03, body.transform.position[2] + chassis.params.width / 2 + 0.02]} label={`${(chassis.params.length * 1000).toFixed(0)} mm`} />
@@ -299,6 +369,14 @@ export default function Viewer(props: ViewerProps) {
     return () => timers.forEach(clearTimeout);
   }, []);
   if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-slate-100"} />;
+  const measuredStrokes = props.explode ? [] : props.strokeTargets?.flatMap(({ instance, axis, minTravel_m }, index) => {
+    const travel = props.test?.metrics[`${instance}.travel_${axis}_m`];
+    if (travel === undefined) return [];
+    const part = instance.replace(/_/g, ' ');
+    const label = part.charAt(0).toUpperCase() + part.slice(1);
+    const axisLabel = props.strokeTargets?.some((other) => other.instance === instance && other.axis !== axis) ? ` · ${axis.toUpperCase()}` : '';
+    return [{ number: index + 1, part: label + axisLabel, travel, target: minTravel_m, color: strokeColors[index % strokeColors.length] }];
+  }) ?? [];
   const previewProps = { assembly: props.assembly, trace: props.test?.trace, playing: props.playing, speed: props.speed, seekTo: props.playbackTime ?? props.seekTo, onTime: props.onTime, diagnosticHighlights: props.diagnosticHighlights };
   const fallback = props.mini ? (
     <IsoPreview {...previewProps} className="h-full w-full" />
@@ -313,6 +391,17 @@ export default function Viewer(props: ViewerProps) {
       <Canvas className="prototype-canvas" shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
         <Scene {...props} zoom={zoom} />
       </Canvas>
+      {measuredStrokes.length > 0 && (
+        <ul className="pointer-events-none absolute bottom-3 left-3 right-3 flex flex-wrap gap-1.5" aria-label="Recorded stroke distances">
+          {measuredStrokes.map(({ number, part, travel, target, color }) => (
+            <li key={number} className="flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-800"
+              aria-label={`${part}, ${Math.round(travel * 1000)} millimeters, minimum ${Math.round(target * 1000)} millimeters`}>
+              <span className="grid h-4 w-4 place-items-center rounded-full text-white" style={{ background: color }} aria-hidden="true">{number}</span>
+              {part} · {Math.round(travel * 1000)} mm
+            </li>
+          ))}
+        </ul>
+      )}
       {!props.mini && !props.cameraBounds && (
         <div className="workbench-zoom" role="group" aria-label="Zoom controls">
           <button type="button" className="btn-secondary" aria-label="Zoom out" disabled={zoom <= .6} onClick={() => setZoom((value) => Math.max(.6, value / 1.25))}>−</button>

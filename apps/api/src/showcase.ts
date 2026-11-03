@@ -3,6 +3,7 @@ import { Spec, VersionRecord, type Assembly, type TestResult, type TestSpec } fr
 import { runTest } from '@protolab/simulator';
 import { buildTriplexPump, measureTriplexPump, triplexPumpTest } from '@protolab/simulator/triplex-pump';
 import { buildTwinDrawbridge, measureTwinDrawbridge, twinDrawbridgeTest } from '@protolab/simulator/twin-drawbridge';
+import { buildDrawingAutomaton, measureDrawingAutomaton, drawingAutomatonTest } from '@protolab/simulator/drawing-automaton';
 import { DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { now, versionSummary } from './jobs.ts';
 import type { ObjectStore } from './store.ts';
@@ -63,9 +64,33 @@ const drawbridge: Reference = {
   testSummary: 'Measure both passive decks and check clearance',
 };
 
+const drawing: Reference = {
+  id: 'inv_drawing_automaton',
+  versionId: 'ver_drawing_automaton_1',
+  title: 'Drawing automaton · a pen guided by four bars',
+  description: 'A reference mechanism where one continuously turning crank guides a passive marker around a closed loop. The path comes from the recorded positions of the tip.',
+  prompt: 'Build a drawing automaton where a single motor guides a marker around a repeating loop through a four-bar linkage.',
+  plan: {
+    purpose: 'Show how a linkage can turn steady rotation into a repeating two-dimensional path.',
+    features: ['Powered crank', 'Passive rocker and pen carrier', 'Fixed-mount drawing marker'],
+    motions: ['The crank rotates continuously. The linked rocker constrains the pen carrier and shapes the path of the marker.'],
+    subassemblies: ['Ground link and motor', 'Four-bar linkage and marker'],
+    successCriteria: ['At least three crank revolutions', 'Tip travel along both horizontal and vertical axes', 'Tip returns within 1 mm after one full measured revolution'],
+    unverified: ['Ink transfer and contact pressure on paper'],
+  },
+  build: buildDrawingAutomaton,
+  test: drawingAutomatonTest,
+  verify: (result) => {
+    const { loopClosure_m } = measureDrawingAutomaton(result);
+    return loopClosure_m !== null && loopClosure_m <= 0.001;
+  },
+  decision: 'Place the marker off the line between the two pivots on the coupler to create a wider loop.',
+  testSummary: 'Measure the powered crank and passive marker travel on both axes',
+};
+
 /** Save verified reference mechanisms once, with their real simulation traces. */
 export async function seedReferenceShowcases(db: DatabaseSync, store: ObjectStore, persist?: () => Promise<void>) {
-  for (const reference of [pump, drawbridge]) {
+  for (const reference of [pump, drawbridge, drawing]) {
     try {
       await saveReference(reference, db, store, persist);
     } catch (error) {

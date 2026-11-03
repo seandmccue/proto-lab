@@ -13,6 +13,7 @@ const steps = [
   { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
   { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
 ];
+const referenceIds = ['inv_drawing_automaton', 'inv_triplex_pump', 'inv_twin_drawbridge'];
 
 export default function Home() {
   const nav = useNavigate();
@@ -33,10 +34,12 @@ export default function Home() {
   const heroId = hero?.id;
   const heroVersionId = hero?.currentVersionId;
   const heroTestId = hero?.latestWalk?.testId;
+  const references = referenceIds.flatMap((id) => featured.filter((item) => item.id === id));
+  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id)).slice(0, 6);
 
   useEffect(() => {
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
-    api.gallery('featured', 6).then((r) => setFeatured(r.items)).catch(() => {});
+    api.gallery('featured', 12).then((r) => setFeatured(r.items)).catch(() => {});
     api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured).slice(0, 6))).catch(() => {});
     api.gallery('remixes', 4).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
@@ -139,8 +142,20 @@ export default function Home() {
             ))}
           </div>
         </div>}
+        {references.length > 0 && (
+          <section className="lab-section" aria-labelledby="motion-gallery-title">
+            <div className="lab-section-heading">
+              <div>
+                <span className="lab-label">Mechanism lab</span>
+                <h2 id="motion-gallery-title">See mechanisms in motion</h2>
+                <p>Replay reference builds to see how one drive moves several linked parts. Open the test to inspect the measured results.</p>
+              </div>
+            </div>
+            <div className="invention-grid">{references.map((item) => <GalleryCard key={item.id} item={item} replay />)}</div>
+          </section>
+        )}
         {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} browse={{ to: '/gallery?view=mine', label: 'All your inventions' }} />}
-        <Section title="Prototype gallery" items={featured} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery', label: 'View gallery' }} />
+        <Section title="Prototype gallery" items={featuredPrototypes} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery', label: 'View gallery' }} />
         <Section title="Recent" items={recent} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
         <Section title="Remixes" items={remixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />
         <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
