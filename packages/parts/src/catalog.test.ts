@@ -102,3 +102,20 @@ test('move carries everything mounted on the moved instance and shifts joint anc
   const solo = applyOps(r0.assembly, [{ op: 'move', id: 'base', translate: [0, 0.1, 0], withAttached: false }], getPart);
   assert.ok(Math.abs(solo.assembly.instances.find((x) => x.id === 'arm')!.transform.position[1] - before.arm[1]) < 1e-9, 'withAttached:false moves only the base');
 });
+
+test('a first batch that mounts onto an unplaced "body" gets the chassis placed automatically; re-using an id replaces', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'mount', id: 'hipL0', part: 'servo-ds3218', onto: 'body', connector: 'hip_L0', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'hipR2', part: 'servo-ds3218', onto: 'body', connector: 'hip_R2', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+  ], getPart, undefined, catalog);
+  const body = r.assembly.instances.find((x) => x.id === 'body');
+  assert.ok(body && body.partId === 'chassis-hex-200', `auto-placed ${body?.partId}`);
+  assert.ok(r.summary[0].startsWith('auto-placed body as chassis-hex-200'), r.summary[0]);
+  assert.equal(r.assembly.instances.length, 3);
+  const r2 = applyOps(r.assembly, [{ op: 'mount', id: 'hipL0', part: 'servo-mg996r', onto: 'body', connector: 'hip_L0', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 }], getPart, undefined, catalog);
+  assert.equal(r2.assembly.instances.filter((x) => x.id === 'hipL0').length, 1);
+  assert.equal(r2.assembly.instances.find((x) => x.id === 'hipL0')!.partId, 'servo-mg996r');
+  assert.ok(r2.summary.some((l) => l === 'replaced hipL0'), r2.summary.join('|'));
+  // ambiguous connectors (top exists on many parts) are not guessed
+  assert.throws(() => applyOps(emptyAssembly(), [{ op: 'mount', id: 'x', part: 'beam-100', onto: 'base', connector: 'top', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 }], getPart, undefined, catalog), /Unknown instance "base"/);
+});
