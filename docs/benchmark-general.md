@@ -392,3 +392,33 @@ other and are exempt from clearance checks (PR #92); a flush-mounted windmill-4x
 | --- | --- | --- | --- |
 | windmill | **passed, first test** | **41 s** | fastest build on record; the flush-mounted rotor spins clear |
 | ferris | passed, first test | 78 s | unchanged behaviour, confirms no regression |
+
+
+## Eighth full pass: bearing-contact fix, free mounts (v9, 2026-11-03 11:48 UTC)
+
+| Metric | Value |
+| --- | --- |
+| Success rate | 90 % (9/10) |
+| Errors (API/model) | 0 % |
+| Median completion time | 172 s |
+| First-try builds | 7 of 10 |
+
+| Prompt | Result | Time | Versions | Custom parts | Handoffs | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| butterfly | passed | 71 s | 1 | 0 | 0 | Mechanical butterfly on anchored tower-300 stand with body-butterfly-80 and two 200mm shap… |
+| ferris | passed | 93 s | 1 | 0 | 0 | Miniature Ferris wheel: anchored tower-300, Ø400mm 8-spoke wheel on tower axle with 60mm f… |
+| muse | passed | 196 s | 5 | 0 | 2 | Muse-inspired quadruped: chassis-quad-160 + 8x servo-ds3218 (2 N·m) driving 4x 2-DOF legs … |
+| claw | passed | 155 s | 1 | 0 | 0 | Robotic grabbing claw: anchored plate-120x80 base, beam-100 post, plate-120x80 palm, two s… |
+| windmill | passed | 85 s | 1 | 0 | 0 | Windmill: anchored tower-500 with windmill-4x600 4-sail rotor mounted on tower axle with 6… |
+| catapult | passed | 458 s | 4 | 1 | 2 | Tabletop catapult: anchored base-plate-300x200 + servo-giant-8 (8 N·m) on top_back + 140mm… |
+| drawbridge | passed | 172 s | 1 | 1 | 0 | Automated drawbridge: anchored 300x200mm base, 3.5 N·m hinge servo at the rear with a 300x… |
+| crane | passed | 162 s | 1 | 0 | 0 | Miniature crane: anchored base-plate-300x200, tower-150 mast, 3.5 N·m luff servo driving a… |
+| crab | failed | 656 s | 9 | 0 | 4 | Six-legged mechanical crab: chassis-hex-200 yawed 90deg so leg swing aligns with Z (sidewa… |
+| novel | passed | 411 s | 1 | 0 | 0 | Garden bird-scarer: weighted base plate with vertical 500mm pole, 4-blade Ø400mm pinwheel … |
+
+Windmill (85 s), drawbridge (172 s), crane (162 s), claw (155 s), butterfly (71 s) and Ferris wheel
+(93 s) were first-try builds. The catapult lost three tests placing the pizza off the tray before Wonder
+fixed it; mounts now accept `joint: "free"` to set a payload down on a connector without coordinates
+(PR #95). The crab set itself a 6° tilt limit and spent nine tests chasing it at 6.6–7.8°; the rules now
+say to leave room in test criteria (10–12° for a legged machine with a shell) and the trails show the
+gains and duty each build used (PR #96).
