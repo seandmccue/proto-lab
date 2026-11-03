@@ -112,9 +112,10 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
       let best: PartDefinition | null = null;
       const baseLike = /base|stand|ground|floor|pedestal|foot/i.test(id);
       if (cands.length === 1) best = cands[0];
-      else if (baseLike && cands.length > 1 && cands.every((p) => p.category === 'plates')) { // a "base" that only plates can be: the smallest purpose-made base plate, else the largest plate
-        const bases = cands.filter((p) => /^base-/.test(p.id)).sort((x, y) => x.dimensions_m[0] * x.dimensions_m[2] - y.dimensions_m[0] * y.dimensions_m[2]);
-        best = bases[0] ?? [...cands].sort((x, y) => y.dimensions_m[0] * y.dimensions_m[2] - x.dimensions_m[0] * x.dimensions_m[2])[0];
+      else if (baseLike && cands.some((p) => p.category === 'plates')) { // a "base" is a plate: the smallest purpose-made base plate that fits, else the largest fitting plate
+        const plates = cands.filter((p) => p.category === 'plates');
+        const bases = plates.filter((p) => /^base-/.test(p.id)).sort((x, y) => x.dimensions_m[0] * x.dimensions_m[2] - y.dimensions_m[0] * y.dimensions_m[2]);
+        best = bases[0] ?? [...plates].sort((x, y) => y.dimensions_m[0] * y.dimensions_m[2] - x.dimensions_m[0] * x.dimensions_m[2])[0];
       }
       else if (cands.length > 1 && cands.length <= 6) { const sorted = [...cands].sort((x, y) => x.connectors.length - y.connectors.length || x.mass_kg - y.mass_kg); if (sorted[0].connectors.length < sorted[1].connectors.length) best = sorted[0]; }
       if (!best) continue;

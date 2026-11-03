@@ -116,8 +116,11 @@ test('a first batch that mounts onto an unplaced "body" gets the chassis placed 
   assert.equal(r2.assembly.instances.filter((x) => x.id === 'hipL0').length, 1);
   assert.equal(r2.assembly.instances.find((x) => x.id === 'hipL0')!.partId, 'servo-mg996r');
   assert.ok(r2.summary.some((l) => l === 'replaced hipL0'), r2.summary.join('|'));
-  // ambiguous connectors (top exists on many parts) are not guessed
-  assert.throws(() => applyOps(emptyAssembly(), [{ op: 'mount', id: 'x', part: 'beam-100', onto: 'base', connector: 'top', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 }], getPart, undefined, catalog), /Unknown instance "base"/);
+  // ambiguous connectors (top exists on many parts) are not guessed for an arbitrary id…
+  assert.throws(() => applyOps(emptyAssembly(), [{ op: 'mount', id: 'x', part: 'beam-100', onto: 'frame', connector: 'top', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 }], getPart, undefined, catalog), /Unknown instance "frame"/);
+  // …but a "base" is a plate: base.top gets the purpose-made base plate
+  const rb = applyOps(emptyAssembly(), [{ op: 'mount', id: 'post', part: 'beam-100', onto: 'base', connector: 'top', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 }], getPart, undefined, catalog);
+  assert.equal(rb.assembly.instances.find((x) => x.id === 'base')!.partId, 'base-plate-300x200');
 });
 
 test('an unplaced "base" that only plates can be is auto-placed as the largest plate', () => {
