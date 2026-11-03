@@ -101,7 +101,10 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     if (!parent) return { error: 'This invention has no finished version to build on yet' } as const;
     let target = inv;
     if (mode === 'remix') {
-      target = { id: newId('inv'), owner_id: sid, title: `${inv.title} (remix)`, description: '', visibility: 'private', current_version_id: null, status: 'queued', parent_version_id: parent.id, source_invention_id: inv.id, prompt: inv.prompt, featured: 0, created_at: now(), updated_at: now() };
+      // Name the remix after the change so lineage reads in the gallery: "Mechanical butterfly → four wings like a dragonfly".
+      const change = changeRequest.trim().replace(/[.!]+$/, ''); const base = inv.title.replace(/\s*\((remix[^)]*)\)$/i, '').replace(/\s*→.*$/, '');
+      const title = `${base} → ${change.charAt(0).toLowerCase() + change.slice(1)}`.slice(0, 80);
+      target = { id: newId('inv'), owner_id: sid, title, description: '', visibility: 'private', current_version_id: null, status: 'queued', parent_version_id: parent.id, source_invention_id: inv.id, prompt: inv.prompt, featured: 0, created_at: now(), updated_at: now() };
       db.prepare('INSERT INTO inventions (id, owner_id, title, description, visibility, current_version_id, status, parent_version_id, source_invention_id, prompt, featured, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(target.id, target.owner_id, target.title, '', 'private', null, 'queued', parent.id, inv.id, inv.prompt, 0, target.created_at, target.updated_at);
       db.prepare('INSERT INTO remixes (id, source_version_id, derived_invention_id, change_request, created_at) VALUES (?,?,?,?,?)').run(newId('rmx'), parent.id, target.id, changeRequest, now());
