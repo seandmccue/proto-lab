@@ -72,6 +72,14 @@ transcript, diagnoses the mechanical problem, applies one targeted change and ru
 Spark resumes. The handoff is shown in the activity log and every version records which model made
 its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_SPECIALIST_AFTER`.
 
+## Generalization benchmark
+
+`node packages/agent/src/bench.ts --general` runs ten inventions through the same engine: butterfly,
+Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbridge, crane and a novel
+garden gadget. On the current engine all ten produce a recognisable, tested mechanism
+([docs/benchmark-general.md](docs/benchmark-general.md)); timings run from 100 s to 22 min, dominated
+by Meta Model API round-trips.
+
 ## Reliability benchmark
 
 `node packages/agent/src/bench.ts --repeats 4 --concurrency 4` runs five prompts four times each
