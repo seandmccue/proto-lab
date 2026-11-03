@@ -315,3 +315,15 @@ the deck (23 N·m demand) until Wonder fixed it; the recipe now quotes a measure
 no saturation). The catapult missed: a 350 mm arm overshot a 0.5 m target for nine tests; the recipe now
 carries a measured arm-length → range table (100 mm → 0.35 m, 140 mm → 0.59 m, 220 mm → 0.98 m) and
 says to pick the arm from the target before the first test.
+
+### Catapult and drawbridge re-runs (v7b / v7c, 2026-11-03 10:50–11:01 UTC)
+
+| Prompt | v7 | Re-run | Note |
+| --- | --- | --- | --- |
+| catapult | failed, 9 tests, 400 s (350 mm arm overshot) | **passed, first test, 103 s** | 140 mm arm from the measured table landed the pizza at 0.48 m (target 0.5 ± 0.25) |
+| drawbridge | passed after 4 cycle tests and 2 Wonder consults, 614 s | **passed, first test, 144 s** | raise-and-lower sine cycle within rating |
+
+The drawbridge re-run also fixed a simulator behaviour: a position drive whose first target sits far from
+the assembled pose (a sine with offset 0.55 and phase 0) used to be commanded there at t = 0, so
+stiffness 40 × 0.55 rad showed up as a 22 N·m demand spike. Drives now approach such a target no faster
+than 0.6 rad/s (measured: 1.3 N·m instead of 22), the way a real servo would be commanded (PR #83, #84).
