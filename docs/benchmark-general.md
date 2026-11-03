@@ -274,3 +274,15 @@ the index in the prompt the model reaches for library parts more and designs few
 runs vs 70 %); custom parts still appear where the library has nothing (the catapult arm here, the bells
 and one-piece stand of the pendulum desk toy in the gallery). Across six passes on the current engine:
 55 of 60 runs passed, and every miss was traced to a cause and fixed.
+
+### Claw after the measured recipe and the honest grip test (v6b, 2026-11-03 10:31 UTC)
+
+| Prompt | v6 | v6b | Note |
+| --- | --- | --- | --- |
+| claw | 746 s, 2 versions (7 min of deliberation before the first assemble) | **149 s, first try** | Mirrored servos under a palm, fingers in one plane, 0.6 rad close cradles the block; 20 events total |
+
+Two engine changes landed alongside: the grip test now fails when the payload lands on the floor (it
+used to accept any block within 15 cm of the palm, floor included), and the engine recovers the three
+wasted first-batch rounds the API log kept showing — a mount onto a `body`/`base` nobody placed is
+auto-placed when its connectors identify one library part, re-using an id replaces the instance, and
+array fields sent as JSON strings are parsed (PR #77, #78).
