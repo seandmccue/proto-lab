@@ -18,6 +18,7 @@ const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
 const drawingRemixId = 'inv_76b7fae5bdf941c9';
 const gimbalRepairId = 'inv_d3f76fcc393b49d6';
+const lotusId = 'inv_ba7b3c7716564397';
 const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal'];
 
 function penPathSize(test: TestSummary | null | undefined) {
@@ -61,7 +62,11 @@ export default function Home() {
   const spotlightId = drawingRemix && originalPath && remixPath ? drawingRemix.id : null;
   const gimbalRepair = featured.find((item) => item.id === gimbalRepairId && item.latestTest?.passed);
   const gimbalTilt = gimbalRepair?.latestTest?.metrics['tray.maxTilt_deg'];
-  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id);
+  const lotus = featured.find((item) => item.id === lotusId && item.latestTest?.passed);
+  const lotusStroke = lotus?.latestTest?.metrics.synchronizedMinTravel_m ?? NaN;
+  const lotusSpread = lotus?.latestTest?.metrics.synchronizedMaxSpread_m ?? NaN;
+  const showLotus = lotus && Number.isFinite(lotusStroke) && Number.isFinite(lotusSpread);
+  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id && item.id !== (showLotus ? lotus.id : undefined));
   const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
@@ -204,7 +209,7 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {(references.length > 0 || spotlightId || orrery || gimbalRepair) && (
+        {(references.length > 0 || spotlightId || orrery || gimbalRepair || showLotus) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">
               <div>
@@ -240,6 +245,20 @@ export default function Home() {
                   <div><dt>Maximum allowed</dt><dd>10°</dd></div>
                 </dl>
                 <Link to={`/i/${gimbalRepair.id}?replay=1&compare=1`} className="btn-secondary">Compare gimbal simulations <span aria-hidden="true">↗</span></Link>
+              </article>
+            )}
+            {showLotus && (
+              <article className="lab-test-example mb-4">
+                <div>
+                  <span className="lab-label">One actuator</span>
+                  <h3>Six petals bloom together</h3>
+                  <p>One sliding collar pulls six passive linkages. Scrub the saved runs to see the flower open and track how closely the tips move together.</p>
+                </div>
+                <dl aria-label="Measured lotus motion">
+                  <div><dt>Shortest tip stroke</dt><dd>{(lotusStroke * 1000).toFixed(1)} mm</dd></div>
+                  <div><dt>Peak tip motion spread</dt><dd>{(lotusSpread * 1000).toFixed(2)} mm</dd></div>
+                </dl>
+                <Link to={`/i/${lotus.id}?replay=1&compare=1`} className="btn-secondary">Compare lotus simulations <span aria-hidden="true">↗</span></Link>
               </article>
             )}
             {references.length > 0 && <div className="invention-grid">{references.map((item) => <GalleryCard key={item.id} item={item} replay />)}</div>}

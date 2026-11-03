@@ -3,6 +3,7 @@
  * judge route, saved simulation evidence, and hosted demo video.
  */
 import type { TestResult, VersionRecord } from '@protolab/schema';
+import { len, sub, transformPoint } from '@protolab/parts';
 import { measureFollowerTiming } from '@protolab/simulator/follower-timing';
 import { measurePlanarOrbit } from '@protolab/simulator/planar-orbit';
 
@@ -212,6 +213,40 @@ if (judge) checks.push(
       throw new Error('Expected the initial Spark failure and the Wonder leveling pass with both drives still moving');
     }
     return 'Wonder repaired leveling while preserving both signed sweeps';
+  }],
+  ['Muse mechanical lotus', async () => {
+    const id = 'inv_ba7b3c7716564397';
+    const { invention, versions } = await publicBuild(id);
+    const first = versions.find(({ iteration }) => iteration === 1);
+    if (!first || !invention.featured) throw new Error('Expected the initial failure and a featured lotus');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, invention.currentVersionId)]);
+    const { assembly } = after;
+    const instances = new Map(assembly.instances.map((instance) => [instance.id, instance]));
+    const parts = new Map(assembly.parts.map((part) => [part.id, part]));
+    const point = ({ instanceId, connectorId }: typeof assembly.joints[number]['a']) => {
+      const instance = instances.get(instanceId);
+      const connector = instance && parts.get(instance.partId)?.connectors.find(({ id }) => id === connectorId);
+      if (!instance || !connector) throw new Error(`Missing lotus connector ${instanceId}.${connectorId}`);
+      return transformPoint(instance.transform, connector.position);
+    };
+    const rods = Array.from({ length: 6 }, (_, index) => `rod${index}`);
+    const exactPins = rods.every((id, index) => {
+      const joints = assembly.joints.filter(({ a, b }) => a.instanceId === id || b.instanceId === id);
+      const neighbors = joints.map(({ a, b }) => a.instanceId === id ? b.instanceId : a.instanceId);
+      return joints.length === 2 && neighbors.includes('collar') && neighbors.includes(`petal${index}`)
+        && joints.every(({ a, b, type, motor }) => type === 'revolute' && !motor && len(sub(point(a), point(b))) <= 0.0005);
+    });
+    const powered = assembly.joints.filter(({ motor }) => motor);
+    if (!after.modelId.startsWith('muse-') || powered.length !== 1 || powered[0].type !== 'prismatic'
+      || assembly.controller.drives.length !== 1 || !exactPins
+      || !recorded(before, (test) => test.testId.startsWith('lotus_cycle#') && !test.passed)
+      || !recorded(after, (test) => test.testId.startsWith('lotus_cycle#') && test.passed
+        && test.metrics.synchronizedMinTravel_m >= 0.04 && test.metrics.synchronizedMaxSpread_m <= 0.005
+        && test.metrics['collar.travel_y_m'] >= 0.035 && test.metrics.clearanceViolation === 0
+        && test.metrics.groundContactViolation === 0)) {
+      throw new Error('Expected one actuator, six fitted rods, and a passing synchronized-motion test');
+    }
+    return 'six synchronized petals, one actuator, and all twelve rod pins aligned';
   }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
