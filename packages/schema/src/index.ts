@@ -219,12 +219,16 @@ export const TestSpec = z.discriminatedUnion('kind', [
       })).max(80).optional(),
       followerTiming: z.object({
         shaft: z.string().min(1),
-        followers: z.tuple([z.string().min(1), z.string().min(1)]),
+        followers: z.union([
+          z.tuple([z.string().min(1), z.string().min(1)]),
+          z.tuple([z.string().min(1), z.string().min(1), z.string().min(1)]),
+        ]),
         axis: Axis,
         minCycles: z.number().int().min(1).max(30),
         minStroke_m: z.number().gt(0.001),
-        minLowDwell_s: z.number().positive().max(15),
+        minLowDwell_s: z.number().positive().max(15).optional(),
         minPhaseGap_deg: z.number().positive().max(180),
+        maxPhaseGap_deg: z.number().positive().max(360).optional(),
       }).optional(),
       payload: z.object({ instance: z.string().min(1), holder: z.string().min(1).optional() }).optional(),
     }).default({}),

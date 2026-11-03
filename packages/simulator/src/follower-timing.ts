@@ -89,8 +89,13 @@ export function measureFollowerTiming(trace: Trace, { shaft, followers, axis }: 
         peakAngle_rad: samples[positions.indexOf(max)].angle - turn * revolution,
       };
     });
-    const gap = Math.abs(flags[0].peakAngle_rad - flags[1].peakAngle_rad) % revolution;
-    cycles.push({ flags, phaseGap_deg: Math.min(gap, revolution - gap) * 180 / Math.PI });
+    const peaks = flags.map(({ peakAngle_rad }) => ((peakAngle_rad % revolution) + revolution) % revolution)
+      .sort((a, b) => a - b);
+    const adjacentGaps = peaks.map((angle, index) => (peaks[index + 1] ?? peaks[0] + revolution) - angle);
+    // With two followers, phase separation has always meant the shorter arc.
+    const phaseGaps_deg = (peaks.length === 2 ? [Math.min(...adjacentGaps)] : adjacentGaps)
+      .map((gap) => gap * 180 / Math.PI);
+    cycles.push({ flags, phaseGap_deg: Math.min(...phaseGaps_deg), phaseGaps_deg });
   }
   return cycles;
 }

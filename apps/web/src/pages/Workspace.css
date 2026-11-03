@@ -281,6 +281,8 @@
 }
 .workbench-follower-chart [data-line="0"] { --follower-line: #884600; }
 .workbench-follower-chart [data-line="1"] { --follower-line: #006e67; }
+.workbench-follower-chart [data-line="2"] { --follower-line: #6b37a3; }
+.workbench-follower-legend [data-line="2"]::before { border-top-style: dotted; }
 .workbench-follower-legend [data-line="1"]::before { border-top-style: dashed; }
 .workbench-follower-plot {
   display: grid;
@@ -294,6 +296,7 @@
 .workbench-follower-gridline { stroke: #d6cce2; }
 .workbench-follower-plot polyline { fill: none; stroke: var(--follower-line); stroke-width: 2; stroke-linejoin: round; }
 .workbench-follower-plot polyline[data-line="1"] { stroke-dasharray: 5 3; }
+.workbench-follower-plot polyline[data-line="2"] { stroke-dasharray: 1 3; stroke-linecap: round; }
 .workbench-follower-cursor { stroke: var(--bench-violet); stroke-width: 1.5; }
 
 

@@ -12,6 +12,10 @@ export const triplexPumpTest: TestSpec = {
   measure: {
     joints: ['shaft_spin'], base: 'base', clearancePairs: [],
     noGroundContact: ['piston_1', 'piston_2', 'piston_3'],
+    followerTiming: {
+      shaft: 'shaft_spin', followers: ['piston_1', 'piston_2', 'piston_3'], axis: 'y',
+      minCycles: 2, minStroke_m: 0.038, minPhaseGap_deg: 110, maxPhaseGap_deg: 130,
+    },
     linearTravel: [1, 2, 3].map((number) => ({ instance: `piston_${number}`, axis: 'y' as const, minTravel_m: 0.038 })),
   },
   criteria: { minRevolutions: 3, maxBaseTilt_deg: 2, torqueWithinRating: true },

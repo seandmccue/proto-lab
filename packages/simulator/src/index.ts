@@ -188,11 +188,14 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
     for (const { instance } of linearTravel) if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
     if (measure.followerTiming) {
-      const { shaft, followers } = measure.followerTiming;
+      const { shaft, followers, minPhaseGap_deg, maxPhaseGap_deg } = measure.followerTiming;
       if (!sims.some(({ joint }) => joint.type === 'revolute' && joint.motor?.controlId === shaft)) {
         failureReasons.push(`Follower timing shaft "${shaft}" must be a motorized revolute joint`);
       }
-      if (followers[0] === followers[1]) failureReasons.push('Follower timing needs two different instances');
+      if (new Set(followers).size !== followers.length) failureReasons.push('Follower timing needs different instances for each follower');
+      if (maxPhaseGap_deg !== undefined && maxPhaseGap_deg < minPhaseGap_deg) {
+        failureReasons.push('Follower timing maximum phase gap must be at least the minimum phase gap');
+      }
       for (const id of followers) if (!instById.has(id)) failureReasons.push(`Follower timing instance "${id}" not found`);
     }
     if (liftThreshold && !liftPayload) failureReasons.push('A payload height threshold needs a payload instance');
@@ -352,6 +355,13 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
           const gap = Math.min(...cycles.map(({ phaseGap_deg }) => phaseGap_deg));
           metrics.followerPhaseGap_deg = +gap.toFixed(2);
           if (gap < timing.minPhaseGap_deg) failureReasons.push(`Follower peaks were only ${gap.toFixed(1)}° apart, target ${timing.minPhaseGap_deg}°`);
+          if (timing.followers.length === 3 || timing.maxPhaseGap_deg !== undefined) {
+            const maxGap = Math.max(...cycles.flatMap(({ phaseGaps_deg }) => phaseGaps_deg));
+            metrics.followerMaxPhaseGap_deg = +maxGap.toFixed(2);
+            if (timing.maxPhaseGap_deg !== undefined && maxGap > timing.maxPhaseGap_deg) {
+              failureReasons.push(`Follower peaks were up to ${maxGap.toFixed(1)}° apart, limit ${timing.maxPhaseGap_deg}°`);
+            }
+          }
           for (const [index, id] of timing.followers.entries()) {
             const readings = cycles.map(({ flags }) => flags[index]);
             const stroke = Math.min(...readings.map(({ stroke_m }) => stroke_m));
@@ -359,7 +369,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
             metrics[`${id}.cycleStroke_m`] = +stroke.toFixed(4);
             metrics[`${id}.lowDwell_s`] = +dwell.toFixed(3);
             if (stroke < timing.minStroke_m) failureReasons.push(`${id} travelled ${stroke.toFixed(3)} m in its shortest stroke, target ${timing.minStroke_m} m`);
-            if (dwell < timing.minLowDwell_s) failureReasons.push(`${id} stayed low ${dwell.toFixed(2)} s in its shortest dwell, target ${timing.minLowDwell_s} s`);
+            if (timing.minLowDwell_s !== undefined && dwell < timing.minLowDwell_s) failureReasons.push(`${id} stayed low ${dwell.toFixed(2)} s in its shortest dwell, target ${timing.minLowDwell_s} s`);
           }
         }
       }

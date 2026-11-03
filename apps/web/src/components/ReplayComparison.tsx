@@ -1,3 +1,4 @@
+import TriplexTimingEvidence from './TriplexTimingEvidence.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { tiltDeg } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
@@ -147,6 +148,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         <div className={`workbench-comparison-note${index === 0 ? ' is-failure' : ''}`}>
           {index === 0 ? <><strong>{tilt ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
         </div>
+        <TriplexTimingEvidence version={version} time={time} test={test} />
       </article>)}
     </div>
     <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />

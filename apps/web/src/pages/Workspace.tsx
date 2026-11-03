@@ -8,6 +8,7 @@ import { recordedPenPath } from '../components/replayEvidence.ts';
 import ReplayComparison from '../components/ReplayComparison.tsx';
 import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx';
 import FollowerTimingEvidence from '../components/FollowerTimingEvidence.tsx';
+import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -684,6 +685,7 @@ export default function Workspace() {
             </div>
           </div>
           {!showLive && test && <FollowerTimingEvidence time={time.t} test={test} definition={testDefinition} isSemaphore={version?.id === 'ver_cam_semaphore_1' && test.testId === 'cam_semaphore_stroke'} />}
+          {!showLive && version && test && <TriplexTimingEvidence version={version} time={time.t} test={test} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
           {running && <SimulationStatus events={events} running replay={replayStatus} />}

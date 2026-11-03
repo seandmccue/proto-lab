@@ -3,6 +3,7 @@
  * judge route, saved simulation evidence, and hosted demo video.
  */
 import type { TestResult, VersionRecord } from '@protolab/schema';
+import { measureFollowerTiming } from '@protolab/simulator/follower-timing';
 
 const arg = (name: string, fallback: string) => {
   const index = process.argv.indexOf(name);
@@ -87,6 +88,42 @@ if (judge) checks.push(
       throw new Error('Expected measured pen travel on both axes');
     }
     return 'public replay with original lineage';
+  }],
+  ['Alternating stamp press', async () => {
+    const id = 'inv_5e16a5e4eaba4831';
+    const detail = await publicBuild(id);
+    const first = detail.versions.find(({ iteration }) => iteration === 1);
+    const framed = detail.versions.find(({ iteration }) => iteration === 2);
+    if (!first || !framed || detail.invention.currentVersionId !== framed.id) throw new Error('Expected original and framed press versions');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, framed.id)]);
+    const timingPassed = (test: TestResult) => test.passed && test.metrics.followerCycles >= 3
+      && test.metrics.followerPhaseGap_deg >= 155
+      && Object.entries(test.metrics).filter(([key, value]) => key.endsWith('.cycleStroke_m') && value >= 0.016).length === 2;
+    if (after.parentVersionId !== before.id || !recorded(before, timingPassed) || !recorded(after, timingPassed)) {
+      throw new Error('Expected both original timing runs and the revision lineage');
+    }
+    return 'both timing replays and revision lineage';
+  }],
+  ['Muse triplex pump', async () => {
+    const id = 'inv_c618332e234d447d';
+    const { invention, versions } = await publicBuild(id);
+    const first = versions.find(({ iteration }) => iteration === 1);
+    if (!first) throw new Error('Expected the original pump revision');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, invention.currentVersionId)]);
+    const turns = (record: VersionRecord) => {
+      const test = record.tests.find(({ testId, passed }) => testId === 'pump_motion#1' && passed);
+      return test ? measureFollowerTiming(test.trace, { shaft: 'spin', followers: ['pist0', 'pist1', 'pist2'], axis: 'y' }) : [];
+    };
+    const original = turns(before);
+    const revised = turns(after);
+    const phaseMet = (gap: number) => gap >= 110 && gap <= 130;
+    if (after.parentVersionId !== before.id || after.assembly.controller.drives.length !== 1
+      || original.length < 3 || !original.some(({ phaseGaps_deg }) => phaseGaps_deg.some((gap) => !phaseMet(gap)))
+      || revised.length < 3 || revised.some(({ phaseGaps_deg, flags }) =>
+        !phaseGaps_deg.every(phaseMet) || flags.some(({ stroke_m }) => stroke_m < 0.03))) {
+      throw new Error('Expected the original phase miss and revised phase and stroke targets');
+    }
+    return 'three passive pistons measured across three full turns';
   }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
