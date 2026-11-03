@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import type { VersionRecord } from '@protolab/schema';
 import { catalog, generatorInfo } from '@protolab/parts';
-import { modelConfigFromEnv, DETERMINISTIC_MODEL_ID } from '@protolab/agent';
+import { modelConfigFromEnv, DETERMINISTIC_MODEL_ID, prettyModelName } from '@protolab/agent';
 import type { ObjectStore } from './store.ts';
 import { JobRunner, newId, now, stripTrace, versionSummary } from './jobs.ts';
 import type { InventionRow, JobRow, VersionRow } from './db.ts';
@@ -33,7 +33,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   const attribution = () => modelStatus.modelId === DETERMINISTIC_MODEL_ID
     ? { modelId: modelStatus.modelId, label: 'Deterministic planner (no model key configured)', live: false }
-    : { modelId: modelStatus.modelId, label: /muse/i.test(modelStatus.modelId) ? `Powered by Meta ${modelStatus.modelId}` : `Model: ${modelStatus.modelId}`, live: modelStatus.live };
+    : { modelId: modelStatus.modelId, label: /^muse-/i.test(modelStatus.modelId) ? `Powered by Meta ${prettyModelName(modelStatus.modelId)}` : `Model: ${modelStatus.modelId}`, live: modelStatus.live };
 
   app.get('/api/model', (c) => c.json({ ...attribution(), detail: modelStatus.detail }));
   app.get('/api/examples', (c) => c.json({ examples: EXAMPLES }));
