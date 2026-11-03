@@ -8,7 +8,7 @@ Everything below is live. Nothing is pre-rendered; gallery items were built by M
 - Open the homepage once so the featured cards have loaded.
 
 ## 1. Homepage (20 s)
-"What will you invent?" Point at the four featured cards: walking Muse robot, mechanical butterfly, Ferris wheel, pizza catapult. Hover a card: the preview animates the *actual* simulation trace. Say: *same component library, same assembly operations, no template per invention.*
+"What will you invent?" Point at the five featured cards: walking Muse robot, mechanical butterfly, Ferris wheel, pizza catapult, mechanical crab (open the crab's version chips: three failed scuttles, a Muse Wonder handoff, then a pass). Hover a card: the preview animates the *actual* simulation trace. Say: *same component library, same assembly operations, no template per invention.*
 
 ## 2. Start a build live (measured Muse timings, so pick deliberately)
 Live Meta Model API rounds take 5–60 s each. Measured end-to-end: Ferris wheel ≈ 100 s, windmill ≈ 140 s, novel garden gadget ≈ 170 s, walker ≈ 2–5 min (2 min with the measured notes), butterfly ≈ 3–4 min on the fixed wing library (first-try pass), catapult ≈ 3–5 min, claw ≈ 8–15 min, crane ≈ 7–11 min, crab ≈ 7–13 min, drawbridge up to 17 min. For a live slot, start a **Ferris wheel**, **windmill** or **butterfly** (or let a judge type one) and, while it runs, open a featured build in a second tab to show the finished experience. The 3D view fills in at the first `assemble` (badge: *assembling · N components · not yet simulated*), so there is something to look at within a minute; the simulated version replaces it after the first test. While the live run works, narrate the activity log:
