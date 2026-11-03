@@ -50,6 +50,27 @@ export function SpecPanel({ spec }: { spec: Spec }) {
   );
 }
 
+const STAGES = ['Plan', 'Parts', 'Assemble', 'Test', 'Revise', 'Done'] as const;
+function stageOf(events: JobEvent[]): number {
+  let s = 0;
+  const tools = events.filter((e) => e.type === 'tool').map((e) => String(e.tool));
+  if (events.some((e) => e.type === 'spec' && (e.spec as { plan?: unknown })?.plan)) s = 1;
+  if (tools.some((t) => t === 'search_catalog' || t === 'create_part' || t === 'design_part')) s = Math.max(s, 1);
+  if (tools.some((t) => t === 'assemble')) s = Math.max(s, 2);
+  if (events.some((e) => e.type === 'test')) s = Math.max(s, 3);
+  if (events.some((e) => e.type === 'test') && events.some((e) => e.type === 'assembly' && Number(e.iteration) > 1)) s = Math.max(s, 4);
+  if (events.some((e) => e.type === 'done')) s = 5;
+  return s;
+}
+function useElapsed(events: JobEvent[], running: boolean): string {
+  const [, tick] = useState(0);
+  useEffect(() => { if (!running) return; const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, [running]);
+  const first = events[0]?.t ? new Date(events[0].t).getTime() : null; const last = events[events.length - 1]?.t ? new Date(events[events.length - 1].t).getTime() : null;
+  if (!first) return '';
+  const ms = (running ? Date.now() : last ?? Date.now()) - first; const m = Math.floor(ms / 60000), sec = Math.floor((ms % 60000) / 1000);
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
 export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
   const end = useRef<HTMLLIElement>(null);
   useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
