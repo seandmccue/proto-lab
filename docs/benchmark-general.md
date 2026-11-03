@@ -97,3 +97,15 @@ Nine of ten passed with zero API errors. The walker built a stable quadruped tha
 −X, and the walk test only credited +X; a backward walk is still a walk, so the test now accepts travel in
 either sense (and reports the sign with a hint to flip the hip drives). Counters in this pass use the generic
 tool names: 80 % of runs created at least one custom part, 40 % consulted Muse Wonder.
+
+### Walker validation after the measured application notes (PR #24/#25)
+
+| Run | Result | Time | Tests | Notes |
+| --- | --- | --- | --- | --- |
+| Hero walker, before notes | failed | 579 s | 9 | Walk passed on the 8th test (0.32 m), the single remaining dance test drifted 0.75 m. |
+| Hero walker, with notes | **passed** | 120 s | 5 | Walk passed first try (0.359 m, 4.8° tilt, torques within rating); dance passed on the third attempt (tilt 4.9°). |
+
+Giving the model simulator-measured application notes (which servo class carries the load, why long legs tip,
+the cadence/amplitude slip limits, the in-place dance pattern) cut the hero build from 5–10 minutes with
+frequent failures to about two minutes. These are measured data in the prompt, not a template: the model still
+chooses parts, assembles with the generic operations, defines the tests and revises from results.
