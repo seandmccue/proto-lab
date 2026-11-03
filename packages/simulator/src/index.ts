@@ -83,9 +83,12 @@ export function controlTargets(ctl: Controller, t: number): ControlTargets {
     }
   } else {
     const ramp = ctl.rampIn_s > 0 ? Math.min(1, t / ctl.rampIn_s) : 1;
+    // Bob: all knees flex together; each hip rotates forward by half the extra flex so the foot stays
+    // under the hip (equal leg segments) instead of sliding. Sway adds a small alternating hip motion.
+    const bob = ramp * ctl.bobAmplitude_rad * (0.5 + 0.5 * Math.sin(2 * w * t));
     for (const [id, phase] of Object.entries(ctl.phases)) {
-      if (id.startsWith('hip_')) out[id] = ctl.hipOffset_rad + ramp * ctl.swayAmplitude_rad * Math.sin(w * t + phase);
-      else if (id.startsWith('knee_')) out[id] = ctl.kneeOffset_rad + ramp * ctl.bobAmplitude_rad * (0.5 + 0.5 * Math.sin(2 * w * t + phase));
+      if (id.startsWith('hip_')) out[id] = ctl.hipOffset_rad + 0.5 * bob + ramp * ctl.swayAmplitude_rad * Math.sin(w * t + phase);
+      else if (id.startsWith('knee_')) out[id] = ctl.kneeOffset_rad + bob;
     }
   }
   return out;

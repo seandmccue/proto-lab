@@ -22,7 +22,7 @@ export function heuristicSpec(prompt: string, base?: Spec): Spec {
     family: 'legged_walker',
     targets: { walkDistance_m: walkDistance, maxTilt_deg: base?.targets.maxTilt_deg ?? 25, duration_s: base?.targets.duration_s ?? 6 },
     environment: { gravity_m_s2: 9.81, groundFriction: 0.9 },
-    constraints: { legCount, maxBodyLength_m: 0.25, maxMass_kg: 1.0, maxParts: 60 },
+    constraints: { legCount, maxBodyLength_m: 0.25, maxMass_kg: legCount === 6 ? 1.5 : 1.0, maxParts: 60 },
     followUps,
     assumptions,
   });

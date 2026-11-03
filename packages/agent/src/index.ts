@@ -24,6 +24,7 @@ export interface AgentInput {
   parent?: VersionRecord | null;        // remix source
   changeRequest?: string;               // remix / follow-up request
   maxIterations?: number;
+  startIteration?: number;              // continue numbering after existing versions (follow-ups)
   model?: ModelConfig | null;           // explicit; undefined = from env
   newVersionId: () => string;
 }
@@ -42,7 +43,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   emit({ type: 'spec', spec });
 
   const versions: VersionRecord[] = [];
-  let iteration = 0;
+  let iteration = input.startIteration ?? 0;
   let pending: { assembly: Assembly; params: WalkerParams; decision: Decision; log: ToolLogEntry[] } | null = null;
   let currentLog: ToolLogEntry[] = [];
   let parentId: string | null = input.parent?.id ?? null;
@@ -53,7 +54,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       iteration++;
       pending = { assembly, params, decision: { source: model ? 'model' : 'planner', summary: rationale, basedOn, changes: changes ?? {} }, log: currentLog };
       currentLog = [];
-      emit({ type: 'status', message: iteration === 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
+      emit({ type: 'status', message: iteration === (input.startIteration ?? 0) + 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
       emit({ type: 'assembly', iteration, assembly, rationale });
     },
     onTest: (result) => {
