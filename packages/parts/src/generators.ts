@@ -1,5 +1,5 @@
 import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape } from '@protolab/schema';
-import { QUAT_ID, quatFromAxisAngle, quatMul } from './math.ts';
+import { QUAT_ID, quatFromAxisAngle, quatMul, rotate } from './math.ts';
 import { profiles, shapeVolume, ensureCCW } from './geometry.ts';
 
 export type ParamSpec = Record<string, { min: number; max: number; default: number; unit: string; description: string }>;
@@ -419,6 +419,53 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'sphere', radius: p.radius }, [0, 0, 0], COLORS.blue, 'decor', QUAT_ID, { collide: false })]; return finish({ id, kind: 'eye_module', name: `Eye dome Ø${mm(p.radius * 2)} mm`, category: 'shells', description: 'Translucent dome with LED.', params: p, mass_kg: 0.004, dimensions_m: [p.radius * 2, p.radius * 2, p.radius * 2], material: 'acrylic', geometry: g, connectors: [fx('mount', [-p.radius, 0, 0], [-1, 0, 0])], cost_usd: 1.5 }); } },
   screw: { kind: 'screw', name: 'Machine screw', category: 'fasteners', description: 'Metric machine screw (cosmetic in simulation).', params: { length: { min: 0.004, max: 0.06, default: 0.01, unit: 'm', description: 'Length' }, radius: { min: 0.001, max: 0.004, default: 0.0015, unit: 'm', description: 'Thread radius' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.length, axis: 'y' }, [0, -p.length / 2, 0], COLORS.steel, 'fastener', QUAT_ID, { collide: false }), piece({ kind: 'cylinder', radius: p.radius * 1.8, height: p.radius * 1.5, axis: 'y' }, [0, p.radius * 0.75, 0], COLORS.steel, 'fastener', QUAT_ID, { collide: false })]; return finish({ id, kind: 'screw', name: `M${mm(p.radius * 2)}×${mm(p.length)} screw`, category: 'fasteners', description: 'Stainless screw.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.radius * 2, p.length, p.radius * 2], material: 'stainless', geometry: g, connectors: [fx('head', [0, 0, 0], [0, 1, 0])], cost_usd: 0.05 }); } },
+  orrery_globe: {
+    kind: 'orrery_globe', name: 'Orrery globe', category: 'shells',
+    description: 'Lightweight mountable Sun, Earth or Moon globe. Fixed connectors at the bottom and top poles face −Y and +Y.',
+    params: {
+      radius: { min: 0.005, max: 0.08, default: 0.022, unit: 'm', description: 'Globe radius' },
+      style: { min: 0, max: 2, default: 1, unit: '', description: '0: Sun, 1: Earth, 2: Moon' },
+    },
+    generate: (p, id) => {
+      const { radius } = p;
+      const style = Math.round(p.style);
+      const [name, color] = [
+        ['Sun', '#ffb52f'], ['Earth', '#2479e7'], ['Moon', '#b9c7d9'],
+      ][style];
+      const body = piece({ kind: 'sphere', radius }, [0, 0, 0], color, 'shell');
+      const geometry = [body];
+      // Shallow painted details follow the surface. Only the main sphere has mass and collision.
+      const mark = (latitude: number, longitude: number, width: number, height: number, paint: string) => {
+        const rotation = quatMul(quatFromAxisAngle([0, 1, 0], longitude), quatFromAxisAngle([0, 0, 1], latitude - Math.PI / 2));
+        geometry.push(piece({ kind: 'ellipsoid', radii: [radius * height, radius * 0.06, radius * width] },
+          rotate(rotation, [0, radius * 0.96, 0]), paint, 'decor', rotation, { collide: false }));
+      };
+      if (style === 0) {
+        mark(0.2, 0.6, 0.55, 0.16, '#ffd85a');
+        mark(-0.33, 3.6, 0.52, 0.14, '#f07821');
+      } else if (style === 1) {
+        mark(0.4, 0.75, 0.38, 0.36, '#2fae73');
+        mark(-0.19, 1.01, 0.21, 0.31, '#52b673');
+        mark(0.36, 3.43, 0.49, 0.3, '#46b776');
+        mark(-0.28, 4.5, 0.25, 0.18, '#66c681');
+        mark(1.48, 0, 0.25, 0.25, '#ebf5ff');
+      } else {
+        mark(0.25, 0.75, 0.25, 0.29, '#778ba3');
+        mark(-0.32, 1.65, 0.18, 0.21, '#8799af');
+        mark(0.16, 3.95, 0.28, 0.19, '#8799af');
+      }
+      const diameter = radius * 2;
+      return finish({
+        id, kind: 'orrery_globe', name: `${name} globe Ø${mm(diameter)} mm`, category: 'shells',
+        description: `Painted ${name} model for an orrery. Secure the bottom mount to a stand or orbit arm.`,
+        params: p, mass_kg: shapeVolume(body.shape) * 60, dimensions_m: [diameter, diameter, diameter],
+        material: 'painted foam', geometry, connectors: [
+          fx('mount', [0, -radius, 0], [0, -1, 0], 'fixed', 'Bottom pole mount'),
+          fx('top', [0, radius, 0], [0, 1, 0], 'fixed', 'Top pole mount'),
+        ], cost_usd: 1.5,
+      });
+    },
+  },
   ball: { kind: 'ball', name: 'Ball', category: 'payloads', description: 'Free payload / projectile ball (foam, rubber or wood by density).', params: { radius: { min: 0.005, max: 0.15, default: 0.03, unit: 'm', description: 'Radius' }, density: { min: 20, max: 2000, default: 60, unit: 'kg/m³', description: 'Density (foam 30–60, wood 600, rubber 1100)' } },
     generate: (p, id) => { const g = [piece({ kind: 'sphere', radius: p.radius }, [0, 0, 0], p.density < 200 ? '#f4d35e' : COLORS.wood, 'payload')]; return finish({ id, kind: 'ball', name: `Ball Ø${mm(p.radius * 2)} mm`, category: 'payloads', description: 'Payload ball.', params: p, mass_kg: vol(g) * p.density, dimensions_m: [p.radius * 2, p.radius * 2, p.radius * 2], material: p.density < 200 ? 'foam' : 'wood', geometry: g, connectors: [fx('top', [0, p.radius, 0], [0, 1, 0]), fx('bottom', [0, -p.radius, 0], [0, -1, 0])], cost_usd: 1 }); } },
   block: { kind: 'block', name: 'Block', category: 'payloads', description: 'Free payload block (box) of given density.', params: { length: { min: 0.005, max: 0.3, default: 0.04, unit: 'm', description: 'Length' }, width: { min: 0.005, max: 0.3, default: 0.04, unit: 'm', description: 'Width' }, height: { min: 0.005, max: 0.3, default: 0.04, unit: 'm', description: 'Height' }, density: { min: 20, max: 8000, default: 600, unit: 'kg/m³', description: 'Density' } },

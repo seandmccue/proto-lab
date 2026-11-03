@@ -1,5 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { measureFollowerTiming } from './follower-timing.ts';
+import { measurePlanarOrbit } from './planar-orbit.ts';
 import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
 
@@ -198,6 +199,21 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       }
       for (const id of followers) if (!instById.has(id)) failureReasons.push(`Follower timing instance "${id}" not found`);
     }
+    const orbits = measure.orbits ?? [];
+    if (new Set(orbits.map(({ body }) => body)).size !== orbits.length) failureReasons.push('Each orbit must measure a different body');
+    for (const { body, center, reference, minRadius_m, maxRadius_m } of orbits) {
+      if (body === center) failureReasons.push(`Orbit body "${body}" must differ from its center`);
+      const references = typeof reference === 'string' ? [reference] : reference ? [reference.from, reference.to] : [];
+      if (reference && typeof reference !== 'string' && reference.from === reference.to) {
+        failureReasons.push(`Orbit reference for "${body}" needs two different instances`);
+      }
+      for (const id of new Set([body, center, ...references])) {
+        if (!instById.has(id)) failureReasons.push(`Orbit instance "${id}" not found`);
+      }
+      if (minRadius_m !== undefined && maxRadius_m !== undefined && maxRadius_m < minRadius_m) {
+        failureReasons.push(`Orbit maximum radius for "${body}" must be at least the minimum radius`);
+      }
+    }
     if (liftThreshold && !liftPayload) failureReasons.push('A payload height threshold needs a payload instance');
     if (retentionThreshold && !liftPayload?.holder) failureReasons.push('A retention threshold needs a payload and holder instance');
     if (liftPayload) {
@@ -208,7 +224,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !orbits.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -345,6 +361,26 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
         const travel = max - min;
         metrics[`${instance}.travel_${axis}_m`] = +travel.toFixed(4);
         if (travel < minTravel_m) failureReasons.push(`${instance} travelled ${travel.toFixed(3)} m along ${axis}, target ${minTravel_m} m`);
+      }
+      for (const orbit of test.measure.orbits ?? []) {
+        const { body, center, minTurns, direction } = orbit;
+        const path = measurePlanarOrbit({ frames, dt: 1 / TRACE_HZ }, orbit);
+        if (!path) {
+          failureReasons.push(`Orbit of "${body}" around "${center}" could not be measured from the trace`);
+          continue;
+        }
+        const { signedTurns, minRadius_m, maxRadius_m } = path;
+        metrics[`${body}.orbitSignedTurns`] = +signedTurns.toFixed(3);
+        metrics[`${body}.orbitMinRadius_m`] = +minRadius_m.toFixed(4);
+        metrics[`${body}.orbitMaxRadius_m`] = +maxRadius_m.toFixed(4);
+        const turns = direction === 'positive' ? signedTurns : direction === 'negative' ? -signedTurns : Math.abs(signedTurns);
+        if (turns < minTurns) failureReasons.push(`${body} completed ${turns.toFixed(2)} ${direction ? direction + ' ' : ''}orbit turns, target ${minTurns}`);
+        if (orbit.minRadius_m !== undefined && minRadius_m < orbit.minRadius_m) {
+          failureReasons.push(`${body} orbit radius fell to ${minRadius_m.toFixed(3)} m, minimum ${orbit.minRadius_m} m`);
+        }
+        if (orbit.maxRadius_m !== undefined && maxRadius_m > orbit.maxRadius_m) {
+          failureReasons.push(`${body} orbit radius reached ${maxRadius_m.toFixed(3)} m, maximum ${orbit.maxRadius_m} m`);
+        }
       }
       const timing = test.measure.followerTiming;
       if (timing) {

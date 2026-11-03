@@ -217,6 +217,16 @@ export const TestSpec = z.discriminatedUnion('kind', [
         axis: Axis,
         minTravel_m: z.number().positive(),
       })).max(80).optional(),
+      orbits: z.array(z.object({
+        body: z.string().min(1),
+        center: z.string().min(1),
+        plane: z.enum(['xy', 'xz', 'yz']),
+        reference: z.union([z.string().min(1), z.object({ from: z.string().min(1), to: z.string().min(1) })]).optional(),
+        minTurns: z.number().positive(),
+        direction: z.enum(['positive', 'negative']).optional(),
+        minRadius_m: z.number().positive().optional(),
+        maxRadius_m: z.number().positive().optional(),
+      })).min(1).max(4).optional(),
       followerTiming: z.object({
         shaft: z.string().min(1),
         followers: z.union([

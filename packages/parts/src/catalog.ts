@@ -62,6 +62,9 @@ const PRESETS: Preset[] = [
   { id: 'track-150', kind: 'track_module', params: { length: 0.15, height: 0.04, width: 0.03 } },
   { id: 'shell-panel-170x90', kind: 'shell_panel', params: { length: 0.17, width: 0.09, thickness: 0.002 } }, { id: 'eye-dome-18', kind: 'eye_module', params: { radius: 0.009 } },
   { id: 'screw-m3x8', kind: 'screw', params: { length: 0.008, radius: 0.0015 } }, { id: 'screw-m4x16', kind: 'screw', params: { length: 0.016, radius: 0.002 } },
+  { id: 'orrery-sun-84', kind: 'orrery_globe', params: { radius: 0.042, style: 0 } },
+  { id: 'orrery-earth-44', kind: 'orrery_globe', params: { radius: 0.022, style: 1 } },
+  { id: 'orrery-moon-20', kind: 'orrery_globe', params: { radius: 0.01, style: 2 } },
   { id: 'foam-ball-60', kind: 'ball', params: { radius: 0.03, density: 40 } }, { id: 'wood-ball-40', kind: 'ball', params: { radius: 0.02, density: 600 } }, { id: 'block-40', kind: 'block', params: { length: 0.04, width: 0.04, height: 0.04, density: 600 } }, { id: 'foam-pizza-80', kind: 'disc', params: { radius: 0.04, thickness: 0.008, density: 60 } },
   { id: 'tray-45', kind: 'tray', params: { radius: 0.045, depth: 0.012 } }, { id: 'counterweight-500g', kind: 'counterweight', params: { mass: 0.5 } }, { id: 'counterweight-2kg', kind: 'counterweight', params: { mass: 2 } },
 ];
