@@ -48,6 +48,11 @@ opens the actual assembly and simulation trace.
   (write_plan) → search the library → design missing parts → assemble and set drives → define
   measurable tests → simulate → analyse failures and revise → finalize with the behaviours the
   physics cannot verify listed as "unverified". Every version records which model made each decision.
+- **Watching a build** is part of the product: before the first assembly the workbench shows the
+  stage stepper (plan → parts → assemble → test → revise), the current step with a reasoning timer,
+  and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly
+  drops in one part at a time; after that a build strip, pass/fail toasts for each test and an
+  iteration ribbon (v1 ✗ 0.12 m → v2 ✓ 0.47 m) keep the 3–10 minute wait legible.
 - **Not simulated:** aerodynamics, fluids, deformation, fatigue, manufacturability. A butterfly's
   wings flap with measured stroke and rate; nobody claims it flies.
 
