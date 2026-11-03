@@ -14,7 +14,19 @@ const outDir = resolve(arg('out', resolve(import.meta.dirname, '../../../bench-r
 const planner = process.argv.includes('--planner');
 mkdirSync(outDir, { recursive: true });
 
-export const PROMPTS = [
+export const GENERAL_PROMPTS = [
+  { id: 'butterfly', prompt: 'Build a mechanical butterfly with large shaped wings that flap on a stand.' },
+  { id: 'ferris', prompt: 'Build a miniature Ferris wheel with eight hanging gondolas that turns steadily on a tower.' },
+  { id: 'muse', prompt: 'Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.' },
+  { id: 'catapult', prompt: 'Build a tabletop catapult that launches a miniature foam pizza about half a metre toward a target.' },
+  { id: 'crab', prompt: 'Build a mechanical crab with six legs that scuttles sideways.' },
+  { id: 'claw', prompt: 'Build a robotic grabbing claw that picks up a small wooden block and holds it.' },
+  { id: 'windmill', prompt: 'Build a windmill with four sails on a tower whose rotor turns.' },
+  { id: 'drawbridge', prompt: 'Build an automated drawbridge whose deck raises and lowers on a hinge with an actuator.' },
+  { id: 'crane', prompt: 'Build a miniature crane with a boom that lifts and lowers a small load.' },
+  { id: 'novel', prompt: 'Build a bird-scaring garden gadget: a spinning pinwheel on a pole with a pendulum that swings below it.' },
+];
+export const PROMPTS = process.argv.includes('--general') ? GENERAL_PROMPTS : [
   { id: 'muse', prompt: 'Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.' },
   { id: 'hexapod', prompt: 'Build a six-legged walking robot that can cover 50 cm in six seconds without tipping.' },
   { id: 'crawler', prompt: 'Design a calm four-legged crawler that walks 25 cm in six seconds with very little body rocking.' },
@@ -29,18 +41,22 @@ async function one(p: { id: string; prompt: string }, run: number): Promise<Row>
   let n = 0; let sweeps = 0, custom = 0, revisions = 0, meaningful = 0, handoffs = 0; let error: string | undefined;
   const model = planner ? null : modelConfigFromEnv();
   const specialist = planner ? null : specialistConfigFromEnv();
+  const trail: string[] = [];
   const out = await runAgent({ prompt: p.prompt, inventionId: `bench_${p.id}_${run}`, model, specialist, newVersionId: () => `${p.id}_${run}_v${++n}` }, (e: AgentEvent) => {
-    if (e.type === 'tool' && e.entry.ok) { if (e.entry.tool === 'sweep_gait') sweeps++; if (e.entry.tool === 'create_parametric_part') custom++; if (e.entry.tool === 'revise_walker') revisions++; }
-    if (e.type === 'handoff') handoffs++;
-    if (e.type === 'error') error = e.message;
+    if (e.type === 'tool') { trail.push(`[${e.entry.ok ? 'ok' : 'ERR'}] ${e.entry.tool}: ${e.entry.summary}`); if (e.entry.ok) { if (e.entry.tool === 'sweep_drive' || e.entry.tool === 'sweep_gait') sweeps++; if (e.entry.tool === 'create_part' || e.entry.tool === 'design_part' || e.entry.tool === 'create_parametric_part') custom++; if (e.entry.tool === 'assemble' || e.entry.tool === 'set_drives' || e.entry.tool === 'revise_walker') revisions++; } }
+    if (e.type === 'status') trail.push(`[status] ${e.message}`);
+    if (e.type === 'handoff') { handoffs++; trail.push(`[handoff] ${e.message}`); }
+    if (e.type === 'error') { error = e.message; trail.push(`[error] ${e.message}`); }
+    if (e.type === 'done') trail.push(`[done] ${e.status}: ${e.summary}`);
   });
+  writeFileSync(resolve(outDir, `${p.id}_${run}.log`), trail.join('\n'));
   for (const v of out.versions.slice(1)) if (Object.keys(v.decisions[0]?.changes ?? {}).length > 0 || v.decisions[0]?.basedOn) meaningful++;
-  const walks = out.versions.flatMap((v) => v.tests.filter((t) => t.kind === 'walk'));
+  const walks = out.versions.flatMap((v) => v.tests);
   const firstFailIdx = walks.findIndex((t) => !t.passed);
   const failedThenPassed = firstFailIdx >= 0 && walks.slice(firstFailIdx).some((t) => t.passed);
   return {
     prompt: p.id, run, status: out.status, seconds: +((Date.now() - t0) / 1000).toFixed(1), iterations: out.versions.length, walkTests: walks.length, sweeps, customParts: custom, revisions, meaningfulChanges: meaningful, handoffs,
-    failedThenPassed, bestDistance_m: Math.max(0, ...walks.map((t) => t.metrics.distance_m)), modelId: out.modelId, specialistUsed: handoffs > 0, summary: out.summary.slice(0, 300), error,
+    failedThenPassed, bestDistance_m: Math.max(0, ...walks.map((t) => t.metrics.distance_m ?? t.metrics.landingDistance_m ?? 0)), modelId: out.modelId, specialistUsed: handoffs > 0, summary: out.summary.slice(0, 300), error,
   };
 }
 

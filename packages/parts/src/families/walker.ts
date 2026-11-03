@@ -1,235 +1,105 @@
-import type { Assembly, Instance, Joint, PartDefinition, GaitController, DanceController, Vec3 } from '@protolab/schema';
-import { generatePart } from '../generators.ts';
+import type { Assembly, Drive } from '@protolab/schema';
 import { getPart } from '../catalog.ts';
-import { add, quatFromAxisAngle, QUAT_ID, scale, transformPoint, v } from '../math.ts';
+import { applyOps, emptyAssembly, setDrives, type AssemblyOp, type PartResolver } from '../assembly.ts';
 
 /**
- * Bounded legged-walker family. The model/planner chooses these parameters; the builder places
- * real catalog parts and connects them with validated joints. Legs swing in the X–Y (sagittal)
- * plane about Z axes; walking direction is +X.
+ * Legged walker expressed purely as generic assembly operations. This is the regression anchor for
+ * the ops engine (the original walking demo) and the seed for the deterministic planner. The model
+ * is never required to use it; it builds walkers (and everything else) from the same operations.
  */
 export interface WalkerParams {
   legCount: 4 | 6;
-  chassisPartId: string;       // body_frame catalog id (or custom part id)
-  hipServoPartId: string;      // servo_motor
-  kneeServoPartId: string;     // servo_motor
-  upperLegPartId: string;      // leg_segment
-  lowerLegPartId: string;      // leg_segment
-  footPartId: string;          // foot_pad
-  hipOffset_rad: number;       // rest hip angle (positive = forward)
-  kneeFlex_rad: number;        // rest knee flexion (positive = foot pulled back)
-  gait: {
-    frequency_hz: number;
-    hipAmplitude_rad: number;
-    kneeAmplitude_rad: number;
-    stiffness: number;
-    damping: number;
-    gaitType: 'crawl' | 'trot' | 'tripod';
-    swingDuty: number;
-  };
-  shell: boolean;              // add cosmetic shell + eyes
+  chassisPartId: string; hipServoPartId: string; kneeServoPartId: string; upperLegPartId: string; lowerLegPartId: string; footPartId: string;
+  hipOffset_rad: number; kneeFlex_rad: number;
+  gait: { frequency_hz: number; hipAmplitude_rad: number; kneeAmplitude_rad: number; stiffness: number; damping: number; gaitType: 'crawl' | 'trot' | 'tripod'; swingDuty: number };
+  shell: boolean;
   dance?: { frequency_hz: number; bobAmplitude_rad: number; swayAmplitude_rad: number };
 }
 export const DEFAULT_DANCE = { frequency_hz: 1.6, bobAmplitude_rad: 0.3, swayAmplitude_rad: 0.1 };
-
+export const DEFAULT_WALKER: WalkerParams = {
+  legCount: 4, chassisPartId: 'chassis-quad-160', hipServoPartId: 'servo-mg90s', kneeServoPartId: 'servo-mg90s', upperLegPartId: 'leg-bar-60', lowerLegPartId: 'leg-bar-60', footPartId: 'foot-pad-12',
+  hipOffset_rad: 0, kneeFlex_rad: 0.5, gait: { frequency_hz: 1.0, hipAmplitude_rad: 0.3, kneeAmplitude_rad: 0.5, stiffness: 3, damping: 0.1, gaitType: 'crawl', swingDuty: 0.22 }, shell: true,
+};
 export const WALKER_PARAM_RANGES = {
   hipOffset_rad: { min: -0.6, max: 0.6, default: 0.0, unit: 'rad', description: 'Rest hip angle; positive swings leg forward' },
   kneeFlex_rad: { min: 0.0, max: 1.4, default: 0.5, unit: 'rad', description: 'Rest knee flexion; 0 = straight leg' },
-  'gait.frequency_hz': { min: 0.3, max: 4, default: 1.5, unit: 'Hz', description: 'Stride frequency' },
-  'gait.hipAmplitude_rad': { min: 0.05, max: 0.9, default: 0.35, unit: 'rad', description: 'Hip swing amplitude' },
-  'gait.kneeAmplitude_rad': { min: 0.0, max: 1.0, default: 0.4, unit: 'rad', description: 'Knee lift during swing' },
-  'gait.stiffness': { min: 1, max: 200, default: 30, unit: 'N·m/rad', description: 'Position-servo stiffness' },
-  'gait.damping': { min: 0, max: 20, default: 1.5, unit: 'N·m·s/rad', description: 'Position-servo damping' },
-  'gait.swingDuty': { min: 0.1, max: 0.5, default: 0.22, unit: '', description: 'Fraction of the stride a leg is in the air (crawl ≤ 0.25 keeps 3 feet down)' },
+  'gait.frequency_hz': { min: 0.3, max: 4, default: 1.0, unit: 'Hz', description: 'Stride frequency' },
+  'gait.hipAmplitude_rad': { min: 0.05, max: 0.9, default: 0.3, unit: 'rad', description: 'Hip swing amplitude' },
+  'gait.kneeAmplitude_rad': { min: 0.0, max: 1.0, default: 0.5, unit: 'rad', description: 'Knee lift during swing' },
+  'gait.stiffness': { min: 0.2, max: 50, default: 3, unit: 'N·m/rad', description: 'Position-servo stiffness' },
+  'gait.damping': { min: 0, max: 5, default: 0.1, unit: 'N·m·s/rad', description: 'Position-servo damping' },
+  'gait.swingDuty': { min: 0.1, max: 0.5, default: 0.22, unit: '', description: 'Fraction of the stride a leg is in the air' },
 } as const;
 
-export const DEFAULT_WALKER: WalkerParams = {
-  legCount: 4,
-  chassisPartId: 'chassis-quad-160',
-  hipServoPartId: 'servo-mg90s',
-  kneeServoPartId: 'servo-mg90s',
-  upperLegPartId: 'leg-bar-60',
-  lowerLegPartId: 'leg-bar-60',
-  footPartId: 'foot-pad-12',
-  hipOffset_rad: 0,
-  kneeFlex_rad: 0.5,
-  gait: { frequency_hz: 1.0, hipAmplitude_rad: 0.3, kneeAmplitude_rad: 0.5, stiffness: 3, damping: 0.1, gaitType: 'crawl', swingDuty: 0.22 },
-  shell: true,
-};
-
-export type PartResolver = (id: string) => PartDefinition | undefined;
-
-function resolve(id: string, extra: PartResolver | undefined, kindWanted: string): PartDefinition {
-  const p = extra?.(id) ?? getPart(id);
-  if (!p) throw new Error(`Unknown part id "${id}"`);
-  if (p.kind !== kindWanted) throw new Error(`Part "${id}" is a ${p.kind}, expected ${kindWanted}`);
-  return p;
-}
-
-export function buildWalker(params: WalkerParams, extraParts?: PartResolver): Assembly {
-  const chassis = resolve(params.chassisPartId, extraParts, 'body_frame');
-  const hipServo = resolve(params.hipServoPartId, extraParts, 'servo_motor');
-  const kneeServo = resolve(params.kneeServoPartId, extraParts, 'servo_motor');
-  const upper = resolve(params.upperLegPartId, extraParts, 'leg_segment');
-  const lower = resolve(params.lowerLegPartId, extraParts, 'leg_segment');
-  const foot = resolve(params.footPartId, extraParts, 'foot_pad');
-  const pairs = params.legCount / 2;
-  if (Math.round(chassis.params.legPairs) !== pairs) throw new Error(`Chassis "${chassis.id}" has ${chassis.params.legPairs} leg pairs but legCount=${params.legCount}`);
-
-  const parts = new Map<string, PartDefinition>();
-  const use = (p: PartDefinition) => { parts.set(p.id, p); return p; };
-  [chassis, hipServo, kneeServo, upper, lower, foot].forEach(use);
-
-  const instances: Instance[] = [];
-  const joints: Joint[] = [];
-  const phases: Record<string, number> = {};
-
-  const L1 = upper.params.length, L2 = lower.params.length;
-  const th = params.hipOffset_rad, flex = params.kneeFlex_rad;
-  const servoD = hipServo.dimensions_m[2];          // depth along Z
-  const kneeD = kneeServo.dimensions_m[2];
-  const hornOut = (s: PartDefinition) => s.connectors.find((c) => c.id === 'horn')!.position[2];
-
-  // Leg kinematics in the sagittal plane (rotation about Z). Upper leg hangs from the hip horn.
-  const upperDir: Vec3 = [Math.sin(th), -Math.cos(th), 0];
-  const lowerAng = th - flex;
-  const lowerDir: Vec3 = [Math.sin(lowerAng), -Math.cos(lowerAng), 0];
-  const body: Instance = { id: 'body', partId: chassis.id, label: 'Chassis', transform: { position: [0, 0, 0], rotation: QUAT_ID }, group: 'body' };
-  instances.push(body);
-
-  const sides: Array<['L' | 'R', number]> = [['L', 1], ['R', -1]];
-  for (let i = 0; i < pairs; i++) {
-    for (const [side, sgn] of sides) {
-      const legId = `${side}${i}`;
-      const hipConn = chassis.connectors.find((c) => c.id === `hip_${legId}`)!;
-      const hipPoint = transformPoint(body.transform, hipConn.position);
-      // Hip servo: case mounted to chassis side, horn pointing outward (local +Z → world sgn*Z)
-      const servoRot = sgn === 1 ? QUAT_ID : quatFromAxisAngle([0, 1, 0], Math.PI);
-      const servoPos = add(hipPoint, v(0, 0, sgn * servoD / 2));
-      const hipServoInst: Instance = { id: `hip_servo_${legId}`, partId: hipServo.id, label: `Hip servo ${legId}`, transform: { position: servoPos, rotation: servoRot }, group: `leg_${legId}` };
-      instances.push(hipServoInst);
-      joints.push({ id: `fix_hip_servo_${legId}`, type: 'fixed', a: { instanceId: 'body', connectorId: hipConn.id }, b: { instanceId: hipServoInst.id, connectorId: 'mount' } });
-
-      // Upper leg pivot at horn tip, rotated by hip angle about world Z
-      const hornWorld = transformPoint(hipServoInst.transform, hipServo.connectors.find((c) => c.id === 'horn')!.position);
-      const pivot = add(hornWorld, v(0, 0, sgn * upper.params.thickness / 2));
-      const upperRot = quatFromAxisAngle([0, 0, 1], th);
-      const upperInst: Instance = { id: `upper_leg_${legId}`, partId: upper.id, label: `Upper leg ${legId}`, transform: { position: pivot, rotation: upperRot }, group: `leg_${legId}` };
-      instances.push(upperInst);
-      const hipCtl = `hip_${legId}`;
-      joints.push({
-        id: `hip_${legId}`, type: 'revolute', a: { instanceId: hipServoInst.id, connectorId: 'horn' }, b: { instanceId: upperInst.id, connectorId: 'pivot' },
-        axis: [0, 0, 1], limits_rad: [-1.2, 1.2],
-        motor: { controlId: hipCtl, maxTorque_Nm: hipServo.limits.maxTorque_Nm ?? 1, stiffness: params.gait.stiffness, damping: params.gait.damping },
-      });
-
-      // Knee servo fixed to the upper leg tip, horn facing outward
-      const knee = add(pivot, scale(upperDir, L1));
-      const kneeServoPos = add(knee, v(0, 0, sgn * (upper.params.thickness / 2 + kneeD / 2)));
-      const kneeServoInst: Instance = { id: `knee_servo_${legId}`, partId: kneeServo.id, label: `Knee servo ${legId}`, transform: { position: kneeServoPos, rotation: servoRot }, group: `leg_${legId}` };
-      instances.push(kneeServoInst);
-      joints.push({ id: `fix_knee_servo_${legId}`, type: 'fixed', a: { instanceId: upperInst.id, connectorId: 'tip' }, b: { instanceId: kneeServoInst.id, connectorId: 'mount' } });
-
-      // Lower leg pivot at the knee horn, rotated by (hip − flex). Axis −Z so positive = flexion.
-      const kneeHorn = add(kneeServoPos, v(0, 0, sgn * (hornOut(kneeServo) + lower.params.thickness / 2)));
-      const lowerRot = quatFromAxisAngle([0, 0, 1], lowerAng);
-      const lowerInst: Instance = { id: `lower_leg_${legId}`, partId: lower.id, label: `Lower leg ${legId}`, transform: { position: kneeHorn, rotation: lowerRot }, group: `leg_${legId}` };
-      instances.push(lowerInst);
-      const kneeCtl = `knee_${legId}`;
-      joints.push({
-        id: `knee_${legId}`, type: 'revolute', a: { instanceId: kneeServoInst.id, connectorId: 'horn' }, b: { instanceId: lowerInst.id, connectorId: 'pivot' },
-        axis: [0, 0, -1], limits_rad: [-0.2, 2.2],
-        motor: { controlId: kneeCtl, maxTorque_Nm: kneeServo.limits.maxTorque_Nm ?? 1, stiffness: params.gait.stiffness, damping: params.gait.damping },
-      });
-
-      // Foot pad under the lower leg tip
-      const tip = add(kneeHorn, scale(lowerDir, L2));
-      const footInst: Instance = { id: `foot_${legId}`, partId: foot.id, label: `Foot ${legId}`, transform: { position: add(tip, v(0, -foot.params.radius, 0)), rotation: QUAT_ID }, group: `leg_${legId}` };
-      instances.push(footInst);
-      joints.push({ id: `fix_foot_${legId}`, type: 'fixed', a: { instanceId: lowerInst.id, connectorId: 'tip' }, b: { instanceId: footInst.id, connectorId: 'mount' } });
-
-      const phase = legPhase(params.gait.gaitType, pairs, i, side);
-      phases[hipCtl] = phase;
-      phases[kneeCtl] = phase;
-    }
-  }
-
-  // Shift everything so the lowest foot point sits exactly on the ground (y = 0).
-  const lowestFoot = Math.min(...instances.filter((x) => x.partId === foot.id).map((x) => x.transform.position[1] - foot.params.radius));
-  for (const inst of instances) inst.transform.position[1] -= lowestFoot;
-
-  if (params.shell) {
-    const shell = use(generatePart('shell_panel', { length: chassis.params.length * 1.06, width: chassis.params.width * 1.12, thickness: 0.002 }, `shell:${chassis.id}`));
-    const eye = use(getPart('eye-dome-18')!);
-    const topY = body.transform.position[1] + chassis.params.height / 2;
-    instances.push({ id: 'shell_top', partId: shell.id, label: 'Shell panel', transform: { position: [0, topY + 0.001, 0], rotation: QUAT_ID }, group: 'body' });
-    joints.push({ id: 'fix_shell', type: 'fixed', a: { instanceId: 'body', connectorId: 'top' }, b: { instanceId: 'shell_top', connectorId: 'mount' } });
-    const fx = chassis.params.length / 2 + eye.params.radius * 0.6;
-    for (const [n, z] of [['eye_l', chassis.params.width * 0.25], ['eye_r', -chassis.params.width * 0.25]] as const) {
-      instances.push({ id: n, partId: eye.id, label: n === 'eye_l' ? 'Eye (left)' : 'Eye (right)', transform: { position: [fx, body.transform.position[1] + chassis.params.height * 0.15, z], rotation: QUAT_ID }, group: 'body' });
-      joints.push({ id: `fix_${n}`, type: 'fixed', a: { instanceId: 'body', connectorId: 'front' }, b: { instanceId: n, connectorId: 'mount' } });
-    }
-  }
-
-  const controller: GaitController = {
-    kind: 'gait',
-    gaitType: params.gait.gaitType,
-    swingDuty: params.gait.swingDuty,
-    rampIn_s: 0.6,
-    frequency_hz: params.gait.frequency_hz,
-    hipAmplitude_rad: params.gait.hipAmplitude_rad,
-    kneeAmplitude_rad: params.gait.kneeAmplitude_rad,
-    hipOffset_rad: th,
-    kneeOffset_rad: flex,
-    kneeLag_rad: Math.PI / 2,
-    phases,
-  };
-
-  return {
-    family: 'legged_walker',
-    familyParams: flattenWalkerParams(params),
-    familyConfig: { ...params },
-    parts: [...parts.values()],
-    instances,
-    joints,
-    controller,
-  };
-}
-
-/** Leg phase for a given gait. Crawl: one leg swings at a time (3 down). Trot/tripod: alternating sets. */
 export function legPhase(gait: 'crawl' | 'trot' | 'tripod', pairs: number, pairIndex: number, side: 'L' | 'R'): number {
-  if (gait === 'crawl') {
-    // Measured best sequence in simulation: left legs front→back, then right legs front→back.
-    const legs = pairs * 2;
-    const order = side === 'L' ? pairIndex : pairs + pairIndex;
-    return (order / legs) * 2 * Math.PI;
-  }
+  if (gait === 'crawl') { const legs = pairs * 2; const order = side === 'L' ? pairIndex : pairs + pairIndex; return (order / legs) * 2 * Math.PI; }
   return ((pairIndex + (side === 'L' ? 0 : 1)) % 2) * Math.PI;
 }
 
-export function danceController(base: GaitController, opts: Partial<typeof DEFAULT_DANCE> = {}): DanceController {
-  const phases: Record<string, number> = {};
-  for (const k of Object.keys(base.phases)) phases[k] = base.phases[k];
-  // Hips keep the gait phasing (diagonal legs sway together) with a small amplitude; knees bob together so the body rises and falls in place.
-  const d = { ...DEFAULT_DANCE, ...opts };
-  return { kind: 'dance', frequency_hz: d.frequency_hz, bobAmplitude_rad: d.bobAmplitude_rad, swayAmplitude_rad: d.swayAmplitude_rad, hipOffset_rad: base.hipOffset_rad, kneeOffset_rad: base.kneeOffset_rad, rampIn_s: 0.4, phases };
+/** The ops that build a walker. Legs swing about Z (sagittal plane); walking direction is +X. */
+export function walkerOps(p: WalkerParams, resolve: PartResolver = getPart): { ops: AssemblyOp[]; drives: Drive[] } {
+  const chassis = resolve(p.chassisPartId); if (!chassis) throw new Error(`Unknown chassis ${p.chassisPartId}`);
+  const upper = resolve(p.upperLegPartId)!, lower = resolve(p.lowerLegPartId)!, foot = resolve(p.footPartId)!;
+  const pairs = p.legCount / 2;
+  if (Math.round(chassis.params.legPairs) !== pairs) throw new Error(`Chassis "${chassis.id}" has ${chassis.params.legPairs} leg pairs but legCount=${p.legCount}`);
+  const L1 = upper.params.length, L2 = lower.params.length, th = p.hipOffset_rad, flex = p.kneeFlex_rad;
+  const dropY = L1 * Math.cos(th) + L2 * Math.cos(th - flex);           // hip to foot centre
+  const bodyY = dropY + foot.params.radius * 2;                           // foot sphere bottom on the ground
+  const ops: AssemblyOp[] = [{ op: 'place', id: 'body', part: chassis.id, label: 'Chassis', group: 'body', position: [0, bodyY, 0] }];
+  const drives: Drive[] = [];
+  const hipDeg = (th * 180) / Math.PI, kneeDeg = (-flex * 180) / Math.PI;
+  for (let i = 0; i < pairs; i++) for (const side of ['L', 'R'] as const) {
+    const leg = `${side}${i}`, g = `leg_${leg}`, sgn = side === 'L' ? 1 : -1;
+    // hip servo on the chassis side; horn points outward (±Z). Upper leg pivots on the horn; its "pivot" connector axis is −Z
+    // so the mated leg hangs with +X forward on both sides. Spin sets the rest hip angle (about the horn axis, outward).
+    ops.push({ op: 'mount', id: `hip_servo_${leg}`, part: p.hipServoPartId, label: `Hip servo ${leg}`, group: g, onto: 'body', connector: `hip_${leg}`, via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 });
+    ops.push({ op: 'mount', id: `upper_leg_${leg}`, part: p.upperLegPartId, label: `Upper leg ${leg}`, group: g, onto: `hip_servo_${leg}`, connector: 'horn', via: 'pivot', joint: 'revolute', spin_deg: sgn * hipDeg, offset_m: 0, limits: [-1.2, 1.2], motor: { controlId: `hip_${leg}`, stiffness: p.gait.stiffness, damping: p.gait.damping } });
+    ops.push({ op: 'mount', id: `knee_servo_${leg}`, part: p.kneeServoPartId, label: `Knee servo ${leg}`, group: g, onto: `upper_leg_${leg}`, connector: 'tip_side', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 });
+    ops.push({ op: 'mount', id: `lower_leg_${leg}`, part: p.lowerLegPartId, label: `Lower leg ${leg}`, group: g, onto: `knee_servo_${leg}`, connector: 'horn', via: 'pivot', joint: 'revolute', spin_deg: sgn * (hipDeg + kneeDeg), offset_m: 0, limits: [-2.2, 2.2], motor: { controlId: `knee_${leg}`, stiffness: p.gait.stiffness, damping: p.gait.damping } });
+    ops.push({ op: 'mount', id: `foot_${leg}`, part: p.footPartId, label: `Foot ${leg}`, group: g, onto: `lower_leg_${leg}`, connector: 'tip', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 });
+    const phase = legPhase(p.gait.gaitType, pairs, i, side);
+    // Joint angles are measured from the assembled rest pose (0 = as mounted). The revolute axis is the parent's connector axis
+    // (outward ±Z): positive on the left (+Z) swings the leg forward; on the right (−Z) the sign flips, so mirror the amplitude.
+    drives.push({ controlId: `hip_${leg}`, mode: 'position', rampIn_s: 0.6, profile: { kind: 'gait', role: 'swing', amplitude: sgn * p.gait.hipAmplitude_rad, offset: 0, frequency_hz: p.gait.frequency_hz, phase, swingDuty: p.gait.swingDuty } });
+    drives.push({ controlId: `knee_${leg}`, mode: 'position', rampIn_s: 0.6, profile: { kind: 'gait', role: 'lift', amplitude: -sgn * p.gait.kneeAmplitude_rad, offset: 0, frequency_hz: p.gait.frequency_hz, phase, swingDuty: p.gait.swingDuty } });
+  }
+  if (p.shell) {
+    ops.push({ op: 'mount', id: 'shell_top', part: 'shell-panel-170x90', label: 'Shell panel', group: 'body', onto: 'body', connector: 'top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0.001 });
+    ops.push({ op: 'mount', id: 'eye_l', part: 'eye-dome-18', label: 'Eye (left)', group: 'body', onto: 'body', connector: 'front_top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 });
+    ops.push({ op: 'move', id: 'eye_l', translate: [0, 0, chassis.params.width * 0.25] });
+    ops.push({ op: 'mount', id: 'eye_r', part: 'eye-dome-18', label: 'Eye (right)', group: 'body', onto: 'body', connector: 'front_top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 });
+    ops.push({ op: 'move', id: 'eye_r', translate: [0, 0, -chassis.params.width * 0.25] });
+  }
+  return { ops, drives };
 }
 
 export function flattenWalkerParams(p: WalkerParams): Record<string, number> {
-  return {
-    legCount: p.legCount,
-    hipOffset_rad: p.hipOffset_rad,
-    kneeFlex_rad: p.kneeFlex_rad,
-    'gait.frequency_hz': p.gait.frequency_hz,
-    'gait.hipAmplitude_rad': p.gait.hipAmplitude_rad,
-    'gait.kneeAmplitude_rad': p.gait.kneeAmplitude_rad,
-    'gait.stiffness': p.gait.stiffness,
-    'gait.damping': p.gait.damping,
-    'gait.swingDuty': p.gait.swingDuty,
-    'dance.frequency_hz': (p.dance ?? DEFAULT_DANCE).frequency_hz,
-    'dance.bobAmplitude_rad': (p.dance ?? DEFAULT_DANCE).bobAmplitude_rad,
-    'dance.swayAmplitude_rad': (p.dance ?? DEFAULT_DANCE).swayAmplitude_rad,
-    'gait.gaitType': p.gait.gaitType === 'crawl' ? 0 : p.gait.gaitType === 'trot' ? 1 : 2,
-    shell: p.shell ? 1 : 0,
-  };
+  const d = p.dance ?? DEFAULT_DANCE;
+  return { legCount: p.legCount, hipOffset_rad: p.hipOffset_rad, kneeFlex_rad: p.kneeFlex_rad, 'gait.frequency_hz': p.gait.frequency_hz, 'gait.hipAmplitude_rad': p.gait.hipAmplitude_rad, 'gait.kneeAmplitude_rad': p.gait.kneeAmplitude_rad, 'gait.stiffness': p.gait.stiffness, 'gait.damping': p.gait.damping, 'gait.swingDuty': p.gait.swingDuty, 'gait.gaitType': p.gait.gaitType === 'crawl' ? 0 : p.gait.gaitType === 'trot' ? 1 : 2, 'dance.frequency_hz': d.frequency_hz, 'dance.bobAmplitude_rad': d.bobAmplitude_rad, 'dance.swayAmplitude_rad': d.swayAmplitude_rad, shell: p.shell ? 1 : 0 };
+}
+
+export function buildWalker(p: WalkerParams, resolve: PartResolver = getPart): Assembly {
+  const { ops, drives } = walkerOps(p, resolve);
+  let a = applyOps(emptyAssembly(), ops, resolve).assembly;
+  a = setDrives(a, drives);
+  // Lift so the lowest foot touches the ground exactly (mates may differ slightly from the analytic drop).
+  const foot = resolve(p.footPartId)!;
+  const lowest = Math.min(...a.instances.filter((x) => x.partId === foot.id).map((x) => x.transform.position[1] - foot.params.radius));
+  for (const inst of a.instances) inst.transform.position[1] -= lowest;
+  for (const j of a.joints) if (j.anchor) j.anchor = [j.anchor[0], j.anchor[1] - lowest, j.anchor[2]];
+  a.family = 'legged_walker'; a.familyParams = flattenWalkerParams(p); a.familyConfig = { ...p };
+  return a;
+}
+
+/** Dance drives: knees bob together with hip compensation; small alternating hip sway. */
+export function danceDrives(p: WalkerParams): Drive[] {
+  const d = { ...DEFAULT_DANCE, ...(p.dance ?? {}) };
+  const pairs = p.legCount / 2; const drives: Drive[] = [];
+  for (let i = 0; i < pairs; i++) for (const side of ['L', 'R'] as const) {
+    const leg = `${side}${i}`, sgn = side === 'L' ? 1 : -1; const phase = legPhase(p.gait.gaitType, pairs, i, side);
+    // knee: offset + bob·(0.5+0.5·sin(2wt)); hip: offset + 0.5·bob·(…) + sway·sin(wt+phase). Expressed as two sines each.
+    drives.push({ controlId: `knee_${leg}`, mode: 'position', rampIn_s: 0.4, profile: { kind: 'sine', amplitude: -sgn * d.bobAmplitude_rad * 0.5, offset: -sgn * d.bobAmplitude_rad * 0.5, frequency_hz: 2 * d.frequency_hz, phase: 0 } });
+    drives.push({ controlId: `hip_${leg}`, mode: 'position', rampIn_s: 0.4, profile: { kind: 'sine', amplitude: sgn * d.swayAmplitude_rad, offset: sgn * 0.25 * d.bobAmplitude_rad, frequency_hz: d.frequency_hz, phase } });
+  }
+  return drives;
 }

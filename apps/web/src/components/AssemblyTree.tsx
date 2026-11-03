@@ -6,14 +6,14 @@ import { fmt } from '../api.ts';
 export default function AssemblyTree({ assembly, selectedId, onSelect, changedIds }: { assembly: Assembly; selectedId: string | null; onSelect: (id: string | null) => void; changedIds?: Set<string> }) {
   const groups = useMemo(() => {
     const m = new Map<string, Assembly['instances']>();
-    for (const i of assembly.instances) { const g = i.group ?? 'other'; if (!m.has(g)) m.set(g, []); m.get(g)!.push(i); }
+    for (const i of assembly.instances) { const g = i.group ?? (i.anchored ? 'base' : 'assembly'); if (!m.has(g)) m.set(g, []); m.get(g)!.push(i); }
     return [...m.entries()].sort(([a], [b]) => (a === 'body' ? -1 : b === 'body' ? 1 : a.localeCompare(b)));
   }, [assembly]);
   const partById = useMemo(() => new Map(assembly.parts.map((p) => [p.id, p])), [assembly]);
   const bom = useMemo(() => billOfMaterials(assembly), [assembly]);
   const sel = selectedId ? assembly.instances.find((i) => i.id === selectedId) : null;
   const selPart = sel ? partById.get(sel.partId) : null;
-  const label = (g: string) => g === 'body' ? 'Body' : g.startsWith('leg_') ? `Leg ${g.slice(4).replace('L', 'left ').replace('R', 'right ')}` : g;
+  const label = (g: string) => g === 'body' ? 'Body' : g === 'base' ? 'Base (anchored)' : g === 'assembly' ? 'Assembly' : g.startsWith('leg_') ? `Leg ${g.slice(4).replace('L', 'left ').replace('R', 'right ')}` : g.replace(/_/g, ' ');
 
   return (
     <div className="flex h-full flex-col text-sm">
@@ -25,7 +25,7 @@ export default function AssemblyTree({ assembly, selectedId, onSelect, changedId
             <ul>
               {items.map((i) => (
                 <li key={i.id}>
-                  <button onClick={() => onSelect(i.id === selectedId ? null : i.id)} className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left hover:bg-slate-100 ${selectedId === i.id ? 'bg-accent-soft text-accent-dark' : ''}`}>
+                  <button aria-pressed={selectedId === i.id} onClick={() => onSelect(i.id === selectedId ? null : i.id)} className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 ${selectedId === i.id ? 'bg-accent-soft text-accent-dark' : ''}`}>
                     <span className="truncate">{i.label}</span>
                     {changedIds?.has(i.id) && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title="Changed in this iteration" />}
                   </button>
@@ -44,7 +44,7 @@ export default function AssemblyTree({ assembly, selectedId, onSelect, changedId
             <dt className="text-slate-500">Size</dt><dd>{selPart.dimensions_m.map((d) => (d * 1000).toFixed(0)).join('×')} mm</dd>
             <dt className="text-slate-500">Material</dt><dd>{selPart.material}</dd>
             {selPart.limits.maxTorque_Nm && <><dt className="text-slate-500">Torque</dt><dd>{fmt.nm(selPart.limits.maxTorque_Nm)}</dd></>}
-            <dt className="text-slate-500">Source</dt><dd>{selPart.source.license}</dd>
+            <dt className="text-slate-500">Source</dt><dd>{selPart.source.kind === 'designed' ? 'designed by Muse' : selPart.source.kind === 'external' ? `${selPart.source.creator} (${selPart.source.license})` : `parametric (${selPart.source.license})`}</dd>
             <dt className="text-slate-500">Position</dt><dd>{sel.transform.position.map((v) => (v * 1000).toFixed(0)).join(', ')} mm</dd>
           </dl>
         </div>
@@ -53,7 +53,10 @@ export default function AssemblyTree({ assembly, selectedId, onSelect, changedId
         <div className="panel-title mb-1">Bill of materials · {fmt.kg(totalMass(assembly))}</div>
         <ul className="text-xs mono">
           {bom.map((l) => (
-            <li key={l.partId} className="flex justify-between gap-2 py-0.5"><span className="truncate text-slate-700">{l.qty}× {l.name}</span><span className="text-slate-500">{fmt.kg(l.mass_kg)}</span></li>
+            <li key={l.partId} className="flex justify-between gap-2 py-0.5" title={l.source ? `${l.source.kind} · ${l.source.license} · ${l.source.creator}${l.source.attribution ? ' · ' + l.source.attribution : ''}` : ''}>
+              <span className="truncate text-slate-700">{l.qty}× {l.name}{l.source?.kind === 'designed' && <span className="ml-1 rounded bg-indigo-100 px-1 text-[9px] font-medium text-indigo-700">designed by Muse</span>}{l.source?.kind === 'external' && <span className="ml-1 rounded bg-emerald-100 px-1 text-[9px] font-medium text-emerald-700">{l.source.license}</span>}{l.partId.startsWith('custom-') && <span className="ml-1 rounded bg-sky-100 px-1 text-[9px] font-medium text-sky-700">custom</span>}</span>
+              <span className="text-slate-500">{fmt.kg(l.mass_kg)}</span>
+            </li>
           ))}
         </ul>
       </div>

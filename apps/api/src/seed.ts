@@ -5,8 +5,9 @@ import type { InventionRow, JobRow } from './db.ts';
 
 export const EXAMPLES = [
   { id: 'muse', title: 'Bring My Muse to Life', prompt: 'Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.', blurb: 'A four-legged robot built from servos and leg bars, tested until it walks, then asked to dance.' },
-  { id: 'hexapod', title: 'Six-legged explorer', prompt: 'Build a six-legged walking robot that can cover 50 cm in six seconds without tipping.', blurb: 'A hexapod on a tripod gait with a longer walking target.' },
-  { id: 'crawler', title: 'Slow steady crawler', prompt: 'Design a calm four-legged crawler that walks 25 cm in six seconds with very little body rocking.', blurb: 'Same part family, gentler targets.' },
+  { id: 'butterfly', title: 'Mechanical butterfly', prompt: 'Build a mechanical butterfly with large shaped wings that flap on a stand.', blurb: 'Shaped wing panels on servo-driven hinges; the test measures stroke and rate, not flight.' },
+  { id: 'ferris', title: 'Miniature Ferris wheel', prompt: 'Build a miniature Ferris wheel with eight hanging gondolas that turns steadily on a tower.', blurb: 'Tower, spoked wheel, gondolas on pivots; tested for rotation and gondola clearance.' },
+  { id: 'catapult', title: 'Pizza catapult', prompt: 'Build a tabletop catapult that launches a miniature foam pizza about half a metre toward a target.', blurb: 'Servo-driven arm with a tray; tested on landing distance.' },
 ];
 
 /** Seed featured gallery items (owned by ProtoLab) if the gallery is empty. They are built by the real agent, not canned. */
@@ -21,4 +22,16 @@ export function seedFeatured(db: DatabaseSync, runner: JobRunner) {
     db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(job.id, job.invention_id, null, 'queued', 'Queued', '[]', null, job.created_at, job.updated_at);
     runner.enqueue(job, inv, { parent: null });
   }
+}
+
+/** Featured items whose build was interrupted (dev restarts, transient API errors) and that have no version yet are rebuilt. */
+export function requeueInterruptedSeeds(db: DatabaseSync, runner: JobRunner) {
+  const rows = db.prepare("SELECT * FROM inventions WHERE owner_id='protolab' AND status='error' AND current_version_id IS NULL").all() as unknown as InventionRow[];
+  for (const inv of rows) {
+    const job: JobRow = { id: newId('job'), invention_id: inv.id, version_id: null, status: 'queued', step: 'Queued', progress_json: '[]', error_code: null, created_at: now(), updated_at: now() };
+    db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(job.id, job.invention_id, null, 'queued', 'Queued', '[]', null, job.created_at, job.updated_at);
+    db.prepare('UPDATE inventions SET status=? WHERE id=?').run('queued', inv.id);
+    runner.enqueue(job, inv, { parent: null });
+  }
+  if (rows.length) console.log(`[seed] re-queued ${rows.length} interrupted featured build(s)`);
 }

@@ -6,6 +6,7 @@ import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
 import { api, fmt, type InventionDetail, type JobEvent } from '../api.ts';
+import './Workspace.css';
 
 export default function Workspace() {
   const { id = '' } = useParams();
@@ -34,6 +35,7 @@ export default function Workspace() {
   const [error, setError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [remixOpen, setRemixOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
@@ -130,37 +132,43 @@ export default function Workspace() {
   const vmeta = detail?.versions.find((v) => v.id === versionId);
 
   return (
-    <div className="flex h-full min-h-screen flex-col bg-slate-50">
+    <div className="workbench">
       <Header compact />
-      <div className="flex flex-col gap-2 border-b border-slate-200 bg-white px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+      <div className="workbench-heading">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-base font-semibold text-slate-900">{inv?.title ?? '…'}</h1>
-            {inv && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${inv.status === 'passed' ? 'bg-emerald-100 text-emerald-800' : inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
-            {inv?.visibility === 'public' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">published</span>}
+          <p className="workbench-label">Invention workbench</p>
+          <div className="workbench-title">
+            <h1>{inv?.title ?? 'Loading invention…'}</h1>
+            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
+            {inv?.visibility === 'public' && <span className="workbench-badge workbench-published">published</span>}
           </div>
-          <p className="truncate text-xs text-slate-500">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
+          <p className="workbench-prompt">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button className="btn-secondary" disabled={running || !inv?.currentVersionId} onClick={() => setRemixOpen(true)}>Remix</button>
           {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
+          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
           <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
         </div>
       </div>
       {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
       {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'The versions recorded so far are shown below; use “Request change” or Remix to continue from them.' : 'Nothing was recorded; start a new build.'}</div>}
 
-      <div className="flex gap-1 border-b border-slate-200 bg-white px-2 py-1 md:hidden">
-        {(['canvas', 'tree', 'agent'] as const).map((p) => <button key={p} onClick={() => setMobilePane(p)} className={`rounded-full px-3 py-1 text-sm capitalize ${mobilePane === p ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>{p === 'canvas' ? '3D' : p === 'tree' ? 'Parts' : 'Agent'}</button>)}
+      <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">
+        {(['canvas', 'tree', 'agent'] as const).map((p) => <button key={p} onClick={() => setMobilePane(p)} aria-pressed={mobilePane === p}>{p === 'canvas' ? '3D view' : p === 'tree' ? 'Parts' : 'Agent'}</button>)}
       </div>
 
-      <div className="grid min-h-0 flex-1 md:grid-cols-[260px_1fr_340px]">
-        <aside className={`${mobilePane === 'tree' ? 'block' : 'hidden'} min-h-0 border-r border-slate-200 bg-white md:block`}>
+      <div className="workbench-grid">
+        <aside className="workbench-panel workbench-parts" data-active={mobilePane === 'tree'} aria-label="Assembly and parts">
           {version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
         </aside>
 
-        <section className={`${mobilePane === 'canvas' ? 'flex' : 'hidden'} relative min-h-[60vh] flex-col md:flex`}>
-          <div className="relative min-h-0 flex-1">
+        <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
+          <div className="workbench-panel-heading">
+            <span className="workbench-label">3D simulation</span>
+            {version && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
+          </div>
+          <div className="workbench-stage">
             {version ? (
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : (
@@ -169,40 +177,43 @@ export default function Workspace() {
               </div>
             )}
             {version && (
-              <div className="pointer-events-none absolute left-3 top-3 flex flex-col gap-1">
-                <span className="rounded-md bg-white/85 px-2 py-1 text-xs text-slate-700 shadow-sm">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{changedIds.size > 0 && <span className="ml-2 text-warn">● {changedIds.size} parts changed</span>}</span>
-                {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.testId}: {test.passed ? 'passed' : 'did not pass'} · {test.kind === 'walk' ? fmt.m2(test.metrics.distance_m) : `drift ${fmt.m2(Math.hypot(test.metrics.distance_m, test.metrics.lateralDrift_m))}`} · tilt {fmt.deg(test.metrics.maxTilt_deg)}</span>}
+              <div className="workbench-readout">
+                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{changedIds.size > 0 && <span className="ml-2 text-warn">● {changedIds.size} parts changed</span>}</span>
+                {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.testId}: {test.passed ? 'passed' : 'did not pass'}{test.metrics.distance_m !== undefined ? ` · ${fmt.m2(test.metrics.distance_m)}` : test.metrics.landingDistance_m !== undefined ? ` · landed ${fmt.m2(test.metrics.landingDistance_m)}` : ''}{test.metrics.maxTilt_deg !== undefined ? ` · tilt ${fmt.deg(test.metrics.maxTilt_deg)}` : ''}</span>}
               </div>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-3 py-2 text-sm">
-            <button className="btn-secondary !px-3 !py-1" onClick={() => setPlaying((p) => !p)} disabled={!test} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
-            <button className="btn-ghost !px-2 !py-1" onClick={() => { setSeek(0); setTimeout(() => setSeek(null), 50); }} disabled={!test}>Reset</button>
-            <input type="range" min={0} max={Math.max(0.01, time.d)} step={0.01} value={Math.min(time.t, time.d)} onChange={(e) => { setPlaying(false); setSeek(Number(e.target.value)); }} className="w-32 accent-accent" aria-label="Scrub time" disabled={!test} />
-            <span className="mono w-20 text-xs text-slate-500">{time.t.toFixed(2)} / {time.d.toFixed(1)} s</span>
-            <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="rounded-md border border-slate-200 px-1.5 py-1 text-xs" aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
-            {version && version.tests.length > 1 && (
-              <select value={testId ?? ''} onChange={(e) => setTestId(e.target.value)} className="rounded-md border border-slate-200 px-1.5 py-1 text-xs" aria-label="Test to replay">{version.tests.map((t) => <option key={t.testId} value={t.testId}>{t.testId} {t.passed ? '✓' : '✗'}</option>)}</select>
-            )}
-            <span className="mx-1 h-5 w-px bg-slate-200" />
-            <label className="flex items-center gap-1 text-xs text-slate-600">Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-20 accent-accent" aria-label="Explode view" /></label>
-            <button className={`btn-ghost !px-2 !py-1 ${blueprint ? 'text-accent' : ''}`} onClick={() => setBlueprint((b) => !b)}>Blueprint</button>
-            <label className="flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>
+          <div className="workbench-toolbar">
+            <div className="workbench-control-group" role="group" aria-label="Replay controls">
+              <button className="btn-secondary" onClick={() => setPlaying((p) => !p)} disabled={!test} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+              <button className="btn-ghost" onClick={() => { setSeek(0); setTimeout(() => setSeek(null), 50); }} disabled={!test}>Reset</button>
+              <input type="range" min={0} max={Math.max(0.01, time.d)} step={0.01} value={Math.min(time.t, time.d)} onChange={(e) => { setPlaying(false); setSeek(Number(e.target.value)); }} className="workbench-timeline" aria-label="Scrub time" disabled={!test} />
+              <span className="mono whitespace-nowrap text-xs text-slate-600">{time.t.toFixed(2)} / {time.d.toFixed(1)} s</span>
+              <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
+              {version && version.tests.length > 1 && (
+                <select value={testId ?? ''} onChange={(e) => setTestId(e.target.value)} aria-label="Test to replay">{version.tests.map((t) => <option key={t.testId} value={t.testId}>{t.testId} {t.passed ? '✓' : '✗'}</option>)}</select>
+              )}
+            </div>
+            <div className="workbench-control-group" role="group" aria-label="View controls">
+              <label>Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-16" aria-label="Explode view" /></label>
+              <button className="btn-ghost" aria-pressed={blueprint} onClick={() => setBlueprint((b) => !b)}>Blueprint</button>
+              <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>
+            </div>
           </div>
           {canFollowUp && (
-            <form onSubmit={(e) => { e.preventDefault(); if (request.trim()) void act(() => api.followUp(id, request.trim())); }} className="flex items-center gap-2 border-t border-slate-200 bg-white px-3 py-2">
-              <input value={request} onChange={(e) => setRequest(e.target.value)} placeholder="Ask for a change: “Make it dance”, “Walk 30% further”, “Give it six legs”" className="min-w-0 flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm outline-none focus:border-accent" maxLength={400} />
+            <form onSubmit={(e) => { e.preventDefault(); if (request.trim()) void act(() => api.followUp(id, request.trim())); }} className="workbench-followup">
+              <input value={request} onChange={(e) => setRequest(e.target.value)} aria-label="Describe a change" placeholder="Ask for a change: “Make it dance”, “Walk 30% further”, “Give it six legs”" className="min-w-0 flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm outline-none focus:border-accent" maxLength={400} />
               <button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>Request change</button>
-              {!version?.spec.followUps.includes('dance') && <button type="button" className="btn-secondary" disabled={busy} onClick={() => void act(() => api.followUp(id, 'Make it dance'))}>Make it dance</button>}
+              {version?.assembly.family === 'legged_walker' && !version?.spec.followUps.includes('dance') && <button type="button" className="btn-secondary" disabled={busy} onClick={() => void act(() => api.followUp(id, 'Make it dance'))}>Make it dance</button>}
             </form>
           )}
         </section>
 
-        <aside className={`${mobilePane === 'agent' ? 'flex' : 'hidden'} min-h-0 flex-col border-l border-slate-200 bg-white md:flex`}>
-          <div className="flex gap-1 border-b border-slate-100 px-2 pt-2">
-            {(['activity', 'spec', 'tests'] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-t-md px-3 py-1.5 text-xs font-medium capitalize ${tab === t ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>{t}</button>)}
+        <aside className="workbench-panel workbench-agent" data-active={mobilePane === 'agent'} aria-label="Engineering agent">
+          <div className="workbench-agent-nav" role="group" aria-label="Agent panels">
+            {(['activity', 'spec', 'tests'] as const).map((t) => <button key={t} onClick={() => setTab(t)} aria-pressed={tab === t}>{t}</button>)}
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="workbench-agent-content">
             {tab === 'activity' && <ActivityPanel events={events} running={running} versions={detail?.versions ?? []} currentVersionId={versionId} onPickVersion={setVersionId} status={jobStatus} />}
             {tab === 'spec' && <div className="overflow-auto p-3">{version ? <SpecPanel spec={version.spec} /> : <p className="text-xs text-slate-400">No spec yet.</p>}</div>}
             {tab === 'tests' && (
@@ -221,6 +232,7 @@ export default function Workspace() {
                     <div className="mb-1 flex items-center justify-between"><span className="font-medium">{t.testId}</span><span className={t.passed ? 'text-emerald-700' : 'text-amber-700'}>{t.passed ? 'passed' : 'did not pass'}</span></div>
                     <Metrics metrics={t.metrics} kind={t.kind} />
                     {t.failureReasons.length > 0 && <ul className="mt-1 list-disc pl-4 text-amber-800">{t.failureReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+                    {t.notes?.length > 0 && <ul className="mt-1 list-disc pl-4 text-slate-500">{t.notes.map((r, i) => <li key={i}>{r}</li>)}</ul>}
                   </div>
                 ))}
                 {version && <p className="text-[11px] text-slate-400">Metrics are computed by the physics engine from this exact assembly and are reproducible. Rigid-body simulation is not engineering certification.</p>}

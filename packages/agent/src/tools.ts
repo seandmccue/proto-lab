@@ -1,286 +1,236 @@
 import { z } from 'zod';
-import type { Assembly, PartDefinition, Spec, TestResult, ToolLogEntry, Controller } from '@protolab/schema';
-import { billOfMaterials, totalMass } from '@protolab/schema';
-import { searchCatalog, getPart, generatePart, generatorInfo, buildWalker, danceController, DEFAULT_WALKER, DEFAULT_DANCE, WALKER_PARAM_RANGES, type WalkerParams, ParamError, transformPoint } from '@protolab/parts';
-import { runTest, walkTest, danceTest } from '@protolab/simulator';
+import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
+import { searchCatalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, AssemblyOp, AssemblyError, ParamError, shapeVolume, piecesBoundingRadius, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
+import { runTest } from '@protolab/simulator';
 import type { ToolDef } from './llm.ts';
 
-export const WalkerParamsSchema = z.object({
-  legCount: z.union([z.literal(4), z.literal(6)]),
-  chassisPartId: z.string(),
-  hipServoPartId: z.string(),
-  kneeServoPartId: z.string(),
-  upperLegPartId: z.string(),
-  lowerLegPartId: z.string(),
-  footPartId: z.string(),
-  hipOffset_rad: z.number().min(WALKER_PARAM_RANGES.hipOffset_rad.min).max(WALKER_PARAM_RANGES.hipOffset_rad.max),
-  kneeFlex_rad: z.number().min(WALKER_PARAM_RANGES.kneeFlex_rad.min).max(WALKER_PARAM_RANGES.kneeFlex_rad.max),
-  gait: z.object({
-    frequency_hz: z.number().min(0.3).max(4),
-    hipAmplitude_rad: z.number().min(0.05).max(0.9),
-    kneeAmplitude_rad: z.number().min(0).max(1),
-    stiffness: z.number().min(0.2).max(50),
-    damping: z.number().min(0).max(5),
-    gaitType: z.enum(['crawl', 'trot', 'tripod']),
-    swingDuty: z.number().min(0.1).max(0.5),
-  }),
-  shell: z.boolean(),
-  dance: z.object({ frequency_hz: z.number().min(0.3).max(4), bobAmplitude_rad: z.number().min(0).max(0.8), swayAmplitude_rad: z.number().min(0).max(0.6) }).optional(),
-});
-
-const SearchArgs = z.object({ query: z.string().default(''), category: z.string().optional(), limit: z.number().int().min(1).max(30).optional() });
+// ---------- argument schemas ----------
+const SearchArgs = z.object({ query: z.string().default(''), category: PartCategory.optional(), limit: z.number().int().min(1).max(40).optional() });
 const GetPartArgs = z.object({ part_id: z.string() });
-const CreatePartArgs = z.object({ kind: z.string(), params: z.record(z.number()), rationale: z.string().optional() });
-const BuildArgs = z.object({ params: WalkerParamsSchema.partial({ shell: true }), rationale: z.string() });
-const ReviseArgs = z.object({ changes: z.record(z.unknown()), rationale: z.string(), based_on: z.string().optional() });
-const RunTestArgs = z.object({ kind: z.enum(['walk', 'dance']) });
-const SweepArgs = z.object({
-  hipAmplitude_rad: z.array(z.number().min(0.05).max(0.9)).min(1).max(4),
-  frequency_hz: z.array(z.number().min(0.3).max(4)).min(1).max(4),
-  kneeAmplitude_rad: z.array(z.number().min(0).max(1)).min(1).max(2).optional(),
-  duration_s: z.number().min(2).max(6).optional(),
+const CreatePartArgs = z.object({ kind: z.string(), params: z.record(z.number()), name: z.string().max(60).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), rationale: z.string().optional() });
+const DesignPartArgs = z.object({
+  name: z.string().min(2).max(60), category: PartCategory, description: z.string().max(300).default(''), material: z.string().max(40).default('PLA'), mass_kg: z.number().positive().max(20).optional(),
+  pieces: z.array(GeometryPiece).min(1).max(16), connectors: z.array(Connector).max(16).default([]), rationale: z.string().optional(),
 });
-const FinalizeArgs = z.object({ summary: z.string(), status: z.enum(['passed', 'failed']) });
-const SpecArgs = z.object({
-  walkDistance_m: z.number().positive().max(5).optional(),
-  maxTilt_deg: z.number().positive().max(60).optional(),
-  duration_s: z.number().positive().max(12).optional(),
-  legCount: z.union([z.literal(4), z.literal(6)]).optional(),
-  assumptions: z.array(z.string()).max(12).optional(),
-});
+const AssembleArgs = z.object({ ops: z.array(AssemblyOp).min(1).max(60), rationale: z.string(), based_on: z.string().optional() });
+const DrivesArgs = z.object({ drives: z.array(Drive).min(1).max(40), rationale: z.string().optional(), based_on: z.string().optional() });
+const DefineTestArgs = z.object({ test: TestSpec });
+const RunTestArgs = z.object({ test_id: z.string() });
+const SweepArgs = z.object({ test_id: z.string(), controlId: z.string(), field: z.enum(['amplitude', 'frequency_hz', 'value', 'offset']), values: z.array(z.number()).min(2).max(8), duration_s: z.number().min(1).max(6).optional() });
+const PlanArgs = Plan.extend({ task: z.string().max(400).optional(), assumptions: z.array(z.string()).max(12).optional(), maxMass_kg: z.number().positive().max(50).optional() });
+const FinalizeArgs = z.object({ summary: z.string().max(1200), status: z.enum(['passed', 'failed']), unverified: z.array(z.string()).max(12).optional() });
 
 export const TOOL_DEFS: ToolDef[] = [
-  { name: 'write_spec', description: 'Refine the engineering specification (targets, leg count, assumptions) before building. Call at most once.', parameters: {
-    type: 'object', properties: {
-      walkDistance_m: { type: 'number', description: 'Target distance to walk in duration_s (metres)' },
-      maxTilt_deg: { type: 'number', description: 'Max allowed body tilt from upright (degrees)' },
-      duration_s: { type: 'number', description: 'Test duration in seconds (≤12)' },
-      legCount: { type: 'integer', enum: [4, 6] },
-      assumptions: { type: 'array', items: { type: 'string' }, description: 'Explicit assumptions shown to the user' },
-    } } },
-  { name: 'search_catalog', description: 'Search the parts catalog. Returns part ids with key parameters, mass and limits.', parameters: {
-    type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: ['motors', 'gears', 'bearings', 'shafts', 'joints', 'springs', 'brackets', 'fasteners', 'frames', 'wheels', 'pads', 'shells', 'grippers'] }, limit: { type: 'integer' } } } },
-  { name: 'get_part', description: 'Get full details of a catalog or custom part.', parameters: { type: 'object', properties: { part_id: { type: 'string' } }, required: ['part_id'] } },
-  { name: 'create_parametric_part', description: 'Create a custom parametric part when no catalog part fits (e.g. a longer leg_segment, a chassis with specific dimensions, a servo with different torque). Returns the new part id. Parameter ranges are enforced.', parameters: {
-    type: 'object', properties: { kind: { type: 'string', description: 'Generator kind: beam, plate, body_frame, servo_motor, leg_segment, foot_pad, bracket, shell_panel, ...' }, params: { type: 'object', additionalProperties: { type: 'number' } }, rationale: { type: 'string' } }, required: ['kind', 'params'] } },
-  { name: 'build_walker', description: 'Place and connect all components of a legged walker from the given part ids and parameters (chassis, hip/knee servos, leg bars, foot pads, rest angles, gait). Replaces the current assembly. Returns an assembly summary with foot positions relative to hips and total mass.', parameters: {
-    type: 'object', properties: { params: { type: 'object', description: 'WalkerParams JSON: legCount, chassisPartId, hipServoPartId, kneeServoPartId, upperLegPartId, lowerLegPartId, footPartId, hipOffset_rad, kneeFlex_rad, gait{frequency_hz,hipAmplitude_rad,kneeAmplitude_rad,stiffness,damping,gaitType,swingDuty}, shell' }, rationale: { type: 'string', description: 'Why these choices, in one or two sentences shown to the user' } }, required: ['params', 'rationale'] } },
-  { name: 'revise_walker', description: 'Change specific walker parameters or part ids on the current assembly and rebuild it. Use dotted keys, e.g. {"gait.hipAmplitude_rad": 0.4, "hipServoPartId": "servo-mg996r", "dance.swayAmplitude_rad": 0.1}. Dance params: dance.frequency_hz, dance.bobAmplitude_rad, dance.swayAmplitude_rad.', parameters: {
-    type: 'object', properties: { changes: { type: 'object' }, rationale: { type: 'string', description: 'What measured result motivates this change' }, based_on: { type: 'string', description: 'Test id and metric the decision is based on, e.g. "walk_1: fell at 1.1 s"' } }, required: ['changes', 'rationale'] } },
-  { name: 'inspect_assembly', description: 'Summarise the current assembly: parts, BOM, mass, foot placement relative to hips, joint count.', parameters: { type: 'object', properties: {} } },
-  { name: 'sweep_gait', description: 'Engineering sweep: simulate the CURRENT assembly over a grid of gait values (up to 4 hip amplitudes × 4 frequencies × 2 knee lifts, short runs) and return measured distance, tilt, falls and peak torque for each. Use it after a walk test to map the stride/cadence space before choosing a revision. Sweeps are exploration: they do not create versions or count against the test budget.', parameters: {
-    type: 'object', properties: { hipAmplitude_rad: { type: 'array', items: { type: 'number' } }, frequency_hz: { type: 'array', items: { type: 'number' } }, kneeAmplitude_rad: { type: 'array', items: { type: 'number' } }, duration_s: { type: 'number', description: '2–6 s per run (default 4)' } }, required: ['hipAmplitude_rad', 'frequency_hz'] } },
-  { name: 'run_test', description: 'Run a deterministic physics test on the current assembly. "walk": must travel the target distance without falling. "dance": must bob/sway in place without falling or drifting. Returns measured metrics and failure reasons.', parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['walk', 'dance'] } }, required: ['kind'] } },
-  { name: 'finalize_design', description: 'Finish. Give an honest one-paragraph summary of what was built, what the tests measured, and what was changed between iterations.', parameters: { type: 'object', properties: { summary: { type: 'string' }, status: { type: 'string', enum: ['passed', 'failed'] } }, required: ['summary', 'status'] } },
+  { name: 'write_plan', description: 'Step 1–3 and 7 of the engineering procedure: state the purpose, the recognisable physical features, the required motions, the sub-assemblies, measurable success criteria, and which behaviours the rigid-body physics cannot verify (e.g. aerodynamic lift). Shown to the user. Call once before building; call again only if the plan changes.', parameters: { type: 'object', properties: { purpose: { type: 'string' }, features: { type: 'array', items: { type: 'string' } }, motions: { type: 'array', items: { type: 'string' } }, subassemblies: { type: 'array', items: { type: 'string' } }, successCriteria: { type: 'array', items: { type: 'string' } }, unverified: { type: 'array', items: { type: 'string' } }, assumptions: { type: 'array', items: { type: 'string' } }, maxMass_kg: { type: 'number' } }, required: ['purpose', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified'] } },
+  { name: 'search_catalog', description: 'Search the component library (100+ parts: beams, plates, chassis, towers, gears, shafts, bearings, wheels, spoked wheels, pulleys, hinges, sliders, linkages, cranks, pistons, servos, gearmotors, springs, actuators, wings, propellers, gripper fingers, gondolas, tracks, payload balls/blocks/discs, trays…). Returns ids, parameters, mass, limits and connector ids with their kinds and axes.', parameters: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, limit: { type: 'integer' } } } },
+  { name: 'get_part', description: 'Full details of a catalog or custom part: connectors (id, position, axis, kind), geometry pieces, limits.', parameters: { type: 'object', properties: { part_id: { type: 'string' } }, required: ['part_id'] } },
+  { name: 'create_part', description: 'Create a parametric part from a generator when no preset fits (any generator kind with custom params, e.g. wing{span,chord,style}, body_frame{length,width,height,legPairs}, big_wheel{radius,spokes}, servo_motor{size,torque,speed}, beam, plate, curved_panel, gear, crank, link, gripper_finger, propeller…). Returns the new part id and its connectors.', parameters: { type: 'object', properties: { kind: { type: 'string' }, params: { type: 'object', additionalProperties: { type: 'number' } }, name: { type: 'string' }, color: { type: 'string', description: 'hex colour like #e63946' }, rationale: { type: 'string' } }, required: ['kind', 'params'] } },
+  { name: 'design_part', description: 'Design a fully custom part from primitives when no generator fits. Example: {"name":"Butterfly thorax","category":"frames","material":"PLA","pieces":[{"shape":{"kind":"capsule","radius":0.012,"height":0.06,"axis":"x"},"offset":{"position":[0,0,0],"rotation":[0,0,0,1]},"color":"#333333","role":"structure"},{"shape":{"kind":"extrude","profile":[[0,0],[0.03,0.01],[0.03,-0.01]],"depth":0.002,"axis":"y"},"offset":{"position":[0.03,0,0],"rotation":[0,0,0,1]},"color":"#e63946","role":"shell"}],"connectors":[{"id":"wing_l","position":[0,0.01,0.012],"axis":[0,0,1],"kind":"revolute"},{"id":"wing_r","position":[0,0.01,-0.012],"axis":[0,0,-1],"kind":"revolute"},{"id":"base","position":[0,-0.012,0],"axis":[0,-1,0],"kind":"fixed"}]}. Shapes: box{size}, cylinder{radius,height,axis}, sphere{radius}, capsule{radius,height,axis}, ellipsoid{radii}, extrude{profile (2D polygon, CCW), depth, axis}, revolve{profile [(r,h)...], axis}. Metres, part-local frame, +Y up. Connector axes point OUT of the part. Mass defaults from volume × material density (shells/wings ×0.3).', parameters: { type: 'object', properties: { name: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, description: { type: 'string' }, material: { type: 'string', enum: ['PLA', 'aluminium', 'steel', 'carbon', 'rubber', 'acrylic', 'nylon', 'balsa', 'foam'] }, mass_kg: { type: 'number' }, pieces: { type: 'array', items: { type: 'object' } }, connectors: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string' } }, required: ['name', 'category', 'pieces'] } },
+  { name: 'assemble', description: 'Apply structured assembly operations to the current design (atomic: all or nothing; on error the failing op index and reason are returned and nothing changes). Ops: {op:"place", id, part, position:[x,y,z], rotation_deg?:[x,y,z], anchored?, free?} · {op:"mount", id, part, onto:<instance>, connector:<parent connector>, via?:<child connector>, joint:"fixed"|"revolute"|"prismatic", spin_deg?, offset_m?, limits?:[min,max], motor?:{controlId, stiffness, damping}} (places the child so the two connectors coincide and face each other; joint axis = parent connector axis) · {op:"connect", a, a_connector, b, b_connector, joint:"revolute"|"prismatic"|"fixed"|"spring", motor?, spring?} (connectors must already touch, ≤ 20 mm) · {op:"pattern", instances:[ids], kind:"mirror"|"polar"|"linear", plane?:"xy"|"yz"|"xz", axis?, center?, count?, step?} (copies instances, joints, drives) · {op:"remove", id} · {op:"move", id, position?, rotation_deg?, translate?}. Ground is y = 0; +Y is up. Use anchored:true for bases fixed to the ground, free:true for projectiles/payloads.', parameters: { type: 'object', properties: { ops: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string', description: 'What this builds or changes and why, in one or two sentences for the user' }, based_on: { type: 'string', description: 'Test id and measurement this change responds to, if any' } }, required: ['ops', 'rationale'] } },
+  { name: 'set_drives', description: 'Set motor drives for motorised joints (by controlId). Each: {controlId, mode:"position"|"velocity", rampIn_s?, profile}. Profiles: {kind:"constant", value} · {kind:"sine", amplitude, offset?, frequency_hz, phase?} · {kind:"ramp", from, to, start_s?, duration_s} · {kind:"step", before, after, at_s} · {kind:"gait", role:"swing"|"lift", amplitude, offset?, frequency_hz, phase?, swingDuty?} for legged locomotion. Position values are radians (revolute) or metres (prismatic); velocity values rad/s or m/s. Replaces drives with the same controlId.', parameters: { type: 'object', properties: { drives: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string' }, based_on: { type: 'string' } }, required: ['drives'] } },
+  { name: 'inspect_assembly', description: 'Current assembly: instances with positions, joints with axes/motors, drives, mass, extents and lowest point (should be ≥ 0 unless intended).', parameters: { type: 'object', properties: {} } },
+  { name: 'define_test', description: 'Define a measurable test (step 7). Kinds: {kind:"motion", id, duration_s, measure:{joints:[controlIds], base?:<instance>, clearancePairs:[[a,b]], noGroundContact:[ids]}, criteria:{minJointAmplitude_rad?, minJointRate_rad_s? (peak angular rate), minRevolutions?, maxBaseTilt_deg?, maxBaseDrift_m?, torqueWithinRating}} (metrics also report <joint>.cycles_hz for oscillation frequency) · {kind:"walk", id, duration_s, base, minDistance_m, maxTilt_deg, direction} · {kind:"launch", id, duration_s, projectile:<free instance>, targetDistance_m, tolerance_m, direction} · {kind:"grip", id, duration_s, payload:<free instance>, holder:<instance>, supportUntil_s, maxSeparation_m}.', parameters: { type: 'object', properties: { test: { type: 'object' } }, required: ['test'] } },
+  { name: 'run_test', description: 'Run a defined test on the current assembly in the rigid-body simulator. Returns measured metrics, failure reasons and notes. Creates a version.', parameters: { type: 'object', properties: { test_id: { type: 'string' } }, required: ['test_id'] } },
+  { name: 'sweep_drive', description: 'Exploration (no version, no test budget): rerun a test briefly while varying one field of one drive over a list of values; returns the measured metrics per value so you can pick a revision from data.', parameters: { type: 'object', properties: { test_id: { type: 'string' }, controlId: { type: 'string' }, field: { type: 'string', enum: ['amplitude', 'frequency_hz', 'value', 'offset'] }, values: { type: 'array', items: { type: 'number' } }, duration_s: { type: 'number' } }, required: ['test_id', 'controlId', 'field', 'values'] } },
+  { name: 'finalize_design', description: 'Finish with an honest summary: what was built, what each test measured, what changed between iterations, and which behaviours remain unverified by the physics.', parameters: { type: 'object', properties: { summary: { type: 'string' }, status: { type: 'string', enum: ['passed', 'failed'] }, unverified: { type: 'array', items: { type: 'string' } } }, required: ['summary', 'status'] } },
 ];
 
 export interface ToolEvents {
   onLog(entry: ToolLogEntry): void;
-  onAssembly(assembly: Assembly, params: WalkerParams, rationale: string, basedOn?: string, changes?: Record<string, { from?: number; to: number }>): void;
+  onPlan(spec: Spec): void;
+  onAssembly(assembly: Assembly, rationale: string, basedOn?: string): void;
   onTest(result: TestResult): void;
-  onSpec(spec: Spec): void;
 }
+
+/** Accept common field synonyms in assembly ops. */
+function normaliseOp(o: unknown): unknown {
+  if (!o || typeof o !== 'object') return o;
+  const x = { ...(o as Record<string, unknown>) };
+  const alias = (from: string, to: string) => { if (x[to] === undefined && x[from] !== undefined) { x[to] = x[from]; } if (from !== to) delete x[from]; };
+  if (typeof x.type === 'string' && x.op === undefined) { x.op = x.type; delete x.type; }
+  if (typeof x.action === 'string' && x.op === undefined) { x.op = x.action; delete x.action; }
+  if (x.op === 'add' || x.op === 'create' || x.op === 'spawn') x.op = 'place';
+  if (x.op === 'attach' || x.op === 'join') x.op = x.onto || x.parent ? 'mount' : 'connect';
+  alias('partId', 'part'); alias('part_id', 'part'); alias('instance', 'id'); alias('instanceId', 'id'); alias('name', 'id'); alias('instance_id', 'id');
+  alias('at', 'position'); alias('pos', 'position'); alias('translation', 'position'); alias('rotation', 'rotation_deg'); alias('rotation_euler_deg', 'rotation_deg'); alias('euler_deg', 'rotation_deg');
+  alias('parent', 'onto'); alias('on', 'onto'); alias('to', 'onto'); alias('parent_connector', 'connector'); alias('parentConnector', 'connector'); alias('onto_connector', 'connector');
+  alias('child_connector', 'via'); alias('childConnector', 'via'); alias('with', 'via'); alias('using', 'via');
+  alias('jointType', 'joint'); alias('joint_type', 'joint'); alias('spin', 'spin_deg'); alias('offset', 'offset_m');
+  alias('fixed', 'anchored'); alias('static', 'anchored');
+  if (x.op === 'place' && x.position === undefined && Array.isArray(x.transform)) { x.position = x.transform; delete x.transform; }
+  if (x.op === 'pattern' && x.instances === undefined && typeof x.id === 'string') { x.instances = [x.id]; delete x.id; }
+  if (x.op === 'pattern' && x.kind === undefined && typeof x.type === 'string') { x.kind = x.type; }
+  if (x.motor && typeof x.motor === 'object') { const m = x.motor as Record<string, unknown>; if (m.controlId === undefined && typeof m.id === 'string') { m.controlId = m.id; delete m.id; } if (m.controlId === undefined && typeof m.name === 'string') { m.controlId = m.name; delete m.name; } }
+  return x;
+}
+/** Accept drives written flat ({controlId, kind:'sine', amplitude...}) by wrapping the profile. */
+function normaliseDrive(d: unknown): unknown {
+  if (!d || typeof d !== 'object') return d;
+  const o = { ...(d as Record<string, unknown>) };
+  if (!o.profile && typeof o.kind === 'string') { const profile: Record<string, unknown> = {}; for (const k of ['kind', 'value', 'amplitude', 'offset', 'frequency_hz', 'phase', 'from', 'to', 'start_s', 'duration_s', 'before', 'after', 'at_s', 'role', 'swingDuty']) if (k in o) { profile[k] = o[k]; delete o[k]; } o.profile = profile; }
+  if (o.profile && typeof o.profile === 'object') { const p = o.profile as Record<string, unknown>; if (p.kind === 'gait' && !p.role) p.role = /knee|lift/i.test(String(o.controlId)) ? 'lift' : 'swing'; if (p.kind === 'sine' && p.frequency_hz === undefined && typeof p.frequency === 'number') { p.frequency_hz = p.frequency; delete p.frequency; } }
+  if (o.mode === undefined) o.mode = 'position';
+  return o;
+}
+/** Accept the shorthand models tend to write: {shape:'box', size:[..], position:[..]} → full GeometryPiece. */
+function normalisePiece(pc: unknown): unknown {
+  if (!pc || typeof pc !== 'object') return pc;
+  const o = { ...(pc as Record<string, unknown>) };
+  if (typeof o.shape === 'string') { const kind = o.shape; const shape: Record<string, unknown> = { kind }; for (const k of ['size', 'radius', 'height', 'axis', 'radii', 'profile', 'depth', 'segments']) if (k in o) { shape[k] = o[k]; delete o[k]; } o.shape = shape; }
+  if (Array.isArray(o.offset)) o.offset = { position: o.offset, rotation: [0, 0, 0, 1] };
+  if (!o.offset && Array.isArray(o.position)) { o.offset = { position: o.position, rotation: o.rotation ?? [0, 0, 0, 1] }; delete o.position; delete o.rotation; }
+  if (o.offset && typeof o.offset === 'object' && !('rotation' in (o.offset as object))) (o.offset as Record<string, unknown>).rotation = [0, 0, 0, 1];
+  if (o.collide === undefined) o.collide = true; if (o.role === undefined) o.role = 'structure';
+  return o;
+}
+const DENSITY: Record<string, number> = { PLA: 1240, aluminium: 2700, steel: 7850, carbon: 1600, rubber: 1100, acrylic: 1180, nylon: 1150, balsa: 160, foam: 30 };
 
 export class ToolRuntime {
   spec: Spec;
   customParts = new Map<string, PartDefinition>();
-  params: WalkerParams | null = null;
-  assembly: Assembly | null = null;
+  assembly: Assembly = emptyAssembly();
   tests: TestResult[] = [];
-  testCount = 0;
-  finalized: { summary: string; status: 'passed' | 'failed' } | null = null;
-  specWritten = false;
-  calls = 0;
-  sweeps = 0;
+  testSpecs = new Map<string, TestSpec>();
+  testCount = 0; sweeps = 0; calls = 0;
+  finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
   private events: ToolEvents;
   budget: { maxTests: number; maxToolCalls: number };
-  constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 6, maxToolCalls: 40 }) { this.spec = spec; this.events = events; this.budget = budget; }
-
-  private partResolver = (id: string) => this.customParts.get(id) ?? getPart(id);
+  constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 9, maxToolCalls: 60 }) { this.spec = spec; this.events = events; this.budget = budget; }
+  resolve = (id: string) => this.customParts.get(id) ?? getPart(id);
 
   summarisePart(p: PartDefinition) {
-    return { id: p.id, kind: p.kind, name: p.name, category: p.category, params: p.params, mass_kg: +p.mass_kg.toFixed(4), limits: p.limits, cost_usd: p.cost_usd };
+    return { id: p.id, kind: p.kind, name: p.name, category: p.category, params: p.params, mass_kg: +p.mass_kg.toFixed(4), dimensions_m: p.dimensions_m.map((v) => +v.toFixed(4)), limits: p.limits, connectors: p.connectors.map((c) => `${c.id} (${c.kind}, axis ${c.axis.map((v) => +v.toFixed(2)).join(',')})`) };
   }
 
-  summariseAssembly(a: Assembly) {
-    const hips = a.instances.filter((i) => i.id.startsWith('hip_servo_'));
-    const feet = a.instances.filter((i) => i.id.startsWith('foot_'));
-    const footOffsets = feet.map((f) => {
-      const leg = f.id.replace('foot_', '');
-      const hip = hips.find((h) => h.id === `hip_servo_${leg}`)!;
-      return { leg, footBehindHip_m: +(f.transform.position[0] - hip.transform.position[0]).toFixed(4) };
-    });
-    const chassis = a.parts.find((p) => p.kind === 'body_frame')!;
-    return {
-      family: a.family,
-      instances: a.instances.length,
-      joints: a.joints.length,
-      revoluteJoints: a.joints.filter((j) => j.type === 'revolute').length,
-      totalMass_kg: +totalMass(a).toFixed(4),
-      bodyHeight_m: +a.instances.find((i) => i.id === 'body')!.transform.position[1].toFixed(4),
-      chassis: { id: chassis.id, length_m: chassis.params.length, width_m: chassis.params.width },
-      footOffsets,
-      note: 'footBehindHip_m should be near 0 for a statically stable crawl; negative means feet sit behind the hips (nose-heavy).',
-      bom: billOfMaterials(a).map((l) => ({ part: l.name, qty: l.qty, mass_kg: +l.mass_kg.toFixed(4) })),
-      params: a.familyConfig,
-    };
-  }
-
-  private applyChanges(base: WalkerParams, changes: Record<string, unknown>): { next: WalkerParams; diff: Record<string, { from?: number; to: number }> } {
-    const next: WalkerParams = { ...base, gait: { ...base.gait }, dance: { ...DEFAULT_DANCE, ...(base.dance ?? {}) } };
-    const diff: Record<string, { from?: number; to: number }> = {};
-    for (const [k, v] of Object.entries(changes)) {
-      if (k.startsWith('dance.')) {
-        const dk = k.slice(6) as keyof typeof DEFAULT_DANCE;
-        if (!(dk in next.dance!)) throw new Error(`Unknown dance parameter "${dk}"`);
-        const from = next.dance![dk];
-        if (typeof v !== 'number') throw new Error(`dance.${dk} must be a number`);
-        next.dance![dk] = v; diff[k] = { from, to: v };
-      } else if (k.startsWith('gait.')) {
-        const gk = k.slice(5) as keyof WalkerParams['gait'];
-        if (!(gk in next.gait)) throw new Error(`Unknown gait parameter "${gk}"`);
-        const from = next.gait[gk];
-        (next.gait as Record<string, unknown>)[gk] = v;
-        if (typeof v === 'number') diff[k] = { from: typeof from === 'number' ? from : undefined, to: v };
-      } else if (k === 'gait' && typeof v === 'object' && v) {
-        for (const [gk, gv] of Object.entries(v as Record<string, unknown>)) { const from = (next.gait as Record<string, unknown>)[gk]; (next.gait as Record<string, unknown>)[gk] = gv; if (typeof gv === 'number') diff[`gait.${gk}`] = { from: typeof from === 'number' ? from : undefined, to: gv }; }
-      } else {
-        if (!(k in next)) throw new Error(`Unknown walker parameter "${k}"`);
-        const rec = next as unknown as Record<string, unknown>;
-        const from = rec[k];
-        rec[k] = v;
-        if (typeof v === 'number') diff[k] = { from: typeof from === 'number' ? from : undefined, to: v };
-        else if (typeof v === 'string' && from !== v) diff[k] = { to: 0 }; // part swap; summarised in rationale
-      }
-    }
-    const chassisPairs = this.partResolver(next.chassisPartId)?.params.legPairs;
-    if (next.legCount === 6 && chassisPairs !== 3) next.chassisPartId = 'chassis-hex-200';
-    if (next.legCount === 4 && chassisPairs === 3) next.chassisPartId = 'chassis-quad-160';
-    return { next: WalkerParamsSchema.parse(next), diff };
-  }
-
-  /** Execute a named tool with raw JSON args. Always returns a JSON-serialisable result; throws on invalid args. */
   async call(name: string, rawArgs: unknown): Promise<unknown> {
     this.calls++;
     if (this.calls > this.budget.maxToolCalls) throw new Error(`Tool-call budget (${this.budget.maxToolCalls}) exhausted; call finalize_design.`);
     const t = new Date().toISOString();
-    const log = (ok: boolean, summary: string, args: unknown = rawArgs) => this.events.onLog({ t, tool: name, args, ok, summary });
+    const log = (ok: boolean, summary: string) => this.events.onLog({ t, tool: name, args: rawArgs, ok, summary });
     try {
       switch (name) {
-        case 'write_spec': {
-          const a = SpecArgs.parse(rawArgs);
-          const next: Spec = { ...this.spec, targets: { ...this.spec.targets }, constraints: { ...this.spec.constraints } };
-          if (a.walkDistance_m) next.targets.walkDistance_m = a.walkDistance_m;
-          if (a.maxTilt_deg) next.targets.maxTilt_deg = a.maxTilt_deg;
-          if (a.duration_s) next.targets.duration_s = a.duration_s;
-          if (a.legCount) next.constraints.legCount = a.legCount;
-          if (a.assumptions) next.assumptions = [...a.assumptions];
-          this.spec = next; this.specWritten = true;
-          this.events.onSpec(next);
-          log(true, `Spec: walk ${next.targets.walkDistance_m} m in ${next.targets.duration_s} s, tilt ≤ ${next.targets.maxTilt_deg}°, ${next.constraints.legCount} legs`);
-          return { spec: next };
+        case 'write_plan': {
+          const a = PlanArgs.parse(rawArgs);
+          const plan = Plan.parse({ purpose: a.purpose, features: a.features, motions: a.motions, subassemblies: a.subassemblies, successCriteria: a.successCriteria, unverified: a.unverified });
+          this.spec = { ...this.spec, plan, assumptions: a.assumptions ?? this.spec.assumptions, constraints: { ...this.spec.constraints, maxMass_kg: a.maxMass_kg ?? this.spec.constraints.maxMass_kg } };
+          this.events.onPlan(this.spec);
+          log(true, `Plan: ${plan.purpose.slice(0, 80)} — ${plan.subassemblies.length} sub-assemblies, ${plan.successCriteria.length} criteria, ${plan.unverified.length} unverified`);
+          return { ok: true, plan };
         }
         case 'search_catalog': {
           const a = SearchArgs.parse(rawArgs);
-          const res = searchCatalog(a.query, { category: a.category as never, limit: a.limit ?? 12 });
+          const res = searchCatalog(a.query, { category: a.category, limit: a.limit ?? 8 });
           const custom = [...this.customParts.values()].filter((p) => !a.category || p.category === a.category);
           log(true, `${res.length + custom.length} parts for "${a.query}"${a.category ? ` in ${a.category}` : ''}`);
-          return { parts: [...custom, ...res].map((p) => this.summarisePart(p)), generators: a.query === '' ? generatorInfo().map((g) => g.kind) : undefined };
+          return { parts: [...custom, ...res].map((p) => this.summarisePart(p)), generators: a.query === '' ? generatorInfo().map((g) => `${g.kind}(${Object.keys(g.params).join(',')})`) : undefined };
         }
         case 'get_part': {
-          const a = GetPartArgs.parse(rawArgs);
-          const p = this.partResolver(a.part_id);
+          const a = GetPartArgs.parse(rawArgs); const p = this.resolve(a.part_id);
           if (!p) throw new Error(`Unknown part id "${a.part_id}"`);
-          log(true, `${p.name}`);
-          return { part: { ...this.summarisePart(p), description: p.description, connectors: p.connectors.map((c) => ({ id: c.id, kind: c.kind })), dimensions_m: p.dimensions_m, material: p.material } };
+          log(true, p.name);
+          return { part: { ...this.summarisePart(p), description: p.description, material: p.material, connectors: p.connectors, geometry: p.geometry.map((g) => ({ shape: g.shape.kind, role: g.role, offset: g.offset.position })) } };
         }
-        case 'create_parametric_part': {
+        case 'create_part': {
           const a = CreatePartArgs.parse(rawArgs);
           const id = `custom-${a.kind}-${this.customParts.size + 1}`;
           const p = generatePart(a.kind, a.params, id);
+          if (a.name) p.name = a.name;
+          if (a.color) for (const g of p.geometry) if (g.role !== 'contact' && g.role !== 'motor') g.color = a.color;
           this.customParts.set(id, p);
           log(true, `Created ${p.name} (${id})`);
           return { part: this.summarisePart(p) };
         }
-        case 'build_walker': {
-          const a = BuildArgs.parse(rawArgs);
-          const params = WalkerParamsSchema.parse({ shell: true, ...a.params });
-          if (params.legCount !== this.spec.constraints.legCount) throw new Error(`Spec requires ${this.spec.constraints.legCount} legs`);
-          const asm = buildWalker(params, this.partResolver);
-          const summary = this.summariseAssembly(asm);
-          if (summary.totalMass_kg > this.spec.constraints.maxMass_kg) throw new Error(`Assembly mass ${summary.totalMass_kg} kg exceeds limit ${this.spec.constraints.maxMass_kg} kg; choose lighter parts`);
-          this.params = params; this.assembly = asm;
-          log(true, `Built ${asm.instances.length} components, ${summary.revoluteJoints} joints, ${summary.totalMass_kg} kg`);
-          this.events.onAssembly(asm, params, a.rationale);
-          return summary;
+        case 'design_part': {
+          const raw = rawArgs as { pieces?: unknown[] };
+          if (Array.isArray(raw?.pieces)) raw.pieces = raw.pieces.map((pc) => normalisePiece(pc));
+          const a = DesignPartArgs.parse(rawArgs);
+          const id = `designed-${this.customParts.size + 1}`;
+          const pieces = a.pieces.map((g) => GeometryPiece.parse(g));
+          const r = piecesBoundingRadius(pieces); if (r > 1.0) throw new Error(`Part spans ~${(2 * r).toFixed(2)} m; keep designed parts under 2 m`);
+          const volume = pieces.reduce((s, g) => s + shapeVolume(g.shape), 0);
+          const mass = a.mass_kg ?? Math.max(0.001, volume * (DENSITY[a.material] ?? 1240) * (pieces.some((g) => g.role === 'shell' || g.role === 'wing') ? 0.3 : 1));
+          const ext = pieces.reduce((m, g) => { const h = g.offset.position; return [Math.max(m[0], Math.abs(h[0]) + r * 0.5), Math.max(m[1], Math.abs(h[1]) + r * 0.5), Math.max(m[2], Math.abs(h[2]) + r * 0.5)] as [number, number, number]; }, [0, 0, 0] as [number, number, number]);
+          const p = PartDefinition.parse({ id, kind: 'designed', name: a.name, category: a.category, description: a.description || `Designed part: ${a.name}`, params: {}, mass_kg: mass, dimensions_m: ext, material: a.material, geometry: pieces, connectors: a.connectors, limits: {}, cost_usd: 5, source: { kind: 'designed', license: 'CC0-1.0', creator: 'ProtoLab agent (model-designed, geometry-engine validated)' } });
+          this.customParts.set(id, p);
+          log(true, `Designed ${p.name} (${id}): ${pieces.length} pieces, ${a.connectors.length} connectors, ${(mass * 1000).toFixed(0)} g`);
+          return { part: this.summarisePart(p) };
         }
-        case 'revise_walker': {
-          const a = ReviseArgs.parse(rawArgs);
-          if (!this.params) throw new Error('No assembly yet; call build_walker first');
-          const { next, diff } = this.applyChanges(this.params, a.changes);
-          const asm = buildWalker(next, this.partResolver);
-          const summary = this.summariseAssembly(asm);
-          if (summary.totalMass_kg > this.spec.constraints.maxMass_kg) throw new Error(`Assembly mass ${summary.totalMass_kg} kg exceeds limit ${this.spec.constraints.maxMass_kg} kg; the change was not applied`);
-          this.params = next; this.assembly = asm;
-          log(true, `Revised: ${Object.entries(a.changes).map(([k, v]) => `${k}=${typeof v === 'number' ? +v.toFixed(3) : v}`).join(', ')}`);
-          this.events.onAssembly(asm, next, a.rationale, a.based_on, diff);
-          return summary;
+        case 'assemble': {
+          const raw = rawArgs as { ops?: unknown[] };
+          if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
+          const a = AssembleArgs.parse(rawArgs);
+          const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m });
+          this.assembly = r.assembly;
+          const s = summarize(this.assembly);
+          log(true, `${a.ops.length} ops: ${r.summary.slice(0, 4).join('; ')}${r.summary.length > 4 ? ` … (+${r.summary.length - 4})` : ''} → ${this.assembly.instances.length} components, ${s.totalMass_kg} kg`);
+          this.events.onAssembly(this.assembly, a.rationale, a.based_on);
+          return { applied: r.summary, assembly: s };
         }
-        case 'inspect_assembly': {
-          if (!this.assembly) throw new Error('No assembly yet');
-          log(true, 'Inspected assembly');
-          return this.summariseAssembly(this.assembly);
+        case 'set_drives': {
+          const raw = rawArgs as { drives?: unknown[] };
+          if (Array.isArray(raw?.drives)) raw.drives = raw.drives.map((d) => normaliseDrive(d));
+          const a = DrivesArgs.parse(rawArgs);
+          this.assembly = setDrives(this.assembly, a.drives);
+          log(true, `Drives: ${a.drives.map((d) => `${d.controlId}=${d.profile.kind}`).join(', ')}`);
+          if (a.rationale) this.events.onAssembly(this.assembly, a.rationale, a.based_on);
+          return { drives: this.assembly.controller.drives };
+        }
+        case 'inspect_assembly': { log(true, 'Inspected'); return summarize(this.assembly); }
+        case 'define_test': {
+          const raw = rawArgs as { test?: Record<string, unknown> };
+          if (raw?.test && Array.isArray(raw.test.direction)) { const v = raw.test.direction as number[]; raw.test.direction = Math.abs(v[0] ?? 0) >= Math.max(Math.abs(v[1] ?? 0), Math.abs(v[2] ?? 0)) ? 'x' : Math.abs(v[1] ?? 0) >= Math.abs(v[2] ?? 0) ? 'y' : 'z'; }
+          if (raw?.test && typeof raw.test.direction === 'string') raw.test.direction = raw.test.direction.replace(/^[+-]/, '').toLowerCase();
+          if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
+          const a = DefineTestArgs.parse(rawArgs);
+          this.testSpecs.set(a.test.id, a.test);
+          log(true, `Test ${a.test.id} (${a.test.kind}) defined`);
+          return { ok: true, test: a.test };
         }
         case 'run_test': {
-          const a = RunTestArgs.parse(rawArgs);
-          if (!this.assembly) throw new Error('No assembly yet; call build_walker first');
+          const a = RunTestArgs.parse(rawArgs); const spec = this.testSpecs.get(a.test_id);
+          if (!spec) throw new Error(`Unknown test "${a.test_id}"; define it first. Defined: ${[...this.testSpecs.keys()].join(', ') || 'none'}`);
+          if (!this.assembly.instances.length) throw new Error('No assembly yet');
           if (this.testCount >= this.budget.maxTests) throw new Error(`Test budget (${this.budget.maxTests}) exhausted; call finalize_design with the best result so far.`);
           this.testCount++;
-          const n = this.tests.filter((x) => x.kind === a.kind).length + 1;
-          const test = a.kind === 'walk' ? walkTest(this.spec, `walk_${n}`) : danceTest(this.spec, `dance_${n}`);
-          const controller: Controller | undefined = a.kind === 'dance' ? danceController(this.assembly.controller as never, this.params?.dance) : undefined;
-          const result = await runTest(this.assembly, { env: this.spec.environment, test, controller });
-          if (controller) this.assembly = { ...this.assembly, controller };
+          const n = this.tests.filter((x) => x.testId.startsWith(a.test_id)).length + 1;
+          const result = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: `${a.test_id}#${n}` } });
           this.tests.push(result);
-          log(true, `${test.id}: ${result.passed ? 'PASS' : 'FAIL'} — distance ${result.metrics.distance_m} m, tilt ${result.metrics.maxTilt_deg}°${result.failureReasons.length ? ' — ' + result.failureReasons.join('; ') : ''}`);
+          log(true, `${result.testId}: ${result.passed ? 'PASS' : 'FAIL'} — ${Object.entries(result.metrics).filter(([k]) => /distance|revolutions|landing|separation|maxTilt|amplitude/.test(k)).slice(0, 4).map(([k, v]) => `${k}=${v}`).join(', ')}${result.failureReasons.length ? ' — ' + result.failureReasons.join('; ') : ''}`);
           this.events.onTest(result);
-          return { testId: test.id, kind: a.kind, passed: result.passed, metrics: result.metrics, failureReasons: result.failureReasons, engine: result.engine };
+          return { testId: result.testId, kind: result.kind, passed: result.passed, metrics: result.metrics, failureReasons: result.failureReasons, notes: result.notes };
         }
-        case 'sweep_gait': {
-          const a = SweepArgs.parse(rawArgs);
-          if (!this.assembly || !this.params) throw new Error('No assembly yet; call build_walker first');
-          if (this.sweeps >= 3) throw new Error('Sweep budget (3) exhausted');
+        case 'sweep_drive': {
+          const a = SweepArgs.parse(rawArgs); const spec = this.testSpecs.get(a.test_id);
+          if (!spec) throw new Error(`Unknown test "${a.test_id}"`);
+          if (this.sweeps >= 4) throw new Error('Sweep budget (4) exhausted');
           this.sweeps++;
-          const base = this.assembly.controller;
-          if (!base || base.kind !== 'gait') throw new Error('Assembly has no gait controller');
-          const duration = a.duration_s ?? 4;
-          const spec = this.spec;
+          const drive = this.assembly.controller.drives.find((d) => d.controlId === a.controlId);
+          if (!drive) throw new Error(`No drive for controlId "${a.controlId}"`);
           const results: Array<Record<string, number>> = [];
-          for (const hip of a.hipAmplitude_rad) for (const f of a.frequency_hz) for (const knee of a.kneeAmplitude_rad ?? [base.kneeAmplitude_rad]) {
-            const controller = { ...base, hipAmplitude_rad: hip, frequency_hz: f, kneeAmplitude_rad: knee };
-            const r = await runTest(this.assembly, { env: spec.environment, controller, test: { id: 'sweep', kind: 'walk', duration_s: duration, targets: { minDistance_m: spec.targets.walkDistance_m * (duration / spec.targets.duration_s), maxTilt_deg: spec.targets.maxTilt_deg } } });
-            results.push({ hipAmplitude_rad: hip, frequency_hz: f, kneeAmplitude_rad: knee, distance_m: r.metrics.distance_m, projected6s_m: +((r.metrics.distance_m / Math.max(0.5, duration - 0.25)) * (spec.targets.duration_s - 0.25)).toFixed(3), maxTilt_deg: r.metrics.maxTilt_deg, fell: r.metrics.fell, peakHipTorque_Nm: r.metrics.peakHipTorque_Nm, peakKneeTorque_Nm: r.metrics.peakKneeTorque_Nm });
+          for (const v of a.values) {
+            const prof = { ...drive.profile } as Record<string, unknown>; prof[a.field] = v;
+            const ctl = { drives: this.assembly.controller.drives.map((d) => (d.controlId === a.controlId ? { ...d, profile: Drive.shape.profile.parse(prof) } : d)) };
+            const r = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: 'sweep', duration_s: a.duration_s ?? Math.min(4, spec.duration_s) }, controller: ctl });
+            results.push({ [a.field]: v, passed: r.passed ? 1 : 0, ...Object.fromEntries(Object.entries(r.metrics).filter(([k]) => /distance|revolutions|landing|separation|maxTilt|fell|peak|amplitude|clearance/.test(k)).slice(0, 8)) });
           }
-          results.sort((x, y) => (x.fell - y.fell) || (y.distance_m - x.distance_m));
-          const best = results[0];
-          log(true, `${results.length} runs × ${duration} s; best: hip ${best.hipAmplitude_rad} rad @ ${best.frequency_hz} Hz, knee ${best.kneeAmplitude_rad} → ${best.distance_m} m${best.fell ? ' (fell)' : ''}`);
-          return { duration_s: duration, note: 'distance_m is over the sweep duration; projected6s_m scales it to the spec duration. Torque ratings: ' + `hip ${this.assembly.joints.find((j) => j.id.startsWith('hip_'))?.motor?.maxTorque_Nm} N·m, knee ${this.assembly.joints.find((j) => j.id.startsWith('knee_'))?.motor?.maxTorque_Nm} N·m`, results };
+          log(true, `${results.length} runs varying ${a.controlId}.${a.field}`);
+          return { results };
         }
         case 'finalize_design': {
-          const a = FinalizeArgs.parse(rawArgs);
-          this.finalized = a;
+          const a = FinalizeArgs.parse(rawArgs); this.finalized = a;
+          if (a.unverified && this.spec.plan) this.spec = { ...this.spec, plan: { ...this.spec.plan, unverified: a.unverified } };
           log(true, `Finalized (${a.status})`);
           return { ok: true };
         }
-        default:
-          throw new Error(`Unknown tool "${name}"`);
+        default: throw new Error(`Unknown tool "${name}"`);
       }
     } catch (e) {
-      const msg = e instanceof ParamError || e instanceof z.ZodError || e instanceof Error ? (e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : e.message) : String(e);
+      const msg = e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).slice(0, 6).join('; ') : e instanceof AssemblyError ? `${e.opIndex !== undefined ? `op[${e.opIndex}]: ` : ''}${e.message}` : e instanceof ParamError || e instanceof Error ? e.message : String(e);
       log(false, msg);
       return { error: msg };
     }
   }
 }
 
-export { DEFAULT_WALKER, WALKER_PARAM_RANGES, transformPoint };
+export { buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, billOfMaterials };
+export type { WalkerParams };

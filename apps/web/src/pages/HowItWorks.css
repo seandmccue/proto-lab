@@ -1,0 +1,41 @@
+.pipeline-page {
+  max-width: 62rem;
+  padding-block: clamp(2.25rem, 6vw, 5rem) 3rem;
+}
+.pipeline-intro { margin-bottom: clamp(1.75rem, 5vw, 3.5rem); }
+.pipeline-intro h1 {
+  margin: .65rem 0 .85rem;
+  font-size: clamp(2.6rem, 8vw, 5.5rem);
+  font-weight: 800;
+  line-height: .98;
+  letter-spacing: -.07em;
+}
+.pipeline-intro h1 span, .pipeline-step-label { color: var(--violet); }
+.pipeline-intro > p:last-child { max-width: 62ch; color: var(--muted); font-size: 1.05rem; line-height: 1.6; }
+.pipeline-section-label { margin-bottom: .65rem; }
+.pipeline-models { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
+.pipeline-model {
+  padding: clamp(1rem, 3vw, 1.6rem);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+.pipeline-spark { color: white; background: var(--violet); border-color: var(--violet); }
+.pipeline-spark .lab-label { color: var(--citron); }
+.pipeline-wonder { background: var(--lavender); }
+.pipeline-wonder .lab-label { color: var(--violet-dark); }
+.pipeline-model h3 { margin: .45rem 0 .35rem; font-size: clamp(1.35rem, 3vw, 2rem); font-weight: 800; letter-spacing: -.045em; line-height: 1.1; }
+.pipeline-model p:last-child, .pipeline-steps li p:last-child { font-size: .94rem; line-height: 1.55; }
+.pipeline-note, .pipeline-status { margin-top: .75rem; font-size: .85rem; color: var(--muted); }
+.pipeline-status strong { color: var(--ink); margin-right: .35rem; }
+.pipeline-flow { margin-block: clamp(2rem, 5vw, 3.5rem); }
+.pipeline-flow h2 { margin-bottom: .85rem; font-size: clamp(1.65rem, 4vw, 2.5rem); font-weight: 800; letter-spacing: -.055em; }
+.pipeline-steps { overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
+.pipeline-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .9rem; padding: clamp(.95rem, 2.5vw, 1.35rem); }
+.pipeline-steps li + li { border-top: 1px solid var(--line); }
+.pipeline-number { display: grid; place-items: center; width: 2.15rem; height: 2.15rem; border-radius: 50%; color: var(--violet-dark); background: var(--lavender); }
+.pipeline-steps h3 { margin-block: .12rem .25rem; font-size: 1.2rem; font-weight: 800; letter-spacing: -.035em; }
+.pipeline-steps li p:last-child, .pipeline-footer p { color: var(--muted); }
+.pipeline-footer { padding-top: 1.1rem; border-top: 1px solid var(--line); font-size: .88rem; }
+.pipeline-footer > div { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1rem; }
+.pipeline-footer a { min-height: 44px; }
+@media (max-width: 600px) { .pipeline-models { grid-template-columns: 1fr; } }
