@@ -19,8 +19,8 @@ publish and remix. Nothing in the gallery is canned: every card is a real build 
 - *Honest about limits.* Every version lists what the physics cannot verify (lift, airflow, fatigue).
 
 **Numbers (current engine, Meta Model API).** Latest full ten-prompt pass: 10 of 10, median 96 s, 0 API
-errors, no specialist escalation (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker 81 s). Two more full passes went 10 of 10 (median 102 s, then 61 s on the branch
-slated for deployment). Twelve passes in all: 112 of 120 runs, every miss traced to a measurable cause and written into a recipe or an
+errors, no specialist escalation (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker 81 s). Three more full passes went 10 of 10 (median 102 s, then 61 s and 56 s on the branch
+slated for deployment). Thirteen passes in all: 122 of 130 runs, every miss traced to a measurable cause and written into a recipe or an
 engine rule with a locking simulator test. 20-run walker reliability set on
 the same engine: 20 of 20, median 81 s.
 

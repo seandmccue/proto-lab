@@ -27,6 +27,7 @@ const plan = [
   { slide: '09-pass', len: 1.8, narr: '09' },
   { clip: b, from: 64.0, to: 75.0, speed: 'fit:8' },     // dance test runs and passes
   { clip: b, from: 85.5, to: 91.0, speed: 1 },           // tests passed, orbit
+  { slide: '09b-proof', len: 7.8, narr: '12' },
   { slide: '10-print', len: 3.4, narr: '10' },
   { clip: 'workbench', from: 6.0, to: 20.0, speed: 'fit:7', narr: '11' }, // explode, blueprint, tests
   { clip: 'gallery', from: 2.0, to: 14.0, speed: 'fit:4' },

@@ -595,3 +595,28 @@ stack. `bench-results-integration-full`, concurrency 3:
 
 Across twelve full passes: 112 of 120 runs passed. Part of the speed-up is time of day on the Meta
 Model API; the round counts match the previous pass.
+
+
+## Twelfth full pass on the integration branch, all guards (v13, 2026-11-03 21:55 UTC)
+
+`integration/main-into-codex` with main through #146 (motion-test guards, JSON-string arguments,
+grounded-grip message). `bench-results-integration-v13`, concurrency 3:
+
+| Metric | Value |
+| --- | --- |
+| Passed | **10 of 10** (fourth consecutive clean pass) |
+| API/model errors | 0 |
+| Median completion time | **55.7 s** |
+| Specialist escalations | 0 |
+| First-try | 9 of 10 (walker: walk then dance) |
+
+| Prompt | Time | Prompt | Time |
+| --- | --- | --- | --- |
+| windmill | 16 s | catapult | 56 s |
+| ferris | 29 s | muse | 78 s (0.51 m, v2) |
+| crane | 29 s | novel | 78 s (first try; the minRevolutions guard fired once and was answered in the same round) |
+| butterfly | 45 s | claw | 104 s |
+| drawbridge | 54 s | crab | 136 s (first try) |
+
+Across thirteen full passes: 122 of 130 runs passed. The novel gadget, three iterations and 149 s in
+v12, is first-try here: the guard turned a failed test into a rejected definition.
