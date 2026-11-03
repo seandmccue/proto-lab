@@ -52,16 +52,23 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
   };
   // The Meta Model API accepts only tool_choice "auto" (no "required" / named choices); omit anything else.
   if (opts.toolChoice === 'auto') body.tool_choice = 'auto';
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
-    body: JSON.stringify(body),
-    signal: opts.signal,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Meta Model API error from ${cfg.model}: HTTP ${res.status} ${text.slice(0, 400)}`);
+  // Retry transient failures (network errors, 429, 5xx) with backoff; surface everything else verbatim.
+  let res: Response | null = null; let lastErr = '';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      res = await fetch(`${cfg.baseUrl}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` }, body: JSON.stringify(body), signal: opts.signal });
+      if (res.ok) break;
+      const text = await res.text().catch(() => '');
+      lastErr = `Meta Model API error from ${cfg.model}: HTTP ${res.status} ${text.slice(0, 400)}`;
+      if (res.status !== 429 && res.status < 500) throw new Error(lastErr);
+      res = null;
+    } catch (e) {
+      if ((e as Error).message.startsWith('Meta Model API error')) throw e;
+      lastErr = `Meta Model API request failed (${cfg.model}): ${(e as Error).message}`;
+    }
+    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
   }
+  if (!res) throw new Error(`${lastErr} (after 4 attempts)`);
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] } }>; usage?: ChatResult['usage'] };
   const msg = json.choices?.[0]?.message;
   if (!msg) throw new Error('Model returned no choices');

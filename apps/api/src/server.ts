@@ -10,7 +10,7 @@ import { openDb } from './db.ts';
 import { ObjectStore } from './store.ts';
 import { JobRunner } from './jobs.ts';
 import { buildApp } from './routes.ts';
-import { seedFeatured } from './seed.ts';
+import { seedFeatured, requeueInterruptedSeeds } from './seed.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_DIR = resolve(process.env.DATA_DIR ?? './data');
@@ -36,4 +36,5 @@ if (cfg) {
 
 const app = buildApp({ db, store, runner, modelStatus });
 seedFeatured(db, runner);
+requeueInterruptedSeeds(db, runner);
 serve({ fetch: app.fetch, port: PORT }, () => console.log(`[api] ProtoLab API on http://localhost:${PORT} (data: ${DATA_DIR})`));

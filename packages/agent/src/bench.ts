@@ -14,7 +14,19 @@ const outDir = resolve(arg('out', resolve(import.meta.dirname, '../../../bench-r
 const planner = process.argv.includes('--planner');
 mkdirSync(outDir, { recursive: true });
 
-export const PROMPTS = [
+export const GENERAL_PROMPTS = [
+  { id: 'butterfly', prompt: 'Build a mechanical butterfly with large shaped wings that flap on a stand.' },
+  { id: 'ferris', prompt: 'Build a miniature Ferris wheel with eight hanging gondolas that turns steadily on a tower.' },
+  { id: 'muse', prompt: 'Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.' },
+  { id: 'catapult', prompt: 'Build a tabletop catapult that launches a miniature foam pizza about half a metre toward a target.' },
+  { id: 'crab', prompt: 'Build a mechanical crab with six legs that scuttles sideways.' },
+  { id: 'claw', prompt: 'Build a robotic grabbing claw that picks up a small wooden block and holds it.' },
+  { id: 'windmill', prompt: 'Build a windmill with four sails on a tower whose rotor turns.' },
+  { id: 'drawbridge', prompt: 'Build an automated drawbridge whose deck raises and lowers on a hinge with an actuator.' },
+  { id: 'crane', prompt: 'Build a miniature crane with a boom that lifts and lowers a small load.' },
+  { id: 'novel', prompt: 'Build a bird-scaring garden gadget: a spinning pinwheel on a pole with a pendulum that swings below it.' },
+];
+export const PROMPTS = process.argv.includes('--general') ? GENERAL_PROMPTS : [
   { id: 'muse', prompt: 'Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.' },
   { id: 'hexapod', prompt: 'Build a six-legged walking robot that can cover 50 cm in six seconds without tipping.' },
   { id: 'crawler', prompt: 'Design a calm four-legged crawler that walks 25 cm in six seconds with very little body rocking.' },

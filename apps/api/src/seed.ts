@@ -23,3 +23,15 @@ export function seedFeatured(db: DatabaseSync, runner: JobRunner) {
     runner.enqueue(job, inv, { parent: null });
   }
 }
+
+/** Featured items whose build was interrupted (dev restarts, transient API errors) and that have no version yet are rebuilt. */
+export function requeueInterruptedSeeds(db: DatabaseSync, runner: JobRunner) {
+  const rows = db.prepare("SELECT * FROM inventions WHERE owner_id='protolab' AND status='error' AND current_version_id IS NULL").all() as unknown as InventionRow[];
+  for (const inv of rows) {
+    const job: JobRow = { id: newId('job'), invention_id: inv.id, version_id: null, status: 'queued', step: 'Queued', progress_json: '[]', error_code: null, created_at: now(), updated_at: now() };
+    db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(job.id, job.invention_id, null, 'queued', 'Queued', '[]', null, job.created_at, job.updated_at);
+    db.prepare('UPDATE inventions SET status=? WHERE id=?').run('queued', inv.id);
+    runner.enqueue(job, inv, { parent: null });
+  }
+  if (rows.length) console.log(`[seed] re-queued ${rows.length} interrupted featured build(s)`);
+}
