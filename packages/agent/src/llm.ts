@@ -2,7 +2,7 @@
  * Chat client for the Meta Model API (https://api.meta.ai/v1, OpenAI-compatible chat completions
  * with tool calling). Serves Muse Spark / Muse Wonder. Any other OpenAI-compatible endpoint also works.
  */
-export interface ModelConfig { baseUrl: string; model: string; apiKey: string; maxTokens: number }
+export interface ModelConfig { baseUrl: string; model: string; apiKey: string; maxTokens: number; timeoutMs: number }
 
 export const DEFAULT_BASE_URL = 'https://api.meta.ai/v1';
 export const DEFAULT_MODEL = 'muse-spark-1.3';
@@ -15,6 +15,7 @@ export function modelConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ModelC
     baseUrl: ((env.MODEL_API_BASE ?? env.LLM_BASE_URL)?.trim() || DEFAULT_BASE_URL).replace(/\/$/, ''),
     model: (env.MODEL_ID ?? env.LLM_MODEL)?.trim() || DEFAULT_MODEL,
     maxTokens: Number(env.MODEL_MAX_TOKENS ?? 4096),
+    timeoutMs: Number(env.MODEL_TIMEOUT_MS ?? 300_000),
   };
 }
 
@@ -54,9 +55,12 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
   if (opts.toolChoice === 'auto') body.tool_choice = 'auto';
   // Retry transient failures (network errors, 429, 5xx) with backoff; surface everything else verbatim.
   let res: Response | null = null; let lastErr = '';
+  const started = Date.now(); const approxChars = messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
+  if (process.env.MODEL_DEBUG) console.error(`[llm] → ${cfg.model}: ${messages.length} msgs, ~${Math.round(approxChars / 4)} tokens`);
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      res = await fetch(`${cfg.baseUrl}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` }, body: JSON.stringify(body), signal: opts.signal });
+      const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(cfg.timeoutMs)]) : AbortSignal.timeout(cfg.timeoutMs);
+      res = await fetch(`${cfg.baseUrl}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` }, body: JSON.stringify(body), signal });
       if (res.ok) break;
       const text = await res.text().catch(() => '');
       lastErr = `Meta Model API error from ${cfg.model}: HTTP ${res.status} ${text.slice(0, 400)}`;
@@ -64,11 +68,13 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
       res = null;
     } catch (e) {
       if ((e as Error).message.startsWith('Meta Model API error')) throw e;
-      lastErr = `Meta Model API request failed (${cfg.model}): ${(e as Error).message}`;
+      lastErr = `Meta Model API request failed (${cfg.model}): ${(e as Error).name === 'TimeoutError' ? `no response within ${cfg.timeoutMs / 1000} s` : (e as Error).message}`;
+      if ((e as Error).name === 'TimeoutError' && attempt >= 1) break; // one retry for timeouts, not four
     }
     await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
   }
   if (!res) throw new Error(`${lastErr} (after 4 attempts)`);
+  if (process.env.MODEL_DEBUG) console.error(`[llm] ← ${cfg.model} in ${((Date.now() - started) / 1000).toFixed(1)} s`);
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] } }>; usage?: ChatResult['usage'] };
   const msg = json.choices?.[0]?.message;
   if (!msg) throw new Error('Model returned no choices');

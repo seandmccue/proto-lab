@@ -116,7 +116,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   }
 
   // joints
-  interface SimJoint { joint: Joint; raw: RAPIER.ImpulseJoint; b1: RAPIER.RigidBody; b2: RAPIER.RigidBody; axisL1: Vec3; axisWorld: Vec3; restAngle: number; restOffset: Vec3; peak: number; rating: number; satSteps: number; angle: number; lastAngle: number; revs: number; minA: number; maxA: number }
+  interface SimJoint { joint: Joint; raw: RAPIER.ImpulseJoint; b1: RAPIER.RigidBody; b2: RAPIER.RigidBody; axisL1: Vec3; axisWorld: Vec3; restAngle: number; restOffset: Vec3; peak: number; rating: number; satSteps: number; peakRate: number; cycles: number; lastDir: number; angle: number; lastAngle: number; revs: number; minA: number; maxA: number }
   const sims: SimJoint[] = [];
   const rootT = (b: RAPIER.RigidBody): Transform => { const p = b.translation(), r = b.rotation(); return { position: [p.x, p.y, p.z], rotation: [r.x, r.y, r.z, r.w] }; };
   for (const j of assembly.joints) {
@@ -142,7 +142,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (j.motor && (j.type === 'revolute' || j.type === 'prismatic')) {
       const m = raw as RAPIER.RevoluteImpulseJoint; m.configureMotorModel(RAPIER.MotorModel.ForceBased); m.configureMotorPosition(restAngle, j.motor.stiffness, j.motor.damping);
     }
-    sims.push({ joint: j, raw, b1, b2, axisL1, axisWorld, restAngle, restOffset, peak: 0, rating: j.motor?.maxTorque_Nm ?? j.motor?.maxForce_N ?? Infinity, satSteps: 0, angle: restAngle, lastAngle: restAngle, revs: 0, minA: restAngle, maxA: restAngle });
+    sims.push({ joint: j, raw, b1, b2, axisL1, axisWorld, restAngle, restOffset, peak: 0, rating: j.motor?.maxTorque_Nm ?? j.motor?.maxForce_N ?? Infinity, satSteps: 0, peakRate: 0, cycles: 0, lastDir: 0, angle: restAngle, lastAngle: restAngle, revs: 0, minA: restAngle, maxA: restAngle });
     void axisL2;
   }
   // Note: Rapier's JS revolute takes one local axis for both bodies; valid when both bodies share the axis frame at rest (true for our mates).
@@ -184,6 +184,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (s.joint.type === 'revolute') { const qRel = quatMul(quatConj(t1.rotation), t2.rotation); const raw = axisAngle(qRel, s.axisL1); let d = raw - (s.lastAngle - 2 * Math.PI * s.revs); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; angle = s.lastAngle + d; }
       else { const ax = rotate(t1.rotation, s.axisL1); angle = dot(sub(sub(t2.position, t1.position), rotate(t1.rotation, s.restOffset)), ax); }
       const prevAngle = s.angle;
+      if (ct > 0) { const rate = Math.abs(angle - prevAngle) / DT; s.peakRate = Math.max(s.peakRate, rate); const dir = Math.sign(angle - prevAngle); if (dir !== 0 && s.lastDir !== 0 && dir !== s.lastDir && rate > 0.02) s.cycles += 0.5; if (dir !== 0) s.lastDir = dir; }
       s.lastAngle = angle; s.angle = angle; s.revs = Math.floor((angle - s.restAngle) / (2 * Math.PI)); s.minA = Math.min(s.minA, angle); s.maxA = Math.max(s.maxA, angle);
       if (!s.joint.motor) continue;
       const tg = targets?.[s.joint.motor.controlId];
@@ -222,7 +223,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const metrics: Record<string, number> = { duration_s: test.duration_s, energyProxy_J: +energy.toFixed(4) };
   if (baseRb) { const end = rootT(baseRb); metrics.baseDisplacement_m = +len(sub(end.position, start.position)).toFixed(4); metrics.maxTilt_deg = +maxTilt.toFixed(2); metrics.fell = fell ? 1 : 0; metrics.fellAt_s = fellAt; metrics.minBaseHeight_m = +minHeight.toFixed(4); }
   const jointStats = (ids: string[]) => ids.map((id) => ctlJoints.get(id)).filter(Boolean) as SimJoint[];
-  const reportJoint = (s: SimJoint, prefix: string) => { const rev = s.joint.type === 'revolute'; metrics[`${prefix}.amplitude_${rev ? 'rad' : 'm'}`] = +(s.maxA - s.minA).toFixed(4); metrics[`${prefix}.revolutions`] = +((s.maxA - s.minA) / (2 * Math.PI)).toFixed(3); metrics[`${prefix}.peak${rev ? 'Torque_Nm' : 'Force_N'}`] = +s.peak.toFixed(4); metrics[`${prefix}.rating`] = s.rating === Infinity ? 0 : s.rating; };
+  const reportJoint = (s: SimJoint, prefix: string) => { const rev = s.joint.type === 'revolute'; metrics[`${prefix}.amplitude_${rev ? 'rad' : 'm'}`] = +(s.maxA - s.minA).toFixed(4); metrics[`${prefix}.revolutions`] = +((s.maxA - s.minA) / (2 * Math.PI)).toFixed(3); metrics[`${prefix}.peakRate_${rev ? 'rad_s' : 'm_s'}`] = +s.peakRate.toFixed(3); metrics[`${prefix}.cycles_hz`] = +(s.cycles / Math.max(0.1, test.duration_s - settle)).toFixed(2); metrics[`${prefix}.peak${rev ? 'Torque_Nm' : 'Force_N'}`] = +s.peak.toFixed(4); metrics[`${prefix}.rating`] = s.rating === Infinity ? 0 : s.rating; };
   const torqueFail: string[] = []; const activeSteps = Math.max(1, steps - Math.round(settle / DT));
   for (const s of sims) if (s.joint.motor && s.rating !== Infinity && s.peak > s.rating) torqueFail.push(`${s.joint.motor.controlId}: demand ${s.peak.toFixed(3)} > rating ${s.rating} (saturated ${Math.round((100 * s.satSteps) / activeSteps)} % of the time)`);
   const allMotor = sims.filter((s) => s.joint.motor);
@@ -249,7 +250,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const c = test.criteria;
       if (c.minJointAmplitude_rad !== undefined) for (const s of js) if (s.maxA - s.minA < c.minJointAmplitude_rad) failureReasons.push(`${s.joint.motor!.controlId} amplitude ${(s.maxA - s.minA).toFixed(3)} < ${c.minJointAmplitude_rad}`);
       if (c.minRevolutions !== undefined) for (const s of js) if ((s.maxA - s.minA) / (2 * Math.PI) < c.minRevolutions) failureReasons.push(`${s.joint.motor!.controlId} turned ${((s.maxA - s.minA) / (2 * Math.PI)).toFixed(2)} rev < ${c.minRevolutions}`);
-      if (c.minJointRate_rad_s !== undefined) for (const s of js) { const rate = (s.maxA - s.minA) / Math.max(0.1, test.duration_s - settle); metrics[`${s.joint.motor!.controlId}.meanRate_rad_s`] = +rate.toFixed(3); if (rate < c.minJointRate_rad_s) failureReasons.push(`${s.joint.motor!.controlId} mean rate ${rate.toFixed(2)} rad/s < ${c.minJointRate_rad_s}`); }
+      if (c.minJointRate_rad_s !== undefined) for (const s of js) if (s.peakRate < c.minJointRate_rad_s) failureReasons.push(`${s.joint.motor!.controlId} peak rate ${s.peakRate.toFixed(2)} rad/s < ${c.minJointRate_rad_s}`);
       if (baseRb && c.maxBaseTilt_deg !== undefined && maxTilt > c.maxBaseTilt_deg) failureReasons.push(`Base tilt ${metrics.maxTilt_deg}° exceeds ${c.maxBaseTilt_deg}°`);
       if (baseRb && c.maxBaseDrift_m !== undefined && metrics.baseDisplacement_m > c.maxBaseDrift_m) failureReasons.push(`Base drifted ${metrics.baseDisplacement_m} m > ${c.maxBaseDrift_m} m`);
       if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);

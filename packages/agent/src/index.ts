@@ -102,7 +102,14 @@ Rules of thumb:
 - Motors: servos (position drives, rad) for oscillation and holding; gearmotors (velocity drives, rad/s) for continuous rotation; linear actuators / pistons (position drives, m). Keep demand under the rating (metrics report it; saturation is applied physically).
 - Tests must be meaningful for the invention: a wheel must turn N revolutions without gondolas hitting the tower (clearancePairs), a wing must reach its stroke amplitude and rate with the body stable, a catapult must land the projectile near the target, a gripper must hold its payload after the support is removed, a walker must travel the distance upright.
 - Honesty: if a requested behaviour cannot be verified (flight, lift, airflow, water), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
-- Be economical: one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- Be economical: search results already include connector ids/axes, so avoid get_part lookups unless you need geometry; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
+
+Worked recipes (adapt, do not copy blindly):
+• 2-DOF leg on a chassis side connector hip_L0 (axis +Z): mount hip servo {onto:"body",connector:"hip_L0",via:"mount",joint:"fixed"}; upper leg {onto:"hip_servo_L0",connector:"horn",via:"pivot",joint:"revolute",spin_deg:17,motor:{controlId:"hip_L0",stiffness:5,damping:0.2}}; knee servo {onto:"upper_leg_L0",connector:"tip_side",via:"mount",joint:"fixed"}; lower leg {onto:"knee_servo_L0",connector:"horn",via:"pivot",joint:"revolute",spin_deg:-12,motor:{controlId:"knee_L0",...}}; foot {onto:"lower_leg_L0",connector:"tip",via:"mount",joint:"fixed"}. Right-side legs use the hip_R* connectors (axis −Z) and the opposite sign of spin and drive amplitudes. Place the chassis so feet touch y = 0 (inspect_assembly reports lowestPoint_m; move everything up by its negative). Gait drives: hips {kind:"gait",role:"swing",amplitude:±0.4,frequency_hz:1,phase,swingDuty:0.2}, knees {kind:"gait",role:"lift",amplitude:∓0.3,...}; crawl phases 0, π/2, π, 3π/2 in the order left-front, left-rear, right-front, right-rear.
+• Flapping wing: mount a wing {via:"root", joint:"revolute", motor} onto a body connector whose axis is the hinge axis (wing root hinge is about X: the wing spans +X from the root; a body connector with axis ±Z makes the wing lie flat and flap up/down about the Z... choose the connector axis = desired hinge axis). Drive with sine, amplitude 0.5–1.0 rad, 1–3 Hz, same phase for both wings.
+• Wheel on a tower: place tower anchored at the origin; mount the spoked wheel {onto:"tower",connector:"axle",via:"hub",joint:"revolute",motor:{controlId:"spin",stiffness:0.5,damping:0.2}}; gondolas {onto:"wheel",connector:"rim_0",via:"hanger",joint:"revolute"} then {op:"pattern",instances:["cab"],kind:"polar",axis:"z",center:[0,<axle height>,0],count:8}; drive spin with {mode:"velocity", profile:{kind:"constant", value:1.5}, rampIn_s:1}; test motion with minRevolutions and clearancePairs gondola↔tower.
+• Catapult: anchored base plate; servo on the plate; arm (leg_segment via pivot, spin_deg ≈ 195 so it stands up leaning back) with a tray on its tip; projectile placed free on the tray; drive {kind:"step", before:0, after:-1.4, at_s:0.5}; launch test on the projectile.
 ${parent ? `\nThis is a remix of an existing design. Its assembly summary: ${JSON.stringify({ family: parent.assembly.family, instances: parent.assembly.instances.length, parts: parent.assembly.parts.map((p) => p.id), drives: parent.assembly.controller.drives.length })}. Previous tests: ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, passed: t.passed, metrics: t.metrics })))}. Rebuild it with ops, apply the change request, keep what worked.` : ''}`;
 }
 
@@ -133,7 +140,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
       const result = await rt.call(call.function.name, args);
-      messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 7000) });
+      messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 5000) });
       if (rt.finalized) break;
     }
     if (specialistRoundsLeft > 0) {
