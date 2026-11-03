@@ -15,6 +15,7 @@ A student robotics club should be able to find out why a mechanism tips or jams 
 - **One request, two measured outcomes.** “Give it four wings like a dragonfly.” The first test detected contact between the right forewing and hind wing. Muse Spark cited the contact, remounted the rear wings farther back, and reran the test. The revised rig flapped at 2 Hz with zero detected wing contacts and peak motor demand of 0.126 N·m against a 0.2 N·m rating.
 - **A robot that learns a longer walk.** The saved walker’s first passing walk covered 30.75 cm. A follow-up asked for at least 45 cm in six seconds. It measured 42.97 cm on the first attempt and 47.15 cm after revision. The separate saved dance test passed at 2.4° maximum tilt.
 - **A real model handoff.** After three failed tests on the saved crab, Muse Wonder cited problems with foot placement and the previous gait, then restored a uniform leg pose and wave gait. The crab went from 0.27 cm and 14.28° tilt to 31.73 cm and 4.72° on the next test. The activity record identifies the model behind each version.
+- **Three pistons from one shaft.** The triplex pump met its original stroke test, but its piston peaks were unevenly spaced. Muse rotated one crank disc. The gaps tightened from 102.2°–137.6° to 119.4°–120.3°, with each piston still traveling more than 40 mm. Scrub the paired replays to see the measured change.
 
 ## How it works
 
@@ -26,6 +27,8 @@ The v10 general mechanism benchmark recorded ten passes across ten briefs and no
 
 - Live app · https://protolab.sean-abc.workers.dev
 - Crab side-by-side replay · https://protolab.sean-abc.workers.dev/i/inv_633b4887ad7f4cdc?replay=1&compare=1
+- Triplex pump side-by-side replay · https://protolab.sean-abc.workers.dev/i/inv_c618332e234d447d?replay=1&compare=1
+- Drawing remix side-by-side replay · https://protolab.sean-abc.workers.dev/i/inv_76b7fae5bdf941c9?replay=1&compare=1
 - Gravity Clock · https://protolab.sean-abc.workers.dev/i/inv_a1f1665e649b41c2
 - Cargo Crane · https://protolab.sean-abc.workers.dev/i/inv_0868f2ea889f4bcc
 - Robot repair replay · https://protolab.sean-abc.workers.dev/i/inv_bb9d5f8a170d4d95?replay=1
