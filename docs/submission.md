@@ -29,6 +29,7 @@ The v10 general mechanism benchmark recorded ten passes across ten briefs and no
 - Dragonfly replay · https://protolab.sean-abc.workers.dev/i/inv_fd8fcc242ed8497f?replay=1
 - Judge video · https://protolab.sean-abc.workers.dev/judge-demo.mp4
 - Public source repository · https://github.com/seandmccue/proto-lab
+- Deployed release branch · https://github.com/seandmccue/proto-lab/tree/codex/protolab-hackathon
 - Evidence · [benchmark](benchmark-general.md) and [demo walkthrough](demo-script.md).
 
 The signed-in Cerebral Valley form shows Indie Developer, Push the Frontier, Public GitHub

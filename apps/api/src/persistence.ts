@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,11 +39,18 @@ export class CloudCheckpoint {
       }
       const archive = join(temp, archiveName);
       await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), createWriteStream(archive));
+      if ((await stat(archive)).size !== bytes) throw new Error('Cloudflare checkpoint download was incomplete.');
       await tar('tar', ['-xzf', archive, '-C', temp, databaseName, 'store']);
       const restored = new DatabaseSync(join(temp, databaseName), { readOnly: true });
       try {
         const result = restored.prepare('PRAGMA quick_check').get();
         if (result?.quick_check !== 'ok') throw new Error('Cloudflare checkpoint SQLite integrity check failed.');
+        const manifests = restored.prepare('SELECT manifest_key FROM versions').all();
+        for (const { manifest_key: key } of manifests) {
+          if (typeof key !== 'string' || !/^versions\/[a-z0-9_-]+\.json$/i.test(key) || !existsSync(join(temp, 'store', key))) {
+            throw new Error('Cloudflare checkpoint is missing a saved version manifest.');
+          }
+        }
       } finally {
         restored.close();
       }
