@@ -119,3 +119,12 @@ test('a first batch that mounts onto an unplaced "body" gets the chassis placed 
   // ambiguous connectors (top exists on many parts) are not guessed
   assert.throws(() => applyOps(emptyAssembly(), [{ op: 'mount', id: 'x', part: 'beam-100', onto: 'base', connector: 'top', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 }], getPart, undefined, catalog), /Unknown instance "base"/);
 });
+
+test('an unplaced "base" that only plates can be is auto-placed as the largest plate', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'mount', id: 'servo', part: 'servo-high-torque-35', onto: 'base', connector: 'top_back', via: 'bottom', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+  ], getPart, undefined, catalog);
+  const base = r.assembly.instances.find((x) => x.id === 'base');
+  assert.ok(base && base.anchored, 'base placed and anchored');
+  assert.equal(base!.partId, 'base-plate-300x200');
+});

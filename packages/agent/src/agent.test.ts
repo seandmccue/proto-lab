@@ -66,3 +66,14 @@ test('set_drives infers a missing profile kind from the fields present', async (
   assert.ok(!r2.error, r2.error);
   assert.equal(rt.assembly.controller.drives[0].profile.kind, 'constant');
 });
+
+test('assemble infers a missing "op" from the fields present', async () => {
+  const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  const r = await rt.call('assemble', { rationale: 'tower + rotor', ops: [
+    { id: 'tower', part: 'tower-500', position: [0, 0, 0], anchored: true },
+    { id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'shaft', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ] }) as { error?: string };
+  assert.ok(!r.error, r.error);
+  assert.equal(rt.assembly.instances.length, 2);
+  assert.equal(rt.assembly.joints[0].type, 'revolute');
+});

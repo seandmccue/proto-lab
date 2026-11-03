@@ -110,7 +110,12 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
       // One match: take it. A few matches (e.g. hex vs octo chassis both carry hip_R2): take the smallest part that fits,
       // unless two are equally small. Many matches (generic connectors like "top"): do not guess.
       let best: PartDefinition | null = null;
+      const baseLike = /base|stand|ground|floor|pedestal|foot/i.test(id);
       if (cands.length === 1) best = cands[0];
+      else if (baseLike && cands.length > 1 && cands.every((p) => p.category === 'plates')) { // a "base" that only plates can be: the smallest purpose-made base plate, else the largest plate
+        const bases = cands.filter((p) => /^base-/.test(p.id)).sort((x, y) => x.dimensions_m[0] * x.dimensions_m[2] - y.dimensions_m[0] * y.dimensions_m[2]);
+        best = bases[0] ?? [...cands].sort((x, y) => y.dimensions_m[0] * y.dimensions_m[2] - x.dimensions_m[0] * x.dimensions_m[2])[0];
+      }
       else if (cands.length > 1 && cands.length <= 6) { const sorted = [...cands].sort((x, y) => x.connectors.length - y.connectors.length || x.mass_kg - y.mass_kg); if (sorted[0].connectors.length < sorted[1].connectors.length) best = sorted[0]; }
       if (!best) continue;
       const anchored = /base|stand|ground|floor|plate|pedestal|tower/i.test(id) || best.category === 'plates';
