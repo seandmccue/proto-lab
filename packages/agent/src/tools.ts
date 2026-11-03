@@ -78,6 +78,10 @@ function describeReceived(args: unknown, path: (string | number)[]): string {
 function normaliseDrive(d: unknown): unknown {
   if (!d || typeof d !== 'object') return d;
   const o = { ...(d as Record<string, unknown>) };
+  // Infer a missing profile kind from the fields present (the model often omits it): role/swingDuty → gait, from/to → ramp, before/after → step, amplitude → sine, value → constant.
+  const inferKind = (x: Record<string, unknown>) => { if (typeof x.kind === 'string') return; if ('role' in x || 'swingDuty' in x) x.kind = 'gait'; else if ('from' in x && 'to' in x) x.kind = 'ramp'; else if ('before' in x && 'after' in x) x.kind = 'step'; else if ('amplitude' in x) x.kind = 'sine'; else if ('value' in x) x.kind = 'constant'; };
+  if (!o.profile) inferKind(o);
+  if (o.profile && typeof o.profile === 'object') inferKind(o.profile as Record<string, unknown>);
   if (!o.profile && typeof o.kind === 'string') { const profile: Record<string, unknown> = {}; for (const k of ['kind', 'value', 'amplitude', 'offset', 'frequency_hz', 'phase', 'from', 'to', 'start_s', 'duration_s', 'before', 'after', 'at_s', 'role', 'swingDuty']) if (k in o) { profile[k] = o[k]; delete o[k]; } o.profile = profile; }
   if (o.profile && typeof o.profile === 'object') { const p = o.profile as Record<string, unknown>; if (p.kind === 'gait' && !p.role) p.role = /knee|lift/i.test(String(o.controlId)) ? 'lift' : 'swing'; if (p.kind === 'sine' && p.frequency_hz === undefined && typeof p.frequency === 'number') { p.frequency_hz = p.frequency; delete p.frequency; } }
   if (o.mode === undefined) o.mode = 'position';
