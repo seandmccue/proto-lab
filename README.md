@@ -77,6 +77,8 @@ needs a little more engineering. Bringing in Muse Wonder to help." Muse Wonder 1
 transcript, diagnoses the mechanical problem, applies one targeted change and runs a test, then
 Spark resumes. The handoff is shown in the activity log and every version records which model made
 its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_SPECIALIST_AFTER`.
+Every build also has a wall-clock budget (`AGENT_TIME_BUDGET_S`, default 20 min): when it runs out the model
+is asked to finalize honestly with the best result so far, so no build runs open-ended.
 
 ## Generalization benchmark
 
