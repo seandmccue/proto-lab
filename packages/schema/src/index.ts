@@ -107,12 +107,18 @@ export const GaitController = z.object({
   kneeOffset_rad: z.number().default(0),
   phases: z.record(z.number()),     // controlId -> phase (rad)
   kneeLag_rad: z.number().default(Math.PI / 2),
+  swingDuty: z.number().min(0.1).max(0.5).default(0.22), // fraction of the cycle a leg spends in the air
+  rampIn_s: z.number().min(0).default(0.6),           // amplitude ramp after the controller starts
+  gaitType: z.enum(['crawl', 'trot', 'tripod']).default('crawl'),
 });
 export const DanceController = z.object({
   kind: z.literal('dance'),
   frequency_hz: z.number().positive(),
   bobAmplitude_rad: z.number(),
   swayAmplitude_rad: z.number(),
+  hipOffset_rad: z.number().default(0),
+  kneeOffset_rad: z.number().default(0),
+  rampIn_s: z.number().min(0).default(0.4),
   phases: z.record(z.number()),
 });
 export const Controller = z.discriminatedUnion('kind', [GaitController, DanceController]);
