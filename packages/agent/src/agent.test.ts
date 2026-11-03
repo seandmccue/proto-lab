@@ -16,6 +16,26 @@ test('part events distinguish planned catalog candidates from what the build act
   assert.equal(logs[2].parts, undefined);
 });
 
+test('inspect_assembly reports selected connectors in the assembled world pose', async () => {
+  const rt = new ToolRuntime(baseSpec('Radial linkage'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'Place two links', ops: [
+    { op: 'place', id: 'link', part: 'beam-50', position: [0.1, 0.2, 0.3], rotation_deg: [0, 0, 90] },
+    { op: 'place', id: 'base', part: 'beam-50', position: [0, 0.1, 0] },
+  ] });
+
+  const basic = await rt.call('inspect_assembly', {}) as object;
+  assert.ok(!('connectorPoses' in basic));
+  const selected = await rt.call('inspect_assembly', { instance_ids: ['link', 'link'] }) as {
+    connectorPoses: { instance: string; connectors: { id: string; position_m: number[]; axis_world: number[] }[] }[];
+  };
+  assert.deepEqual(selected.connectorPoses.map(({ instance }) => instance), ['link']);
+  const end = selected.connectorPoses[0].connectors.find(({ id }) => id === 'end_b');
+  assert.deepEqual(end?.position_m, [0.1, 0.225, 0.3]);
+  assert.deepEqual(end?.axis_world.map((axis) => axis || 0), [0, 1, 0]);
+  const missing = await rt.call('inspect_assembly', { instance_ids: ['missing'] }) as { error: string };
+  assert.match(missing.error, /Unknown instance id "missing"/);
+});
+
 test('deterministic planner builds a walker from generic ops, tests and revises honestly', async () => {
   const events: AgentEvent[] = []; let n = 0;
   const out = await runAgent({ prompt: 'Design a small walking robot inspired by my Muse character, test its walking, then make it dance.', inventionId: 'inv_test', model: null, newVersionId: () => `v${++n}` }, (e) => events.push(e));
