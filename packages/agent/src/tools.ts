@@ -121,6 +121,7 @@ export class ToolRuntime {
     try {
       switch (name) {
         case 'write_plan': {
+          { const r = rawArgs as Record<string, unknown>; if (Array.isArray(r.purpose)) r.purpose = r.purpose.map(String).join(' '); for (const k of ['features', 'motions', 'successCriteria', 'unverified', 'assumptions']) if (typeof r[k] === 'string') r[k] = [r[k]]; }
           const a = PlanArgs.parse(rawArgs);
           const plan = Plan.parse({ purpose: a.purpose, features: a.features, motions: a.motions, subassemblies: a.subassemblies, successCriteria: a.successCriteria, unverified: a.unverified });
           this.spec = { ...this.spec, plan, assumptions: a.assumptions ?? this.spec.assumptions, constraints: { ...this.spec.constraints, maxMass_kg: a.maxMass_kg ?? this.spec.constraints.maxMass_kg } };
