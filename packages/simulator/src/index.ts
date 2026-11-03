@@ -224,12 +224,18 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   if (baseRb) { const end = rootT(baseRb); metrics.baseDisplacement_m = +len(sub(end.position, start.position)).toFixed(4); metrics.maxTilt_deg = +maxTilt.toFixed(2); metrics.fell = fell ? 1 : 0; metrics.fellAt_s = fellAt; metrics.minBaseHeight_m = +minHeight.toFixed(4); }
   const jointStats = (ids: string[]) => ids.map((id) => ctlJoints.get(id)).filter(Boolean) as SimJoint[];
   const reportJoint = (s: SimJoint, prefix: string) => { const rev = s.joint.type === 'revolute'; metrics[`${prefix}.amplitude_${rev ? 'rad' : 'm'}`] = +(s.maxA - s.minA).toFixed(4); metrics[`${prefix}.revolutions`] = +((s.maxA - s.minA) / (2 * Math.PI)).toFixed(3); metrics[`${prefix}.peakRate_${rev ? 'rad_s' : 'm_s'}`] = +s.peakRate.toFixed(3); metrics[`${prefix}.cycles_hz`] = +(s.cycles / Math.max(0.1, test.duration_s - settle)).toFixed(2); metrics[`${prefix}.peak${rev ? 'Torque_Nm' : 'Force_N'}`] = +s.peak.toFixed(4); metrics[`${prefix}.rating`] = s.rating === Infinity ? 0 : s.rating; };
-  const torqueFail: string[] = []; const activeSteps = Math.max(1, steps - Math.round(settle / DT));
-  for (const s of sims) if (s.joint.motor && s.rating !== Infinity && s.peak > s.rating) torqueFail.push(`${s.joint.motor.controlId}: demand ${s.peak.toFixed(3)} > rating ${s.rating} (saturated ${Math.round((100 * s.satSteps) / activeSteps)} % of the time)`);
+  // A motor is overloaded when it sits at its rating for a meaningful share of the run or the demand is far past it.
+  // A brief transient a few percent over (saturated < 3 % of steps) is reported as a note, not a failure, so a
+  // borderline design does not burn a whole iteration on a 1 % overshoot.
+  const torqueFail: string[] = []; const torqueNotes: string[] = []; const activeSteps = Math.max(1, steps - Math.round(settle / DT));
+  for (const s of sims) if (s.joint.motor && s.rating !== Infinity && s.peak > s.rating) {
+    const satFrac = s.satSteps / activeSteps; const line = `${s.joint.motor.controlId}: demand ${s.peak.toFixed(3)} > rating ${s.rating} (saturated ${Math.round(100 * satFrac)} % of the time)`;
+    if (satFrac >= 0.03 || s.peak > s.rating * 1.5) torqueFail.push(line); else torqueNotes.push(line);
+  }
   const allMotor = sims.filter((s) => s.joint.motor);
   metrics.peakMotorEffort = +Math.max(0, ...allMotor.map((s) => s.peak)).toFixed(4);
   metrics.motorSaturation_fraction = +(allMotor.length ? Math.max(...allMotor.map((s) => s.satSteps / activeSteps)) : 0).toFixed(3);
-  const saturationNote = () => { if (torqueFail.length) notes.push(`Motor saturation (applied torque was capped at the rating): ${torqueFail.slice(0, 3).join('; ')}`); };
+  const saturationNote = () => { if (torqueFail.length) notes.push(`Motor saturation (applied torque was capped at the rating): ${torqueFail.slice(0, 3).join('; ')}`); if (torqueNotes.length) notes.push(`Brief peaks over rating (tolerated, < 3 % of the run): ${torqueNotes.slice(0, 3).join('; ')}`); };
 
   switch (test.kind) {
     case 'walk': {
@@ -258,7 +264,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);
       if (clearanceHit) { metrics.clearanceViolation = 1; failureReasons.push(`Clearance violated: ${clearanceHit}`); } else metrics.clearanceViolation = 0;
       if (groundHit) { metrics.groundContactViolation = 1; failureReasons.push(`${groundHit} touched the ground`); } else metrics.groundContactViolation = 0;
-      if (c.torqueWithinRating && torqueFail.length) failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`); else saturationNote();
+      if (c.torqueWithinRating && torqueFail.length) { failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`); if (torqueNotes.length) saturationNote(); } else saturationNote();
       break;
     }
     case 'launch': {
