@@ -233,10 +233,18 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   return app;
 }
 
-function titleFromPrompt(p: string) {
-  const words = p.replace(/[^\w\s-]/g, '').split(/\s+/).filter(Boolean);
-  const t = words.slice(0, 6).join(' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
+/** "Build a desk toy: a pendulum on a stand that swings…" → "Desk toy: pendulum on a stand". Drops the verb and
+ *  articles, stops at the first clause break, keeps at most seven words. */
+export function titleFromPrompt(p: string) {
+  let t = p.trim().replace(/^(please\s+)?(build|design|make|create|invent|construct|prototype|engineer|i want|i need|can you (build|make|design))\s+(me\s+)?(a|an|the)?\s*/i, '');
+  t = t.replace(/\s+(that|which|whose|so that|where)\b.*$/i, '').replace(/[.!?]+$/, '');
+  const [head, tail] = t.split(/:\s*/, 2);
+  const clean = (x: string) => x.replace(/[^\w\s-]/g, '').replace(/^(a|an|the)\s+/i, '').split(/\s+/).filter(Boolean);
+  let words = clean(head);
+  if (tail) { const tw = clean(tail).slice(0, Math.max(2, 7 - words.length - 1)); if (tw.length) words = [...words, ':', ...tw]; }
+  const out = words.slice(0, 8).join(' ').replace(/\s+:\s+/, ': ').replace(/\s+(with|and|on|in|for|to|of|at|by)$/i, '');
+  const title = out.charAt(0).toUpperCase() + out.slice(1);
+  return title.length >= 3 ? title : p.slice(0, 40);
 }
 
 export { modelConfigFromEnv };

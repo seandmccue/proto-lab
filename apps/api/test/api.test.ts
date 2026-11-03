@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { titleFromPrompt } from '../src/routes.ts';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,4 +54,11 @@ test('API golden path with the deterministic planner', async () => {
   assert.ok(rv.length >= 1, 'remix produced a version');
   const rver = await j(`/api/inventions/${(remix.body as { inventionId: string }).inventionId}/versions/${rv[rv.length - 1].id}?trace=0`, { headers: { ...H, 'x-session-id': 'other' } });
   assert.equal((rver.body.version as { assembly: { familyConfig: { legCount: number } } }).assembly.familyConfig.legCount, 6);
+});
+
+test('titleFromPrompt drops the verb and stops at the first clause', () => {
+  assert.equal(titleFromPrompt('Build a desk toy: a pendulum on a stand that swings and taps a small bell at each end of its swing.'), 'Desk toy: pendulum on a stand');
+  assert.equal(titleFromPrompt('Build a mechanical butterfly with large shaped wings that flap on a stand.'), 'Mechanical butterfly with large shaped wings');
+  assert.equal(titleFromPrompt('Design a small walking robot inspired by my Muse character. Build it from mechanical components, test its balance and walking, then make it dance.'), 'Small walking robot inspired by my Muse character');
+  assert.equal(titleFromPrompt('Build a miniature Ferris wheel with eight hanging gondolas that turns steadily on a tower.'), 'Miniature Ferris wheel with eight hanging gondolas');
 });

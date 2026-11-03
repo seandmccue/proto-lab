@@ -99,7 +99,11 @@ export function applyOps(input: Assembly, ops: AssemblyOp[], resolve: PartResolv
     if (!p) { p = resolve(id); if (!p) throw new AssemblyError(`Unknown part "${id}"`, i); if (p.decorative) throw new AssemblyError(`Part "${id}" is decorative (no mechanical properties); it can be mounted with joint "fixed" onto structure but cannot carry joints or loads`, i); partById.set(id, p); a.parts.push(p); }
     return p;
   };
-  const inst = (id: string, i: number) => { const x = a.instances.find((y) => y.id === id); if (!x) throw new AssemblyError(`Unknown instance "${id}"`, i); return x; };
+  const inst = (id: string, i: number) => {
+    const x = a.instances.find((y) => y.id === id);
+    if (!x) throw new AssemblyError(`Unknown instance "${id}". ${a.instances.length ? `Existing instances: ${a.instances.slice(0, 12).map((y) => y.id).join(', ')}${a.instances.length > 12 ? ', …' : ''}.` : 'Nothing has been placed yet.'} Place it first in this batch ({op:"place", id:"${id}", part:<part id>, position:[x,y,z], anchored?}) before mounting onto it.`, i);
+    return x;
+  };
   const unique = (id: string, i: number) => { if (a.instances.some((x) => x.id === id)) throw new AssemblyError(`Instance id "${id}" already exists`, i); if (!/^[a-zA-Z][\w-]{0,40}$/.test(id)) throw new AssemblyError(`Instance id "${id}" must be alphanumeric/underscore, ≤ 40 chars`, i); };
 
   ops.forEach((op, i) => {
