@@ -200,3 +200,15 @@ test('a sine drive whose offset starts away from the assembled pose is blended i
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics['lift.peakTorque_Nm'] < 3, `peak ${r.metrics['lift.peakTorque_Nm']}`);
 });
+
+test('a rotor mounted flush on a tower axle spins clear: bearing contact is not a clearance violation', async () => {
+  for (const [tower, rotor] of [['tower-500', 'windmill-4x600'], ['tower-150', 'propeller-3x200']] as const) {
+    const r0 = applyOps(emptyAssembly(), [
+      { op: 'place', id: 'tower', part: tower, position: [0, 0, 0], anchored: true },
+      { op: 'mount', id: 'rotor', part: rotor, onto: 'tower', connector: 'axle', via: 'shaft', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+    ], getPart);
+    const a = setDrives(r0.assembly, [{ controlId: 'spin', mode: 'velocity', rampIn_s: 1, profile: { kind: 'constant', value: 2.5 } }]);
+    const r = await runTest(a, { env, test: { kind: 'motion', id: 's', duration_s: 6, measure: { joints: ['spin'], base: 'tower', clearancePairs: [['rotor', 'tower']], noGroundContact: ['rotor'] }, criteria: { minRevolutions: 1.5, torqueWithinRating: true } } });
+    assert.ok(r.passed, `${tower}+${rotor}: ` + r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  }
+});
