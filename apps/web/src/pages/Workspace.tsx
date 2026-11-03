@@ -5,7 +5,7 @@ import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
-import BuildProgress, { BuildStrip, IterationRibbon, SimulationStatus, keyMetric } from '../components/BuildProgress.tsx';
+import BuildProgress, { BuildStrip, IterationRibbon, SimulationStatus, keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
 import { api, fmt, type InventionDetail, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
 import './Workspace.css';
 
@@ -165,7 +165,7 @@ export default function Workspace() {
   const [sourceVersion, setSourceVersion] = useState<VersionRecord | null>(null);
   const [localRevision, setLocalRevision] = useState<{ jobId: string; versionId: string; changeRequest: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean } | null>(null);
+  const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean; error?: string } | null>(null);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
   const [stageMode, setStageMode] = useState(replayLink);
   const captureRef = useRef<(() => string | null) | null>(null);
@@ -372,6 +372,40 @@ export default function Workspace() {
   const target = story[0]?.label === 'Before revision' ? walkTargets(story[0].test) : null;
   const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
   const vmeta = detail?.versions.find((v) => v.id === versionId);
+  const testDefinition = test ? recordedTestSpec(test.testId, [version, prevVersion]) : undefined;
+  const revisionDecision = version?.decisions.slice().reverse().find((decision) =>
+    decision.source === 'model' && (decision.previousTestId || decision.basedOn));
+  const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
+  const finalEvent = finalVersion && detail?.latestJob?.versionId === finalVersion.id
+    ? [...events].reverse().find((event) => event.type === 'done' && event.status === 'passed')
+    : undefined;
+  const finalSummary = (typeof finalEvent?.summary === 'string' ? finalEvent.summary : inv?.description?.trim()) || finalVersion?.spec.plan?.purpose;
+
+
+  const askForExplanation = async (target: VersionRecord) => {
+    setExplain({ vid: target.id, text: '', modelId: '', loading: true });
+    try {
+      const result = await api.explain(target.inventionId, target.id);
+      setExplain((current) => current?.vid === target.id ? { vid: target.id, ...result } : current);
+    } catch (error) {
+      setExplain((current) => current?.vid === target.id ? { vid: target.id, text: '', modelId: '', error: (error as Error).message } : current);
+    }
+  };
+
+  const renderExplanation = (target: VersionRecord) => {
+    const explanation = explain?.vid === target.id ? explain : null;
+    if (explanation?.text) {
+      return <div className="workbench-explanation-muse"><p>{explanation.text}</p><small>Explained by {explanation.modelId} from the recorded design and tests.</small></div>;
+    }
+    return (
+      <>
+        {explanation?.error && <p role="alert">{explanation.error}</p>}
+        <button type="button" className="btn-secondary" disabled={explanation?.loading} onClick={() => void askForExplanation(target)}>
+          {explanation?.loading ? 'Asking Muse…' : explanation?.error ? 'Retry explanation' : 'Ask Muse for more detail'}
+        </button>
+      </>
+    );
+  };
 
   if (missing) {
     return (
@@ -437,6 +471,7 @@ export default function Workspace() {
               </div>
             )}
             {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
+            {finalVersion && <a href="#prototype-explanation" className="btn-ghost">How it works ↓</a>}
             {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
@@ -469,7 +504,7 @@ export default function Workspace() {
               {storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
             </div>
           )}
-          <SimulationStatus events={events} running={running} replay={!showLive && version && test ? { iteration: version.iteration, test, playing } : null} />
+          <SimulationStatus events={events} running={running} replay={!showLive && version && test ? { iteration: version.iteration, test, playing, definition: testDefinition, adjustment: revisionDecision?.summary } : null} />
           <div className="workbench-stage">
             {showLive && live ? (
               <>
@@ -512,6 +547,19 @@ export default function Workspace() {
               {!showLive && (comparing ? <span className="workbench-view-hint">Same camera for both tests</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
+          {finalVersion && (
+            <section id="prototype-explanation" className="workbench-explanation" aria-label="How the final prototype works">
+              <div className="workbench-explanation-heading">
+                <span className="workbench-label">Passed design · v{finalVersion.iteration}</span>
+                <h3>How it works</h3>
+              </div>
+              <p>{finalSummary || `This design uses ${finalVersion.assembly.instances.length} components and ${finalVersion.assembly.controller.drives.length} programmed drives.`}</p>
+              {!!finalVersion.spec.plan?.motions.length && (
+                <ul aria-label="Planned motions">{finalVersion.spec.plan.motions.slice(0, 4).map((motion, i) => <li key={i}>{motion}</li>)}</ul>
+              )}
+              {renderExplanation(finalVersion)}
+            </section>
+          )}
         </section>
 
         <aside className="workbench-panel workbench-agent" data-active={mobilePane === 'agent'} aria-label="Engineering agent">
@@ -524,15 +572,7 @@ export default function Workspace() {
             {tab === 'tests' && (
               <div className="overflow-auto p-3 space-y-3">
                 {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} · engine: {version?.tests[0]?.engine}</p>}
-                {version && !running && (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
-                    {explain?.vid === version.id && !explain.loading ? (
-                      <><p className="text-slate-800 whitespace-pre-wrap">{explain.text}</p><p className="mt-1 text-[10px] text-slate-400">Explained by {explain.modelId} from this version's recorded decisions and measurements.</p></>
-                    ) : (
-                      <button className="btn-secondary !px-3 !py-1 !text-xs" disabled={explain?.loading} onClick={async () => { setExplain({ vid: version.id, text: '', modelId: '', loading: true }); try { const r = await api.explain(id, version.id); setExplain({ vid: version.id, ...r }); } catch (e) { setExplain({ vid: version.id, text: (e as Error).message, modelId: '' }); } }}>{explain?.loading ? 'Asking Muse…' : 'Ask Muse to explain this design'}</button>
-                    )}
-                  </div>
-                )}
+                {version && !running && !finalVersion && <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">{renderExplanation(version)}</div>}
                 {detail && detail.versions.length > 1 && (
                   <div className="rounded-md border border-slate-200 p-2 text-xs">
                     <div className="panel-title mb-1">Iterations</div>

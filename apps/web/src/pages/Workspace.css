@@ -412,3 +412,30 @@ li[data-state='active'] .build-progress-dot { background: var(--violet, #6d28d9)
 .iteration-chip.is-fail .iteration-chip-mark { color: #d97706; }
 .iteration-chip-metric { color: #64748b; font-weight: 500; }
 @media (prefers-reduced-motion: reduce) { .simulation-status-signal::after { animation: none; } }
+
+
+.simulation-evidence {
+  display: grid;
+  gap: .4rem;
+  padding: .58rem .8rem;
+  border-inline-start: .27rem solid #49802d;
+  border-bottom: 1px solid #d2dfc3;
+  background: #f0f7e7;
+  color: #263c1d;
+}
+.simulation-evidence[data-outcome='fail'] { border-color: #be742a; border-bottom-color: #ead4b8; background: #fff2e3; color: #532e0b; }
+.simulation-evidence h3 { font-size: .9rem; font-weight: 760; }
+.simulation-evidence p, .simulation-evidence li { font-size: .79rem; line-height: 1.45; overflow-wrap: anywhere; }
+.simulation-evidence ul { list-style: disc; padding-left: 1.1rem; max-height: 6rem; overflow-y: auto; }
+.simulation-evidence dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .35rem; }
+.simulation-evidence dl div { padding: .32rem .45rem; border: 1px solid currentColor; border-radius: .35rem; background: #ffffffb5; }
+.simulation-evidence dt, .simulation-evidence-target { font-size: .68rem; }
+.simulation-evidence dd:not(.simulation-evidence-target) { font-size: .88rem; font-weight: 740; font-variant-numeric: tabular-nums; }
+
+.workbench-explanation { scroll-margin-top: 8rem; display: grid; gap: .65rem; padding: .9rem 1rem; border-top: 1px solid var(--bench-line); background: #f7f4fc; color: var(--bench-ink); }
+.workbench-explanation h3 { font-size: 1.25rem; font-weight: 780; letter-spacing: -.025em; }
+.workbench-explanation p, .workbench-explanation li { font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
+.workbench-explanation ul { list-style: disc; padding-left: 1.1rem; }
+.workbench-explanation .btn-secondary { justify-self: start; }
+.workbench-explanation-muse { display: grid; gap: .25rem; white-space: pre-wrap; }
+.workbench-explanation-muse small { color: var(--bench-muted); }

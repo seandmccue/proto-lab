@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Spec } from '@protolab/schema';
+import type { Spec, TestSpec, VersionRecord } from '@protolab/schema';
 import { STAGES, stageOf, useElapsed } from './ActivityPanel.tsx';
 import PartsBin, { pickedParts } from './PartsBin.tsx';
 import { fmt, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
@@ -68,10 +68,47 @@ function latestPhysicsEvent(events: JobEvent[]) {
     (event.type === 'tool' && event.tool === 'run_test' && event.ok === false));
 }
 
+export function recordedTestSpec(testId: string, versions: (VersionRecord | null)[]): TestSpec | undefined {
+  const id = testId.replace(/#\d+$/, '');
+  for (const version of versions) {
+    const entry = version?.toolLog.slice().reverse().find((log) =>
+      log.ok && log.tool === 'define_test' && (log.args as { test?: TestSpec } | null)?.test?.id === id);
+    if (entry) return (entry.args as { test: TestSpec }).test;
+  }
+}
+
+function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
+  const items: { label: string; value: string; target?: string }[] = [];
+  const distance = (v: number) => fmt.cm(v);
+  const angle = (v: number) => fmt.deg(v);
+  const revolutions = (v: number) => `${v.toFixed(2)} rev`;
+  const add = (label: string, value: number | undefined, format: (v: number) => string, limit?: number, atLeast = false) => {
+    if (value === undefined) return;
+    items.push({ label, value: format(value), target: limit === undefined ? undefined : `${atLeast ? 'Minimum' : 'Maximum'} ${format(limit)}` });
+  };
+  const motion = definition?.kind === 'motion' ? definition.criteria : undefined;
+  const walk = definition?.kind === 'walk' ? definition : undefined;
+  add('Distance travelled', walk && !walk.signed && metrics.distance_m !== undefined ? Math.abs(metrics.distance_m) : metrics.distance_m, distance, walk?.minDistance_m, true);
+  add('Peak tilt', metrics.distance_m !== undefined ? metrics.maxTilt_deg : undefined, angle, walk?.maxTilt_deg);
+  add('Payload lift', metrics.payloadLift_m, distance, motion?.minPayloadLift_m, true);
+  add('Furthest from holder', metrics.payloadSeparation_m, distance, motion?.maxPayloadSeparation_m ?? (definition?.kind === 'grip' ? definition.maxSeparation_m : undefined));
+  add('Return error', metrics.payloadReturnError_m, (v) => `${(v * 1000).toFixed(1)} mm`, motion?.maxPayloadReturnError_m);
+  add('Landing distance', metrics.landingDistance_m, distance);
+  add('Peak tracked-part tilt', metrics.maxInstanceTilt_deg, angle, motion?.maxInstanceTilt_deg);
+  const rotation = Object.entries(metrics).find(([name, value]) => name.endsWith('.revolutions') && value >= .5);
+  const swing = Object.entries(metrics).find(([name]) => name.endsWith('.amplitude_rad'));
+  if (rotation) add('Rotation', rotation[1], revolutions, motion?.minRevolutions, true);
+  else if (swing && items.length === 0) add('Joint swing', swing[1], (v) => angle(v * 180 / Math.PI), motion?.minJointAmplitude_rad, true);
+  if (definition?.kind === 'motion' && definition.measure?.clearancePairs?.length && metrics.clearanceViolation === 0) {
+    items.push({ label: 'Checked parts', value: 'No contact detected' });
+  }
+  return items.slice(0, 4);
+}
+
 export function SimulationStatus({ events, running, replay }: {
   events: JobEvent[];
   running: boolean;
-  replay: { iteration: number; test: TestSummary; playing: boolean } | null;
+  replay: { iteration: number; test: TestSummary; playing: boolean; definition?: TestSpec; adjustment?: string } | null;
 }) {
   const event = running ? latestPhysicsEvent(events) : undefined;
   const live = event?.type === 'test_start';
@@ -83,6 +120,14 @@ export function SimulationStatus({ events, running, replay }: {
   const metrics = result ? result.metrics as TestSummary['metrics'] | undefined : replay?.test.metrics;
   const passed = result ? result.passed === true : replay?.test.passed;
   const metric = !live && !assembly && metrics ? keyMetric({ metrics }) : '';
+  const previous = live || assembly ? [...events].reverse().find((item) => item.type === 'test') : undefined;
+  const recorded = result ?? previous;
+  const matchesReplay = !recorded || (Number(recorded.iteration) === replay?.iteration && recorded.testId === replay.test.testId);
+  const reasons = recorded ? (Array.isArray(recorded.failureReasons) ? recorded.failureReasons.map(String) : []) : replay?.test.failureReasons ?? [];
+  const evidenceMetrics = recorded ? recorded.metrics as TestSummary['metrics'] | undefined : metrics;
+  const evidence = evidenceMetrics ? testEvidence(evidenceMetrics, matchesReplay ? replay?.definition : undefined) : [];
+  const evidencePassed = recorded ? recorded.passed === true : passed;
+  const adjustment = matchesReplay ? replay?.adjustment : undefined;
   const mode = live ? 'live' : assembly ? 'assembly' : passed ? 'pass' : 'fail';
   const title = live ? 'Simulation running'
     : result ? passed ? 'Simulation passed' : 'Simulation failed'
@@ -93,13 +138,27 @@ export function SimulationStatus({ events, running, replay }: {
     : [result ? 'Test complete' : passed ? 'Saved test passed' : 'Saved test failed', metric].filter(Boolean).join(' · ');
 
   return (
-    <div className="simulation-status" data-mode={mode} role="status">
-      <span className="simulation-status-version">v{iteration}</span>
-      <div className="simulation-status-copy">
-        <strong>{title}</strong>
-        <span>{detail}</span>
+    <div role="status">
+      <div className="simulation-status" data-mode={mode}>
+        <span className="simulation-status-version">v{iteration}</span>
+        <div className="simulation-status-copy">
+          <strong>{title}</strong>
+          <span>{detail}</span>
+        </div>
+        {live && <span className="simulation-status-signal" aria-hidden="true" />}
       </div>
-      {live && <span className="simulation-status-signal" aria-hidden="true" />}
+      {(previous || (!live && !assembly)) && (
+        <div className="simulation-evidence" data-outcome={evidencePassed ? 'pass' : 'fail'}>
+          {previous && <span className="workbench-label">Previous result · v{Number(previous.iteration)}</span>}
+          <h3>{evidencePassed ? 'What the test verified' : 'Why this test failed'}</h3>
+          {evidencePassed && evidence.length === 0 && <p>The simulation met its recorded criteria.</p>}
+          {!evidencePassed && (reasons.length ? <ul>{reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : <p>The saved test did not meet its criteria.</p>)}
+          {evidence.length > 0 && <dl>{evidence.map((item) => (
+            <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd>{item.target && <dd className="simulation-evidence-target">{item.target}</dd>}</div>
+          ))}</dl>}
+          {adjustment && <p><strong>Muse’s recorded change</strong> {adjustment}</p>}
+        </div>
+      )}
     </div>
   );
 }
