@@ -139,3 +139,18 @@ auto-place, batch reorder). `bench-results-walkers-v3`:
 
 Crawler and sprinter passed first-try every time; the hexapod's 50 cm target and the dance follow-ups
 are where revisions and the three Wonder consults happened, all of which ended in a pass.
+
+### Pet and Muse re-run with the dance-criteria floor (2026-11-03 15:58 UTC, 4 runs)
+
+Every pet run above failed its first dance on self-set limits the recipe never meets. The recipe now
+quotes the measured figures (about 8° tilt and under 3 cm drift with 12 mm feet, 11° and 11 cm with
+24 mm feet) and `define_test` rejects tighter limits on a legged machine. `bench-results-dance-floor`:
+
+| Prompt | Set above | Re-run |
+| --- | --- | --- |
+| pet #1 | 128 s median, 4.3 iterations | **passed, 78 s, 2 iterations** (walk 0.55 m, dance first try at 12.4°) |
+| pet #2 | | **passed, 74 s, 2 iterations** |
+| muse #1 | 101 s median, 2.0 iterations | **passed, 65 s, 2 iterations** (0.51 m, dance 8.0°) |
+| muse #2 | | **passed, 113 s, 2 iterations** |
+
+The floor never had to fire: with the measured figures in the recipe the model chose 12–15° and 0.15 m itself.
