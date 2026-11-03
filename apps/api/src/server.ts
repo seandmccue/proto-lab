@@ -26,6 +26,12 @@ await initSimulator();
 const db = openDb(DATA_DIR);
 const store = new ObjectStore(resolve(DATA_DIR, 'store'));
 const persist = checkpoint ? () => checkpoint.save(db) : undefined;
+// Curate the existing public Gravity Clock without changing its ownership or saved versions.
+const gravityClock = db.prepare(
+  "UPDATE inventions SET featured=1 WHERE id=? AND visibility='public' AND status='passed' AND current_version_id IS NOT NULL AND featured=0",
+).run('inv_a1f1665e649b41c2');
+if (gravityClock.changes) await persist?.();
+
 const runner = new JobRunner(db, store, { persist });
 // Requeue anything that was running when the process last stopped.
 db.prepare('UPDATE jobs SET status=\'error\', step=\'Interrupted by restart\', error_code=\'interrupted\' WHERE status IN (\'queued\',\'running\')').run();
