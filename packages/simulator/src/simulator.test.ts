@@ -168,3 +168,20 @@ test('grip test fails honestly when the payload lands on the floor', async () =>
   assert.ok(!r.passed && r.failureReasons[0].includes('fell to the ground'), r.failureReasons.join('; '));
   assert.equal(r.metrics.payloadGrounded, 1);
 });
+
+test('catapult range is set by arm length: a 140 mm arm on the 8 N·m servo lands the pizza near 0.6 m (recipe numbers)', async () => {
+  const arm = generatePart('leg_segment', { length: 0.14 }, 'arm-140');
+  const resolve = (id: string) => (id === arm.id ? arm : getPart(id));
+  const r0 = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'base', part: 'base-plate-300x200', position: [0, 0.005, 0], anchored: true },
+    { op: 'mount', id: 'servo', part: 'servo-giant-8', onto: 'base', connector: 'top_back', via: 'bottom', joint: 'fixed', spin_deg: 0, offset_m: 0.03 },
+    { op: 'mount', id: 'arm', part: arm.id, onto: 'servo', connector: 'horn', via: 'pivot', joint: 'revolute', spin_deg: 195, offset_m: 0, motor: { controlId: 'throw', stiffness: 30, damping: 0.5 } },
+    { op: 'mount', id: 'tray', part: 'tray-45', onto: 'arm', connector: 'tip', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+  ], resolve);
+  const tray = r0.assembly.instances.find((i) => i.id === 'tray')!;
+  const r1 = applyOps(r0.assembly, [{ op: 'place', id: 'pizza', part: 'foam-pizza-80', position: [tray.transform.position[0], tray.transform.position[1] + 0.03, tray.transform.position[2]], free: true }], resolve);
+  const a = setDrives(r1.assembly, [{ controlId: 'throw', mode: 'position', rampIn_s: 0, profile: { kind: 'step', before: 0, after: -1.4, at_s: 0.5 } }]);
+  const r = await runTest(a, { env, test: { kind: 'launch', id: 'l', duration_s: 5, projectile: 'pizza', targetDistance_m: 0.6, tolerance_m: 0.15, direction: 'x' } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.ok(r.metrics.landingDistance_m > 0.45 && r.metrics.landingDistance_m < 0.75, `landed ${r.metrics.landingDistance_m}`);
+});
