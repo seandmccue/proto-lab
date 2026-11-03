@@ -422,3 +422,9 @@ fixed it; mounts now accept `joint: "free"` to set a payload down on a connector
 (PR #95). The crab set itself a 6° tilt limit and spent nine tests chasing it at 6.6–7.8°; the rules now
 say to leave room in test criteria (10–12° for a legged machine with a shell) and the trails show the
 gains and duty each build used (PR #96).
+
+### Crab re-run with the test-criteria guidance (v9b, 2026-11-03 11:51 UTC)
+
+| Prompt | v9 | Re-run | Note |
+| --- | --- | --- | --- |
+| crab | failed, 9 tests chasing a self-set 6° limit | **passed, first test, 205 s, 0.37 m at 3.5° tilt** | gait from the recipe (±0.4 rad, 1 Hz, swingDuty 0.3), now visible in the trail |
