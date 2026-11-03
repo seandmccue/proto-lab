@@ -13,7 +13,7 @@ const steps = [
   { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
   { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
 ];
-const referenceIds = ['inv_drawing_automaton', 'inv_triplex_pump', 'inv_twin_drawbridge'];
+const referenceIds = ['inv_drawing_automaton', 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift'];
 
 export default function Home() {
   const nav = useNavigate();

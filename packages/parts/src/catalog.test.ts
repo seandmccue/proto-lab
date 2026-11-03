@@ -52,6 +52,24 @@ test('drive discs, clevises, and bell cranks expose usable pivots in both catalo
   assert.ok(drivePoint.every((coordinate, axis) => Math.abs(coordinate - linkPoint[axis]) < 1e-9));
 });
 
+test('pillow blocks and adjustable linkage plates mount shafts and selectable passive pivots', () => {
+  const { assembly } = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'frame', part: 'plate-120x80', position: [0, 0.02, 0], anchored: true },
+    { op: 'mount', id: 'bearing', part: 'pillow-block-8', onto: 'frame', connector: 'top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'axle', part: 'shaft-8x200', onto: 'bearing', connector: 'bore_front', via: 'end_a', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+    { op: 'place', id: 'lever', part: 'adjustable-link-60', position: [0.2, 0.1, 0], anchored: true },
+    { op: 'mount', id: 'near_link', part: 'link-40', onto: 'lever', connector: 'pin_4', via: 'pivot_a_back', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'far_link', part: 'link-40', onto: 'lever', connector: 'pin_5', via: 'pivot_a_back', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+  ], getPart);
+  const [baseJoint, shaftJoint, nearJoint, farJoint] = assembly.joints;
+  assert.equal(baseJoint.type, 'fixed');
+  assert.equal(shaftJoint.type, 'revolute');
+  assert.deepEqual(shaftJoint.axis, [0, 0, 1]);
+  assert.deepEqual(nearJoint.axis, [0, 0, 1]);
+  assert.deepEqual(farJoint.axis, [0, 0, 1]);
+  assert.ok(Math.abs(farJoint.anchor![0] - nearJoint.anchor![0] - 0.015) < 1e-9, 'selecting a new pin changes the lever arm');
+});
+
 test('mount places the child so connectors coincide and face each other', () => {
   const beam = getPart('beam-100')!, servo = getPart('servo-mg996r')!;
   const r = applyOps(emptyAssembly(), [

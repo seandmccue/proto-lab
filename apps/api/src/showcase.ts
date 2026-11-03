@@ -4,6 +4,7 @@ import { runTest } from '@protolab/simulator';
 import { buildTriplexPump, measureTriplexPump, triplexPumpTest } from '@protolab/simulator/triplex-pump';
 import { buildTwinDrawbridge, measureTwinDrawbridge, twinDrawbridgeTest } from '@protolab/simulator/twin-drawbridge';
 import { buildDrawingAutomaton, measureDrawingAutomaton, drawingAutomatonTest } from '@protolab/simulator/drawing-automaton';
+import { buildScissorLift, scissorLiftTest } from '@protolab/simulator/scissor-lift';
 import { DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { now, versionSummary } from './jobs.ts';
 import type { ObjectStore } from './store.ts';
@@ -88,9 +89,34 @@ const drawing: Reference = {
   testSummary: 'Measure the powered crank and passive marker travel on both axes',
 };
 
+const scissorLift: Reference = {
+  id: 'inv_scissor_lift',
+  versionId: 'ver_scissor_lift_1',
+  title: 'Scissor lift · horizontal drive, vertical lift',
+  description: 'One horizontal actuator drives crossed links to raise a level platform. The replay measures the vertical travel and shows the return to the starting height.',
+  prompt: 'Build a scissor lift that raises a level platform using one horizontal actuator.',
+  plan: {
+    purpose: 'Show how crossed links turn horizontal actuator motion into vertical lift.',
+    features: ['Horizontal actuator', 'Crossed scissor arms', 'Platform with a passive slider'],
+    motions: ['The actuator draws the lower pivots together. The arms pivot around their center and lift the platform, then lower it as the actuator retracts.'],
+    subassemblies: ['Actuator and lower carriage', 'Crossed linkage and platform'],
+    successCriteria: ['At least 45 mm of platform travel', 'Platform stays within 2° of level', 'Platform returns within 2 mm of its starting height'],
+    unverified: ['Load rating, stability under external loads, and fabrication tolerances'],
+  },
+  build: buildScissorLift,
+  test: scissorLiftTest,
+  verify: ({ trace }) => {
+    const start = trace.frames[0]?.bodies.platform?.position[1];
+    const end = trace.frames.at(-1)?.bodies.platform?.position[1];
+    return start !== undefined && end !== undefined && Math.abs(end - start) <= 0.002;
+  },
+  decision: 'Put a passive slide at one upper pivot so the arms can fold while keeping the platform level.',
+  testSummary: 'Measure platform travel, tilt, and clearance',
+};
+
 /** Save verified reference mechanisms once, with their real simulation traces. */
 export async function seedReferenceShowcases(db: DatabaseSync, store: ObjectStore, persist?: () => Promise<void>) {
-  for (const reference of [pump, drawbridge, drawing]) {
+  for (const reference of [pump, drawbridge, drawing, scissorLift]) {
     try {
       await saveReference(reference, db, store, persist);
     } catch (error) {

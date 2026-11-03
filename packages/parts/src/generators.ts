@@ -83,6 +83,41 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const r = (p.module * p.teeth) / 2; const g = [piece({ kind: 'extrude', profile: profiles.gear(Math.round(p.teeth), p.module), depth: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.brass)]; return finish({ id, kind: 'gear', name: `Gear ${Math.round(p.teeth)}T m${(p.module * 1000).toFixed(1)}`, category: 'gears', description: `${Math.round(p.teeth)}-tooth spur gear, pitch Ø${mm(r * 2)} mm.`, params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [r * 2, r * 2, p.thickness], material: 'steel', geometry: g, connectors: [fx('bore', [0, 0, 0], [0, 0, 1], 'revolute'), fx('hub', [0, 0, -p.thickness / 2], [0, 0, -1], 'fixed', 'press onto a shaft hub'), fx('face', [0, 0, p.thickness / 2], [0, 0, 1])], cost_usd: 2 + p.teeth * 0.05 }); } },
   bearing: { kind: 'bearing', name: 'Ball bearing', category: 'bearings', description: 'Radial bearing: outer race fixed (outer), inner race revolute (inner, Z).', params: { outerRadius: { min: 0.004, max: 0.05, default: 0.011, unit: 'm', description: 'Outer radius' }, width: { min: 0.002, max: 0.02, default: 0.007, unit: 'm', description: 'Width' } },
     generate: (p, id) => { const g = [piece({ kind: 'revolve', profile: profiles.rim(p.outerRadius, p.outerRadius * 0.45, p.width), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'bearing', name: `Bearing Ø${mm(p.outerRadius * 2)} mm`, category: 'bearings', description: 'Shielded radial bearing.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.outerRadius * 2, p.outerRadius * 2, p.width], material: 'steel', geometry: g, connectors: [fx('outer', [0, p.outerRadius, 0], [0, 1, 0]), fx('housing', [0, 0, -p.width / 2], [0, 0, -1]), fx('inner', [0, 0, p.width / 2], [0, 0, 1], 'revolute')], limits: { maxLoad_N: 400 }, cost_usd: 1.5 }); } },
+  pillow_block: {
+    kind: 'pillow_block', name: 'Pillow block bearing', category: 'bearings',
+    description: 'Supports a horizontal rotating shaft. Fix "mount" to a frame and connect a shaft end to "bore_front" or "bore_back" with a revolute joint about Z.',
+    params: {
+      bore: { min: 0.004, max: 0.02, default: 0.008, unit: 'm', description: 'Shaft diameter' },
+      depth: { min: 0.006, max: 0.035, default: 0.012, unit: 'm', description: 'Bearing depth along Z' },
+    },
+    generate: (p, id) => {
+      const boreRadius = p.bore / 2;
+      const raceRadius = boreRadius + 0.003;
+      const housingRadius = raceRadius + 0.003;
+      const baseWidth = housingRadius * 3.2;
+      const baseDepth = p.depth * 1.25;
+      const baseThickness = 0.004;
+      const boreDepth = p.depth + 0.001;
+      const geometry = [
+        piece({ kind: 'box', size: [baseWidth, baseThickness, baseDepth] }, [0, -housingRadius - baseThickness / 2, 0], COLORS.steel),
+        piece({ kind: 'box', size: [housingRadius * 1.6, housingRadius * 0.5, p.depth] }, [0, -housingRadius * 0.75, 0], COLORS.steel),
+        piece({ kind: 'revolve', profile: profiles.rim(housingRadius, raceRadius, p.depth), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.steel),
+        piece({ kind: 'revolve', profile: profiles.rim(raceRadius, boreRadius, boreDepth), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.brass),
+      ];
+      return finish({
+        id, kind: 'pillow_block', name: `Pillow block bearing Ø${mm(p.bore)} mm`, category: 'bearings',
+        description: 'Base-mounted bearing support for a shaft, axle, or rotating transmission.',
+        params: p, geometry, material: 'steel', mass_kg: vol(geometry) * DENSITY.steel,
+        dimensions_m: [baseWidth, 2 * housingRadius + baseThickness, Math.max(baseDepth, boreDepth)],
+        connectors: [
+          fx('mount', [0, -housingRadius - baseThickness, 0], [0, -1, 0]),
+          fx('bore_front', [0, 0, boreDepth / 2], [0, 0, 1], 'revolute'),
+          fx('bore_back', [0, 0, -boreDepth / 2], [0, 0, -1], 'revolute'),
+        ],
+        cost_usd: 4,
+      });
+    },
+  },
   wheel: { kind: 'wheel', name: 'Wheel', category: 'wheels', description: 'Rubber-tyred wheel; hub is revolute about Z.', params: { radius: { min: 0.01, max: 0.3, default: 0.03, unit: 'm', description: 'Radius' }, width: { min: 0.004, max: 0.08, default: 0.012, unit: 'm', description: 'Width' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.width, axis: 'z' }, [0, 0, 0], COLORS.rubber, 'contact'), piece({ kind: 'cylinder', radius: p.radius * 0.6, height: p.width * 1.05, axis: 'z' }, [0, 0, 0], COLORS.aluminium, 'decor', QUAT_ID, { collide: false })]; return finish({ id, kind: 'wheel', name: `Wheel Ø${mm(p.radius * 2)} mm`, category: 'wheels', description: 'Rubber-tyred wheel.', params: p, mass_kg: Math.PI * p.radius ** 2 * p.width * DENSITY.rubber * 0.6, dimensions_m: [p.radius * 2, p.radius * 2, p.width], material: 'rubber / nylon', geometry: g, connectors: [fx('hub', [0, 0, 0], [0, 0, 1], 'revolute'), fx('hub_fixed', [0, 0, -p.width / 2], [0, 0, -1])], cost_usd: 2 }); } },
   big_wheel: { kind: 'big_wheel', name: 'Spoked wheel', category: 'wheels', description: 'Large spoked wheel (Ferris wheel / waterwheel): hub revolute about Z; N rim mounts "rim_{i}" (axis Z, for gondolas or sails) and "spoke_tip_{i}" (radial).', params: { radius: { min: 0.05, max: 0.7, default: 0.25, unit: 'm', description: 'Radius' }, spokes: { min: 3, max: 16, default: 8, unit: '', description: 'Spokes / rim mounts' }, spokeWidth: { min: 0.003, max: 0.03, default: 0.008, unit: 'm', description: 'Spoke section' } },
@@ -102,6 +137,38 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.size, p.size * 0.5, p.size * 1.2] }, [0, 0, 0], COLORS.aluminium)]; return finish({ id, kind: 'carriage', name: `Carriage ${mm(p.size)} mm`, category: 'sliders', description: 'Aluminium carriage block.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.size, p.size * 0.5, p.size * 1.2], material: 'aluminium', geometry: g, connectors: [fx('rail_face', [-p.size / 2, 0, 0], [-1, 0, 0], 'prismatic'), fx('top', [0, p.size * 0.25, 0], [0, 1, 0]), fx('front', [p.size / 2, 0, 0], [1, 0, 0])], cost_usd: 3 }); } },
   link: { kind: 'link', name: 'Linkage bar', category: 'linkages', description: 'Flat link with revolute pivots at both ends (Z axis) and a fixed mid mount; length is pivot-to-pivot along X.', params: { length: { min: 0.01, max: 0.6, default: 0.06, unit: 'm', description: 'Pivot spacing' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Width (Y)' }, thickness: { min: 0.002, max: 0.02, default: 0.004, unit: 'm', description: 'Thickness (Z)' } },
     generate: (p, id) => { const g = [piece({ kind: 'extrude', profile: profiles.roundedRect(p.length + p.width, p.width, p.width / 2), depth: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.titanium)]; return finish({ id, kind: 'link', name: `Link ${mm(p.length)} mm`, category: 'linkages', description: 'Aluminium linkage bar.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.length + p.width, p.width, p.thickness], material: 'aluminium', geometry: g, connectors: [fx('pivot_a', [-p.length / 2, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('pivot_b', [p.length / 2, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('pivot_a_back', [-p.length / 2, 0, -p.thickness / 2], [0, 0, -1], 'revolute'), fx('pivot_b_back', [p.length / 2, 0, -p.thickness / 2], [0, 0, -1], 'revolute'), fx('mid', [0, p.width / 2, 0], [0, 1, 0])], cost_usd: 1.2 }); } },
+  adjustable_link: {
+    kind: 'adjustable_link', name: 'Adjustable linkage plate', category: 'linkages',
+    description: 'Five selectable pin holes for changing lever arms or linking several outputs. Holes are numbered from 1 to 5 along +X. Each "pin_n" faces +Z and has a matching "pin_n_back".',
+    params: {
+      span: { min: 0.04, max: 0.25, default: 0.06, unit: 'm', description: 'Distance between outermost pins' },
+      thickness: { min: 0.002, max: 0.016, default: 0.004, unit: 'm', description: 'Plate thickness along Z' },
+    },
+    generate: (p, id) => {
+      const pitch = p.span / 4;
+      const outerRadius = Math.min(pitch * 0.4, 0.012);
+      const holeRadius = outerRadius * 0.45;
+      const geometry: GeometryPiece[] = [];
+      const connectors: Connector[] = [];
+      for (let i = 0; i < 5; i++) {
+        const x = (i - 2) * pitch;
+        geometry.push(piece({ kind: 'revolve', profile: profiles.rim(outerRadius, holeRadius, p.thickness), axis: 'z', segments: 24 }, [x, 0, 0], COLORS.aluminium));
+        if (i < 4) {
+          geometry.push(piece({ kind: 'box', size: [pitch - outerRadius, outerRadius, p.thickness] }, [x + pitch / 2, 0, 0], COLORS.aluminium));
+        }
+        connectors.push(
+          fx(`pin_${i + 1}`, [x, 0, p.thickness / 2], [0, 0, 1], 'revolute'),
+          fx(`pin_${i + 1}_back`, [x, 0, -p.thickness / 2], [0, 0, -1], 'revolute'),
+        );
+      }
+      return finish({
+        id, kind: 'adjustable_link', name: `Adjustable linkage plate ${mm(p.span)} mm`, category: 'linkages',
+        description: `Five evenly spaced pivots at ${mm(pitch)} mm pitch for adjusting stroke or leverage.`,
+        params: p, geometry, material: 'aluminium', mass_kg: vol(geometry) * DENSITY.aluminium,
+        dimensions_m: [p.span + 2 * outerRadius, 2 * outerRadius, p.thickness], connectors, cost_usd: 3,
+      });
+    },
+  },
   leg_segment: { kind: 'leg_segment', name: 'Leg segment', category: 'legs', description: 'Leg bar: revolute pivot at the top (Z axis), fixed tip at the bottom (−Y). Length runs down −Y from the pivot.', params: { length: { min: 0.01, max: 0.4, default: 0.06, unit: 'm', description: 'Pivot-to-tip' }, width: { min: 0.003, max: 0.04, default: 0.012, unit: 'm', description: 'Bar width (X)' }, thickness: { min: 0.002, max: 0.02, default: 0.004, unit: 'm', description: 'Thickness (Z)' } },
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.width, p.length, p.thickness] }, [0, -p.length / 2, 0], COLORS.titanium), piece({ kind: 'cylinder', radius: p.width * 0.7, height: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'leg_segment', name: `Leg bar ${mm(p.length)} mm`, category: 'legs', description: 'Aluminium leg bar.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.width, p.length, p.thickness], material: 'aluminium', geometry: g, connectors: [fx('pivot', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'top pivot; mount onto a servo horn'), fx('pivot_front', [0, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('tip', [0, -p.length, 0], [0, -1, 0]), fx('tip_side', [0, -p.length + p.width / 2, p.thickness / 2], [0, 0, 1])], cost_usd: 1.2 }); } },
   crank: { kind: 'crank', name: 'Crank arm', category: 'cranks', description: 'Crank: "shaft" bore (revolute Z) at origin and "pin" (revolute Z) at radius `throw` along +X for a connecting rod.', params: { throw: { min: 0.005, max: 0.3, default: 0.03, unit: 'm', description: 'Crank radius' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Arm width' }, thickness: { min: 0.002, max: 0.02, default: 0.005, unit: 'm', description: 'Thickness' } },
