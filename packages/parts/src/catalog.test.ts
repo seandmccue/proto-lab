@@ -86,3 +86,19 @@ test('butterfly: catalog wings mount on the winged body, span outward, forewings
   // both joints run along the body axis (±X) and carry the body's torque rating
   for (const j of r.assembly.joints) { assert.ok(Math.abs(Math.abs(j.axis![0]) - 1) < 1e-9, `axis ${j.axis}`); assert.equal(j.motor?.maxTorque_Nm, body.limits.maxTorque_Nm); }
 });
+
+test('move carries everything mounted on the moved instance and shifts joint anchors', () => {
+  const r0 = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'base', part: 'base-plate-300x200', position: [0, 0.005, 0], anchored: true },
+    { op: 'mount', id: 'servo', part: 'servo-mg996r', onto: 'base', connector: 'top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'arm', part: 'leg-bar-100', onto: 'servo', connector: 'horn', via: 'pivot', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'swing', stiffness: 5, damping: 0.2 } },
+  ], getPart);
+  const before = Object.fromEntries(r0.assembly.instances.map((x) => [x.id, [...x.transform.position]]));
+  const anchorBefore = [...r0.assembly.joints.find((j) => j.id === 'j_arm')!.anchor!];
+  const r = applyOps(r0.assembly, [{ op: 'move', id: 'base', translate: [0, 0.1, 0], withAttached: true }], getPart);
+  for (const x of r.assembly.instances) assert.ok(Math.abs(x.transform.position[1] - before[x.id][1] - 0.1) < 1e-9, `${x.id} should move up 0.1 m`);
+  assert.ok(Math.abs(r.assembly.joints.find((j) => j.id === 'j_arm')!.anchor![1] - anchorBefore[1] - 0.1) < 1e-9, 'joint anchor follows');
+  assert.ok(r.summary[0].includes('+2 attached'), r.summary[0]);
+  const solo = applyOps(r0.assembly, [{ op: 'move', id: 'base', translate: [0, 0.1, 0], withAttached: false }], getPart);
+  assert.ok(Math.abs(solo.assembly.instances.find((x) => x.id === 'arm')!.transform.position[1] - before.arm[1]) < 1e-9, 'withAttached:false moves only the base');
+});
