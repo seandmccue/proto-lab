@@ -15,7 +15,7 @@ export interface SimEnvironment { gravity_m_s2: number; groundFriction: number }
 export function driveValue(p: DriveProfile, t: number, ramp: number): number {
   switch (p.kind) {
     case 'constant': return ramp * p.value;
-    case 'sine': return p.offset + ramp * p.amplitude * Math.sin(2 * Math.PI * p.frequency_hz * t + p.phase);
+    case 'sine': return ramp * (p.offset + p.amplitude * Math.sin(2 * Math.PI * p.frequency_hz * t + p.phase)); // the ramp blends the whole target from the assembled pose, so an offset cannot slam the joint at t = 0
     case 'ramp': { const u = Math.max(0, Math.min(1, (t - p.start_s) / p.duration_s)); return p.from + (p.to - p.from) * u; }
     case 'step': return t < p.at_s ? p.before : p.after;
     case 'gait': {
