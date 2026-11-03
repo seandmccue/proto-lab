@@ -130,7 +130,7 @@ export default function Workspace() {
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
         if (j.status === 'queued') api.load().then((next) => { if (!stop) setLoad(next); }).catch(() => {}); else setLoad(null);
-        if (j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {});
+        if ((j.status === 'queued' || j.status === 'running') && j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {}); // the live snapshot only exists while the job runs; a finished job's replay would 404
         const active = j.status === 'queued' || j.status === 'running';
         needsRefresh ||= !active || j.events.some((e) => e.type === 'version' || e.type === 'done');
         if (needsRefresh) { await refresh(); needsRefresh = false; }
