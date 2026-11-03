@@ -164,7 +164,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
         const anchor = transformPoint(parent.transform, pc.position);
         const motor: Motor | undefined = op.motor ? { controlId: op.motor.controlId, stiffness: op.motor.stiffness, damping: op.motor.damping, maxTorque_Nm: op.joint === 'revolute' ? (pp.limits.maxTorque_Nm ?? p.limits.maxTorque_Nm) : undefined, maxForce_N: op.joint === 'prismatic' ? (pp.limits.maxForce_N ?? p.limits.maxForce_N) : undefined } : undefined;
         a.joints.push(Joint.parse({ id: `j_${op.id}`, type: op.joint, a: { instanceId: parent.id, connectorId: pc.id }, b: { instanceId: op.id, connectorId: cc.id }, axis, anchor, limits: op.limits, motor }));
-        summary.push(`mounted ${op.id} (${p.name}) on ${op.onto}.${pc.id} [${op.joint}${op.motor ? ' motor ' + op.motor.controlId : ''}]`);
+        summary.push(`mounted ${op.id} (${p.name}) on ${op.onto}.${pc.id} [${op.joint}${op.motor ? ` motor ${op.motor.controlId} k${op.motor.stiffness}/d${op.motor.damping}` : ''}]`);
         break;
       }
       case 'connect': {

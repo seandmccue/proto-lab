@@ -194,7 +194,8 @@ export class ToolRuntime {
           if (Array.isArray(raw?.drives)) raw.drives = raw.drives.map((d) => normaliseDrive(d));
           const a = DrivesArgs.parse(rawArgs);
           this.assembly = setDrives(this.assembly, a.drives);
-          log(true, `Drives: ${a.drives.map((d) => `${d.controlId}=${d.profile.kind}`).join(', ')}`);
+          const brief = (d: (typeof a.drives)[number]) => { const q = d.profile as Record<string, unknown>; const f = ['amplitude', 'offset', 'frequency_hz', 'swingDuty', 'value', 'from', 'to', 'after'].filter((k) => q[k] !== undefined).map((k) => `${k.replace('frequency_hz', 'f').replace('amplitude', 'a').replace('swingDuty', 'duty').replace('offset', 'o')}=${q[k]}`).join(','); return `${d.controlId}=${d.profile.kind}(${f})`; };
+          log(true, `Drives: ${a.drives.slice(0, 4).map(brief).join('; ')}${a.drives.length > 4 ? ` … (+${a.drives.length - 4} more)` : ''}`);
           if (a.rationale) this.events.onAssembly(this.assembly, a.rationale, a.based_on);
           return { drives: this.assembly.controller.drives };
         }
