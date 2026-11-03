@@ -205,12 +205,18 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       if (res.finishReason === 'length') { emit({ type: 'status', message: 'The model ran out of output budget before acting; asking it to answer with the tool call only.' }); messages.push({ role: 'user', content: 'Your previous reply was cut off before any tool call. Reply with the tool call(s) only and minimal deliberation: send the complete assemble/set_drives/define_test batch now.' }); continue; }
       messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.' }); continue;
     }
+    let failedInReply: string | null = null;
     for (const call of res.toolCalls) {
       if (deadline.aborted) break;
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
+      if (failedInReply) { // a batched reply (assemble → set_drives → define_test → run_test) stops at the first error; the rest would only compound it
+        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ skipped: true, reason: `${failedInReply} failed earlier in this reply, so this call was not run. Fix that error and resend the remaining calls.` }) });
+        continue;
+      }
       const result = await rt.call(call.function.name, args);
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 5000) });
+      if (result && typeof result === 'object' && 'error' in (result as Record<string, unknown>)) failedInReply = call.function.name;
       if (rt.finalized) break;
     }
     if (specialistRoundsLeft > 0) {

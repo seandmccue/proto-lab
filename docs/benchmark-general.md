@@ -552,3 +552,21 @@ Every engine change from today in one pass. `bench-results-general-v11`, concurr
 | muse | 87 s (0.51 m, v2) | crab | 223 s (first-try, 0.39 m) |
 
 Across eleven full passes: 102 of 110 runs passed.
+
+### Batching experiment and the quad-chassis tie (2026-11-03 16:20 UTC)
+
+**Batching instruction, dropped.** A prompt line asking Muse to send assemble, set_drives,
+define_test and run_test in one reply was run on six prompts (`bench-results-batched`): 6 of 6
+passed, median 99.5 s, but the round counts matched the runs without it (windmill 25 s vs 23 s,
+catapult 160 s vs 73 s). Muse already batches when it wants to. What stayed (PR #137): a batched
+reply now stops at its first failed call and reports the rest as skipped, with a fake-model test.
+
+**Quad-chassis tie, fixed (PR #138).** The rejected-args log showed the recurring
+`Unknown instance "body"` was a quadruped batch mounting onto hip_L0..hip_R1: chassis-quad-120/160/220
+tie at nine connectors, so auto-place declined. A tie within one family now resolves to the mid-size
+part (chassis-quad-160, the measured recipe). Walker set after the fix (`bench-results-quad-tie`):
+
+| Prompt | Runs | Result | Times |
+| --- | --- | --- | --- |
+| muse (walk, then dance) | 2 | 2/2, two iterations each | 67 s, 69 s (0.51 m) |
+| sprinter (40 cm) | 2 | 2/2, first try | 46 s, 41 s (0.51 m) |

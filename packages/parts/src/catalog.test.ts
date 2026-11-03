@@ -167,3 +167,13 @@ test('a batch that mounts onto an id it places later is reordered, not auto-plac
   assert.ok(r.summary[0].startsWith('reordered: placed tower1'), r.summary[0]);
   assert.ok(!r.summary.some((x) => x.startsWith('auto-placed')), 'no guess when the batch places it itself');
 });
+
+test('an unplaced quadruped "body" is auto-placed as the mid-size quad chassis when the family ties on connectors', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'mount', id: 'hip_L0', part: 'servo-ds3218', onto: 'body', connector: 'hip_L0', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'hip_R1', part: 'servo-ds3218', onto: 'body', connector: 'hip_R1', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+  ], getPart, undefined, catalog);
+  const body = r.assembly.instances.find((x) => x.id === 'body');
+  assert.equal(body?.partId, 'chassis-quad-160', `auto-placed ${body?.partId}`);
+  assert.ok(r.summary[0].startsWith('auto-placed body as chassis-quad-160'), r.summary[0]);
+});

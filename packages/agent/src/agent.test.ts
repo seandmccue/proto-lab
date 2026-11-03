@@ -121,3 +121,31 @@ test('define_test rejects dance criteria tighter than a legged machine measures'
   const ok = await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 4, measure: { joints: ['hip_L0'], base: 'body' }, criteria: { minJointAmplitude_rad: 0.08, maxBaseTilt_deg: 12, maxBaseDrift_m: 0.15, torqueWithinRating: true } } }) as { error?: string };
   assert.ok(!ok.error, ok.error);
 });
+
+test('a batched reply stops at the first failed tool call; later calls are reported as skipped', async () => {
+  const { createServer } = await import('node:http');
+  const bodies: Array<{ messages: Array<{ role: string; content: string; tool_call_id?: string }> }> = [];
+  const server = createServer((req, res) => {
+    let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
+      const body = JSON.parse(raw); bodies.push(body);
+      const reply = bodies.length === 1
+        ? [{ id: 'a1', type: 'function', function: { name: 'assemble', arguments: JSON.stringify({ rationale: 'bad part id', ops: [{ op: 'place', id: 'body', part: 'no-such-part', position: [0, 0.1, 0] }] }) } },
+           { id: 'd1', type: 'function', function: { name: 'set_drives', arguments: JSON.stringify({ drives: [{ controlId: 'spin', mode: 'velocity', profile: { kind: 'constant', value: 1 } }] }) } }]
+        : [{ id: 'f1', type: 'function', function: { name: 'finalize_design', arguments: JSON.stringify({ summary: 'stopping', status: 'failed' }) } }];
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: null, tool_calls: reply }, finish_reason: 'tool_calls' }] }));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, r));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const model = { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 256, timeoutMs: 5000 };
+    await runAgent({ prompt: 'test', inventionId: 'inv_t', model, specialist: null, maxIterations: 1, newVersionId: () => 'ver_t' }, () => {});
+    const second = bodies[1]; assert.ok(second, 'the model was asked again after the batch');
+    const toolMsgs = second.messages.filter((m) => m.role === 'tool');
+    const assembleMsg = toolMsgs.find((m) => m.tool_call_id === 'a1'); const drivesMsg = toolMsgs.find((m) => m.tool_call_id === 'd1');
+    assert.match(assembleMsg?.content ?? '', /error/, 'the bad assemble reports its error');
+    assert.match(drivesMsg?.content ?? '', /"skipped":true/, 'the call after the failure is skipped, not run');
+    assert.match(drivesMsg?.content ?? '', /assemble failed earlier in this reply/);
+  } finally { server.close(); }
+});
