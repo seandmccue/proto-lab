@@ -286,3 +286,32 @@ used to accept any block within 15 cm of the palm, floor included), and the engi
 wasted first-batch rounds the API log kept showing — a mount onto a `body`/`base` nobody placed is
 auto-placed when its connectors identify one library part, re-using an id replaces the instance, and
 array fields sent as JSON strings are parsed (PR #77, #78).
+
+
+## Sixth full pass: claw recipe, first-batch recovery (v7, 2026-11-03 10:48 UTC)
+
+| Metric | Value |
+| --- | --- |
+| Success rate | 90 % (9/10) |
+| Errors (API/model) | 0 % |
+| Median completion time | **181 s** (was 352 s) |
+
+| Prompt | Result | Time | Versions | Custom parts | Handoffs | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferris | passed | 60 s | 1 | 0 | 0 | Miniature Ferris wheel: anchored tower-300 with spoked-wheel-400 (Ø400mm, 8 spokes) driven… |
+| muse | passed | 80 s | 2 | 0 | 0 | Muse-inspired quadruped: chassis-quad-160 + 4x 2-DOF legs (ds3218 2Nm hips/knees, leg-bar-… |
+| butterfly | passed | 164 s | 1 | 0 | 0 | Mechanical butterfly on a stand: anchored plate-120x80 base with a 400mm rod post holding … |
+| claw | passed | 181 s | 1 | 0 | 0 | Robotic grabbing claw: anchored plate-120x80 base, beam-100 post, plate-120x80 palm, two o… |
+| crab | passed | 288 s | 1 | 1 | 0 | Mechanical crab: yawed hex chassis (body across travel) with 6 two-joint legs (ds3218 hips… |
+| windmill | passed | 67 s | 2 | 0 | 0 | Built a windmill: anchored A-frame tower-500 with 4-blade rotor windmill-4x600 mounted on … |
+| catapult | failed | 400 s | 9 | 1 | 4 | Tabletop catapult: anchored base-plate-300x200, servo-ds3218 pivot, custom 350mm arm (desi… |
+| novel | passed | 86 s | 1 | 0 | 0 | Bird-scaring garden gadget: anchored tower-500 pole with a 4-blade Ø400mm pinwheel rotor o… |
+| crane | passed | 228 s | 2 | 2 | 0 | Miniature crane: anchored 300x200 base + 150mm A-frame tower + 8Nm luff servo driving a 40… |
+| drawbridge | passed | 614 s | 5 | 1 | 2 | Automated drawbridge: anchored base-plate-300x200 with servo-high-torque-35 hinge servo dr… |
+
+Median time halved again: eight of ten were first-try builds. The claw went 746 s → 181 s. The
+drawbridge lifted first-try, then spent four tests on a raise-and-lower cycle whose step drive slammed
+the deck (23 N·m demand) until Wonder fixed it; the recipe now quotes a measured sine cycle (1.1 N·m,
+no saturation). The catapult missed: a 350 mm arm overshot a 0.5 m target for nine tests; the recipe now
+carries a measured arm-length → range table (100 mm → 0.35 m, 140 mm → 0.59 m, 220 mm → 0.98 m) and
+says to pick the arm from the target before the first test.
