@@ -148,3 +148,18 @@ Two findings, both fixed before the next pass:
    mirrored outline, and a winged-body part with built-in flap servos; the recipe quotes simulator-measured
    gains (PR #28). A rebuild of the featured butterfly on the fixed library passed its flap test on the first
    attempt in 4 minutes and finally looks like a butterfly.
+
+### Re-runs on the hardened engine (v3b, 2026-11-03 06:42 UTC)
+
+The three prompts affected above, re-run after PR #27 (Wonder fallback) and PR #28 (wing library):
+
+| Prompt | Result | Time | Versions | Note |
+| --- | --- | --- | --- | --- |
+| butterfly | passed | 168 s | 1 | Catalog winged body + left/right wings, first-try pass (was 621 s with box wings) |
+| catapult | passed | 190 s | 2 | DS3218 pivot, swept the release step, 0.39 m landing |
+| crab | failed | 1444 s | 9 | Custom carapace with fore-aft hip axes; fell at t ≈ 0.65 s on every test (nine tests, two Wonder consults) |
+
+The crab is the one prompt the engine had not measured a known-good configuration for. It drove three
+changes: a measured hexapod recipe in the prompt (wave gait numbers, body-mass budget, how a sideways
+crab maps onto it), the assemble batch cap raised from 60 to 120 ops (a six-leg rebuild was rejected),
+and a wall-clock budget per build (20 min, then an honest finalize) so no run can take 24 minutes again.
