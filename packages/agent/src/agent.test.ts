@@ -91,3 +91,16 @@ test('define_test rejects a walk tilt limit tighter than the measured recipes', 
   const ok = await rt.call('define_test', { test: { kind: 'walk', id: 'scuttle', duration_s: 6, base: 'body', minDistance_m: 0.3, maxTilt_deg: 10, direction: 'z' } }) as { error?: string };
   assert.ok(!ok.error, ok.error);
 });
+
+test('define_test rejects dance criteria tighter than a legged machine measures', async () => {
+  const rt = new ToolRuntime(baseSpec('Pet robot'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'body + one leg', ops: [
+    { op: 'place', id: 'body', part: 'chassis-quad-160', position: [0, 0.1, 0] },
+    { op: 'mount', id: 'hip_servo', part: 'servo-ds3218', onto: 'body', connector: 'hip_L0', via: 'bottom', joint: 'fixed' },
+    { op: 'mount', id: 'upper', part: 'leg-bar-60', onto: 'hip_servo', connector: 'horn', via: 'pivot', joint: 'revolute', motor: { controlId: 'hip_L0', stiffness: 8, damping: 0.2 } },
+  ] }) as { error?: string };
+  const tight = await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 4, measure: { joints: ['hip_L0'], base: 'body' }, criteria: { minJointAmplitude_rad: 0.08, maxBaseTilt_deg: 5, maxBaseDrift_m: 0.05, torqueWithinRating: true } } }) as { error?: string };
+  assert.match(tight.error ?? '', /maxBaseTilt_deg 5/);
+  const ok = await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 4, measure: { joints: ['hip_L0'], base: 'body' }, criteria: { minJointAmplitude_rad: 0.08, maxBaseTilt_deg: 12, maxBaseDrift_m: 0.15, torqueWithinRating: true } } }) as { error?: string };
+  assert.ok(!ok.error, ok.error);
+});

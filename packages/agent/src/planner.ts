@@ -42,7 +42,7 @@ export async function runPlanner(rt: ToolRuntime, spec: Spec, opts: { parent: Ve
   const walkPassed = rt.tests.some((t) => t.passed && t.kind === 'walk');
   if (wantsDance && walkPassed) {
     const walkOk = rt.tests.find((t) => t.passed && t.kind === 'walk')!; await rt.call('set_drives', { drives: danceDrives({ ...params, dance: DEFAULT_DANCE }), rationale: 'Switching to the dance routine: knees bob together with hip compensation, hips sway alternately.', based_on: `${walkOk.testId}: walked ${walkOk.metrics.distance_m} m, so the structure is stable enough to dance in place` });
-    await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 5, measure: { base: 'body', joints: [], clearancePairs: [], noGroundContact: [] }, criteria: { maxBaseTilt_deg: 25, maxBaseDrift_m: 0.08, torqueWithinRating: true } } });
+    await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 5, measure: { base: 'body', joints: [], clearancePairs: [], noGroundContact: [] }, criteria: { maxBaseTilt_deg: 25, maxBaseDrift_m: 0.15, torqueWithinRating: true } } });
     await rt.call('run_test', { test_id: 'dance' });
   }
   const last = rt.tests[rt.tests.length - 1];
