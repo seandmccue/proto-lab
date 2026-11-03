@@ -29,7 +29,14 @@ each). Nothing in the gallery is canned: every card opens the actual assembly an
   torque demand vs servo rating, energy proxy) are measured; runs are deterministic. Rigid-body
   simulation is not engineering certification and the UI says so.
 - **Agent decisions** are the model's (or the deterministic planner's) and are labelled as such.
-  Every revision records which test metric it was based on and what parameters changed.
+  Every revision records which test metric it was based on and what parameters changed. The
+  model's tools are search_catalog, get_part, create_parametric_part, build_walker, revise_walker,
+  inspect_assembly, sweep_gait (short simulator sweeps over stride/cadence), run_test and
+  finalize_design; every call is validated against a schema before it executes.
+- **Verified live with Muse Spark 1.3 and Muse Wonder 1.0:** both pick parts from the catalog,
+  create custom parametric parts when the presets do not fit, read measured test results and
+  revise. Runs vary; when the budget runs out the result is reported as "did not pass" with the
+  best measured design, never dressed up.
 - **Bounded family:** today the agent designs one mechanism family — legged walkers with 4 or 6
   legs — with a parametric chassis, two servos per leg and a crawl/tripod gait. Other prompts are
   interpreted into that family and the homepage says so.
