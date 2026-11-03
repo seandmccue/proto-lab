@@ -112,6 +112,7 @@ Rules of thumb:
 - Motors: servos (position drives, rad) for oscillation and holding; gearmotors (velocity drives, rad/s) for continuous rotation; linear actuators / pistons (position drives, m). Keep demand under the rating (metrics report it; saturation is applied physically). A test fails on torque only when a motor sits at its rating ≥ 3 % of the run or demand exceeds 1.5× rating; brief peaks a few percent over are tolerated and noted.
 - Tests must be meaningful for the invention: a wheel must turn N revolutions without gondolas hitting the tower (clearancePairs), a wing must reach its stroke amplitude and rate with the body stable, a catapult must land the projectile near the target, a gripper must hold its payload after the support is removed, a walker must travel the distance upright.
 - Honesty: if a requested behaviour cannot be verified (flight, lift, airflow, water), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
+- One behaviour at a time, and never re-run a passed test: when the brief asks for several behaviours (walk, then dance), get the first to pass, record it, then change drives for the next and test only that. Each passing test is a recorded version; a later drive set for another behaviour does not undo it. When every requested behaviour has a passing test, finalize with status "passed".
 - Be economical: search results already include connector ids/axes, so avoid get_part lookups unless you need geometry; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
 
@@ -193,7 +194,8 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       if (rt.tests.length > testsBefore || specialistRoundsLeft === 0) {
         specialistRoundsLeft = 0; const last = rt.tests[rt.tests.length - 1];
         emit({ type: 'handoff', from: specialist!.model.model, to: model.model, message: `${prettyModelName(model.model)} resumes${last ? ` after ${last.testId} (${last.passed ? 'passed' : 'did not pass'})` : ''}.` });
-        messages.push({ role: 'user', content: `[${prettyModelName(model.model)} resumes as the inventor.] Continue from the specialist's result: if the test passed, finish remaining criteria and finalize; otherwise keep iterating.` });
+        const passedKinds = [...new Map(rt.tests.filter((t) => t.passed).map((t) => [t.kind, t])).values()].map((t) => `${t.kind} (${t.testId}${t.metrics.distance_m !== undefined ? `, ${t.metrics.distance_m} m` : ''})`);
+        messages.push({ role: 'user', content: `[${prettyModelName(model.model)} resumes as the inventor.] Continue from the specialist's result. Passed so far: ${passedKinds.join('; ') || 'nothing yet'}. If every behaviour the brief asked for has a passing test, call finalize_design now with status "passed" — do not re-run a test that already passed (a later drive change for another behaviour, like a dance, does not undo the recorded walking version). Otherwise keep iterating on what has not passed.` });
       }
     }
   }
