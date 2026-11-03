@@ -68,9 +68,10 @@ export function stageOf(events: JobEvent[]): number {
   if (events.some((e) => e.type === 'spec' && (e.spec as { plan?: unknown })?.plan)) s = 1;
   if (tools.some((t) => t === 'search_catalog' || t === 'create_part' || t === 'design_part')) s = Math.max(s, 1);
   if (tools.some((t) => t === 'assemble')) s = Math.max(s, 2);
-  if (events.some((e) => e.type === 'test')) s = Math.max(s, 3);
-  if (events.some((e) => e.type === 'test') && events.some((e) => e.type === 'assembly' && Number(e.iteration) > 1)) s = Math.max(s, 4);
-  if (events.some((e) => e.type === 'done')) s = 5;
+  const latest = [...events].reverse().find((e) => e.type === 'test' || e.type === 'test_start' || e.type === 'assembly' || e.type === 'done');
+  if (latest?.type === 'test' || latest?.type === 'test_start') s = 3;
+  if (latest?.type === 'assembly') s = Number(latest.iteration) > 1 ? 4 : 2;
+  if (latest?.type === 'done') s = 5;
   return s;
 }
 export function useElapsed(events: JobEvent[], running: boolean): string {
@@ -85,7 +86,7 @@ export function useElapsed(events: JobEvent[], running: boolean): string {
 export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
   const end = useRef<HTMLLIElement>(null);
   useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
-  const visible = events.filter((e) => e.type !== 'version' && e.type !== 'timing' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
+  const visible = events.filter((e) => e.type !== 'version' && e.type !== 'timing' && e.type !== 'test_start' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
   const stage = stageOf(events); const elapsed = useElapsed(events, running);
   const lastStatus = [...events].reverse().find((e) => e.type === 'status');
   const timing = [...events].reverse().find((e) => e.type === 'timing')?.timing as { firstAssemblyMs: number | null; modelMs: number } | undefined;

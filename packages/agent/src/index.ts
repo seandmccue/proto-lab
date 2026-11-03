@@ -1,4 +1,4 @@
-import type { Assembly, Decision, Spec, TestResult, ToolLogEntry, VersionRecord } from '@protolab/schema';
+import type { Assembly, Decision, Spec, TestResult, TestSpec, ToolLogEntry, VersionRecord } from '@protolab/schema';
 import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
@@ -26,6 +26,7 @@ export type AgentEvent =
   | { type: 'spec'; spec: Spec }
   | { type: 'tool'; entry: ToolLogEntry }
   | { type: 'assembly'; iteration: number; assembly: Assembly; rationale: string }
+  | { type: 'test_start'; iteration: number; testId: string; kind: TestSpec['kind'] }
   | { type: 'test'; iteration: number; result: TestResult }
   | { type: 'version'; version: VersionRecord }
   | { type: 'handoff'; from: string; to: string; message: string }
@@ -76,8 +77,11 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       }
       emit({ type: 'assembly', iteration, assembly, rationale });
     },
+    onTestStart: (testId, kind) => {
+      emit({ type: 'status', message: `Testing: ${testId}` });
+      emit({ type: 'test_start', iteration, testId, kind });
+    },
     onTest: (result) => {
-      emit({ type: 'status', message: `Testing: ${result.testId}` });
       emit({ type: 'test', iteration, result });
       if (!pending) return;
       const existing = versions.length && versions[versions.length - 1].iteration === iteration ? versions[versions.length - 1] : null;

@@ -15,6 +15,7 @@ export type PublicEvent =
   | { t: string; type: 'spec'; spec: unknown }
   | { t: string; type: 'tool'; tool: string; ok: boolean; summary: string; parts?: unknown[] }
   | { t: string; type: 'assembly'; iteration: number; rationale: string; instances: number; mass_kg: number }
+  | ({ t: string } & Extract<AgentEvent, { type: 'test_start' }>)
   | { t: string; type: 'test'; iteration: number; testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] }
   | { t: string; type: 'version'; versionId: string; iteration: number; status: string }
   | { t: string; type: 'handoff'; from: string; to: string; message: string }
@@ -136,6 +137,7 @@ export class JobRunner {
           this.liveAssembly.set(job.id, { assembly: e.assembly, iteration: e.iteration, rationale: e.rationale, at: t });
           push({ t, type: 'assembly', iteration: e.iteration, rationale: e.rationale, instances: e.assembly.instances.length, mass_kg: +mass.toFixed(3) }); break;
         }
+        case 'test_start': push({ t, ...e }); break;
         case 'test':
           if (timing.firstTestMs === null) {
             timing.firstTestMs = sinceRequest();

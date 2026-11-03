@@ -39,6 +39,7 @@ export interface ToolEvents {
   onLog(entry: ToolLogEntry): void;
   onPlan(spec: Spec): void;
   onAssembly(assembly: Assembly, rationale: string, basedOn?: string): void;
+  onTestStart?(testId: string, kind: TestSpec['kind']): void;
   onTest(result: TestResult): void;
 }
 
@@ -253,7 +254,9 @@ export class ToolRuntime {
           if (this.testCount >= this.budget.maxTests) throw new Error(`Test budget (${this.budget.maxTests}) exhausted; call finalize_design with the best result so far.`);
           this.testCount++;
           const n = this.tests.filter((x) => x.testId.slice(0, x.testId.lastIndexOf('#')) === a.test_id).length + 1;
-          const result = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: `${a.test_id}#${n}` } });
+          const testId = `${a.test_id}#${n}`;
+          this.events.onTestStart?.(testId, spec.kind);
+          const result = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: testId } });
           this.tests.push(result);
           this.testEvidence.set(a.test_id, { spec, result });
           this.lastTestedAssembly = this.assembly;

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { initSimulator } from '@protolab/simulator';
 import { openDb } from '../src/db.ts';
 import { ObjectStore } from '../src/store.ts';
-import { JobRunner } from '../src/jobs.ts';
+import { JobRunner, type PublicEvent } from '../src/jobs.ts';
 import { buildApp } from '../src/routes.ts';
 
 // End-to-end API test with the deterministic planner (no model key): create → job → versions → publish → gallery → remix.
@@ -35,6 +35,10 @@ test('API golden path with the deterministic planner', async () => {
   for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${jobId}`, { headers: H }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
   const job = await j(`/api/jobs/${jobId}`, { headers: H });
   assert.equal(job.body.status, 'done', JSON.stringify(job.body).slice(0, 300));
+  const jobEvents = job.body.events as PublicEvent[];
+  const firstTestStart = jobEvents.findIndex((event) => event.type === 'test_start');
+  const firstTestResult = jobEvents.findIndex((event) => event.type === 'test');
+  assert.ok(firstTestStart >= 0 && firstTestStart < firstTestResult);
   const timing = job.body.timing as { firstAssemblyMs: number; firstTestMs: number; totalMs: number; modelCalls: number };
   assert.ok(Number.isFinite(timing.firstAssemblyMs) && Number.isFinite(timing.firstTestMs));
   assert.ok(timing.firstAssemblyMs <= timing.firstTestMs && timing.firstTestMs <= timing.totalMs);

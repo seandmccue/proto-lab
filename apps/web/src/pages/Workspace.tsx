@@ -5,7 +5,7 @@ import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
-import BuildProgress, { BuildStrip, IterationRibbon, keyMetric } from '../components/BuildProgress.tsx';
+import BuildProgress, { BuildStrip, IterationRibbon, SimulationStatus, keyMetric } from '../components/BuildProgress.tsx';
 import { api, fmt, type InventionDetail, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
 import './Workspace.css';
 
@@ -430,7 +430,6 @@ export default function Workspace() {
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
           <div className="workbench-panel-heading">
             <span className="workbench-label">{running ? 'Live build' : '3D simulation'}</span>
-            {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
             {running && hasLiveAssembly && version && (
               <div className="workbench-control-group" role="group" aria-label="Choose live assembly or recorded test">
                 <button type="button" className="btn-ghost" aria-pressed={showLive} onClick={() => setViewMode('live')}>Live assembly</button>
@@ -440,6 +439,7 @@ export default function Workspace() {
             {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
             {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
+          {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {!running && story.length > 0 && (
             <div className="workbench-story">
               <div className="workbench-story-heading">
@@ -469,13 +469,14 @@ export default function Workspace() {
               {storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
             </div>
           )}
+          <SimulationStatus events={events} running={running} replay={!showLive && version && test ? { iteration: version.iteration, test, playing } : null} />
           <div className="workbench-stage">
             {showLive && live ? (
               <>
                 <Viewer assembly={live.assembly} visibleInstanceIds={visibleLiveIds} enteringInstanceIds={reducedMotion ? undefined : live.newIds} test={null} playing={false} speed={1} explode={explode} blueprint={activeBlueprint} follow={false} selectedId={selected} changedIds={liveHighlightIds} onSelect={setSelected} autoRotate={!reducedMotion && !introBlueprint} />
                 <div className="workbench-readout">
                   <span className="workbench-readout-model">{running ? 'Live assembly' : 'Assembly preview'} · v{live.iteration} · {visibleLiveIds ? `${visibleLiveIds.size} of ` : ''}{live.assembly.instances.length} parts placed</span>
-                  <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{running ? newerAssembly ? 'Awaiting simulation' : 'Switch to Tested replay for the recorded result' : 'Showing the assembled parts before replay'}</span>
+                  <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{running ? 'Assembly preview' : 'Showing the assembled parts before replay'}</span>
                   {live.rationale && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale}</span>}
                 </div>
               </>

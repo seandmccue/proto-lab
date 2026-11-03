@@ -365,22 +365,50 @@ li[data-state='active'] .build-progress-dot { background: var(--violet, #6d28d9)
 .build-strip-stages { font-size: 0.62rem; gap: 0.25rem 0.7rem; }
 .build-strip-now { display: flex; align-items: center; gap: 0.55rem; }
 .build-strip-spinner { width: 1.1rem; height: 1.1rem; }
-.build-strip-toast { display: flex; align-items: center; gap: 0.5rem; align-self: flex-start; max-width: 100%; border-radius: 0.65rem; padding: 0.45rem 0.7rem; font-size: 0.78rem; box-shadow: 0 10px 24px -14px rgba(15, 23, 42, 0.5); animation: bs-toast 7s ease forwards; }
-.build-strip-toast.is-pass { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
-.build-strip-toast.is-fail { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
-.build-strip-toast-mark { font-weight: 700; font-size: 1rem; }
-@keyframes bs-toast { 0% { opacity: 0; transform: translateY(8px) scale(0.97); } 6% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-4px); } }
-
-/* Iteration ribbon in the canvas heading: one chip per version, a pulsing chip for the one being built */
-.iteration-ribbon { display: flex; align-items: center; gap: 0.3rem; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; margin-left: 0.5rem; }
-.iteration-ribbon::-webkit-scrollbar { display: none; }
+/* The current physics state and the saved version history sit above the canvas. */
+.simulation-status {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: .55rem .8rem;
+  background: #21173b;
+  color: #fff;
+  border-bottom: 1px solid #4c386f;
+}
+.simulation-status-version {
+  flex: none;
+  min-width: 2.45rem;
+  padding: .28rem .45rem;
+  border-radius: .4rem;
+  background: #443160;
+  color: #fff;
+  font: 750 .9rem/1.15 var(--font-mono, monospace);
+  text-align: center;
+}
+.simulation-status[data-mode='live'] .simulation-status-version { background: #d4c3ff; color: #291449; }
+.simulation-status[data-mode='pass'] .simulation-status-version { background: #d9f99d; color: #244414; }
+.simulation-status[data-mode='fail'] .simulation-status-version { background: #fce1a4; color: #553108; }
+.simulation-status-copy { display: grid; flex: 1; gap: .05rem; min-width: 0; }
+.simulation-status-copy strong { font-size: .95rem; }
+.simulation-status-copy > span { color: #d5c6ee; overflow-wrap: anywhere; font-size: .75rem; }
+.simulation-status-signal { flex: 0 0 2rem; height: .24rem; overflow: hidden; border-radius: 999px; background: #5e4983; }
+.simulation-status-signal::after {
+  display: block;
+  width: 45%;
+  height: 100%;
+  border-radius: inherit;
+  background: #e0cdff;
+  animation: simulation-signal 1.1s ease-in-out infinite alternate;
+  content: '';
+}
+@keyframes simulation-signal { to { transform: translateX(120%); } }
+.iteration-ribbon { display: flex; align-items: center; gap: .4rem; overflow-x: auto; padding: .4rem .8rem; border-bottom: 1px solid var(--bench-line); }
 .iteration-ribbon li { flex: none; }
-.iteration-chip { display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid var(--bench-line, #e2e8f0); border-radius: 999px; padding: 0.15rem 0.55rem; background: var(--bench-panel, #fff); color: #475569; font: 600 0.66rem/1.3 var(--font-mono, ui-monospace, monospace); white-space: nowrap; cursor: pointer; transition: border-color 0.15s, background 0.15s; animation: pb-in 0.35s ease both; }
+.iteration-ribbon-label { color: var(--bench-muted); font-size: .72rem; font-weight: 650; }
+.iteration-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--bench-line, #e2e8f0); border-radius: 999px; padding: .38rem .65rem; background: var(--bench-panel, #fff); color: #334155; font: 650 .73rem/1.3 var(--font-mono, ui-monospace, monospace); white-space: nowrap; cursor: pointer; transition: border-color .15s, background .15s; }
 .iteration-chip:hover { border-color: #94a3b8; }
 .iteration-chip[aria-pressed='true'] { border-color: var(--violet, #6d28d9); background: var(--accent-soft, #ede9fe); color: var(--violet-dark, #4c1d95); }
 .iteration-chip.is-pass .iteration-chip-mark { color: #059669; }
 .iteration-chip.is-fail .iteration-chip-mark { color: #d97706; }
 .iteration-chip-metric { color: #64748b; font-weight: 500; }
-.iteration-chip.is-building { cursor: default; color: var(--violet-dark, #4c1d95); border-style: dashed; }
-.iteration-chip.is-building .build-progress-dot { background: var(--violet, #6d28d9); animation: bp-pulse 1.2s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .build-strip-toast, .iteration-chip { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .simulation-status-signal::after { animation: none; } }

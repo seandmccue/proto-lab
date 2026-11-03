@@ -25,6 +25,10 @@ test('deterministic planner builds a walker from generic ops, tests and revises 
   const allTests = out.versions.flatMap((v) => v.tests);
   assert.ok(allTests.some((t) => t.kind === 'walk' && t.passed));
   assert.ok(allTests.some((t) => t.kind === 'motion'), 'dance follow-up tested');
+  const starts = events.flatMap((event) => event.type === 'test_start' ? [event] : []);
+  const results = events.flatMap((event) => event.type === 'test' ? [event] : []);
+  assert.deepEqual(starts.map((event) => [event.iteration, event.testId, event.kind]), results.map((event) => [event.iteration, event.result.testId, event.result.kind]));
+  for (const [i, start] of starts.entries()) assert.ok(events.indexOf(start) < events.indexOf(results[i]), 'test starts before the result');
   for (const v of out.versions.slice(1)) assert.ok(v.decisions[0].basedOn, `iteration ${v.iteration} cites a measurement`);
   console.log(out.versions.map((v) => `${v.id} it${v.iteration} ${v.status} ${v.tests.map((t) => `${t.testId}:${t.passed ? 'P' : 'F'}`).join(' ')} | ${v.decisions[0].summary.slice(0, 80)}`).join('\n'));
 });
