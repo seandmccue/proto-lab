@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { JobEvent, VersionMeta } from '../api.ts';
 import { fmt } from '../api.ts';
 import type { Spec } from '@protolab/schema';
@@ -58,8 +58,17 @@ export default function ActivityPanel({ events, running, versions, currentVersio
     <div className="flex h-full flex-col">
       <div className="px-3 pt-3 pb-2 flex items-center justify-between">
         <span className="panel-title">Agent activity</span>
-        {running && <span className="inline-flex items-center gap-1.5 text-xs text-accent"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />working</span>}
+        {running && <span className="inline-flex items-center gap-1.5 text-xs text-accent"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />working{elapsed && <span className="mono text-slate-400">· {elapsed}</span>}</span>}
+        {!running && elapsed && <span className="mono text-xs text-slate-400">{elapsed}</span>}
       </div>
+      {events.length > 0 && (
+        <div className="px-3 pb-2">
+          <ol className="flex items-center gap-1 text-[10px]">
+            {STAGES.map((name, i) => <li key={name} className={`flex items-center gap-1 ${i < stage ? 'text-emerald-700' : i === stage && running ? 'text-accent' : 'text-slate-400'}`}><span className={`h-1.5 w-1.5 rounded-full ${i < stage ? 'bg-emerald-500' : i === stage && running ? 'bg-accent animate-pulse' : 'bg-slate-300'}`} />{name}{i < STAGES.length - 1 && <span className="mx-0.5 h-px w-3 bg-slate-200" />}</li>)}
+          </ol>
+          {running && lastStatus && <p className="mt-1 truncate text-[11px] text-slate-500" title={String(lastStatus.message)}>{String(lastStatus.message)}</p>}
+        </div>
+      )}
       {versions.length > 0 && (
         <div className="flex flex-wrap gap-1 px-3 pb-2">
           {versions.map((v) => (
