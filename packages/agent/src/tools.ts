@@ -42,6 +42,15 @@ export interface ToolEvents {
   onTest(result: TestResult): void;
 }
 
+/** Accept drives written flat ({controlId, kind:'sine', amplitude...}) by wrapping the profile. */
+function normaliseDrive(d: unknown): unknown {
+  if (!d || typeof d !== 'object') return d;
+  const o = { ...(d as Record<string, unknown>) };
+  if (!o.profile && typeof o.kind === 'string') { const profile: Record<string, unknown> = {}; for (const k of ['kind', 'value', 'amplitude', 'offset', 'frequency_hz', 'phase', 'from', 'to', 'start_s', 'duration_s', 'before', 'after', 'at_s', 'role', 'swingDuty']) if (k in o) { profile[k] = o[k]; delete o[k]; } o.profile = profile; }
+  if (o.profile && typeof o.profile === 'object') { const p = o.profile as Record<string, unknown>; if (p.kind === 'gait' && !p.role) p.role = /knee|lift/i.test(String(o.controlId)) ? 'lift' : 'swing'; if (p.kind === 'sine' && p.frequency_hz === undefined && typeof p.frequency === 'number') { p.frequency_hz = p.frequency; delete p.frequency; } }
+  if (o.mode === undefined) o.mode = 'position';
+  return o;
+}
 /** Accept the shorthand models tend to write: {shape:'box', size:[..], position:[..]} → full GeometryPiece. */
 function normalisePiece(pc: unknown): unknown {
   if (!pc || typeof pc !== 'object') return pc;
@@ -135,6 +144,8 @@ export class ToolRuntime {
           return { applied: r.summary, assembly: s };
         }
         case 'set_drives': {
+          const raw = rawArgs as { drives?: unknown[] };
+          if (Array.isArray(raw?.drives)) raw.drives = raw.drives.map((d) => normaliseDrive(d));
           const a = DrivesArgs.parse(rawArgs);
           this.assembly = setDrives(this.assembly, a.drives);
           log(true, `Drives: ${a.drives.map((d) => `${d.controlId}=${d.profile.kind}`).join(', ')}`);
@@ -144,6 +155,7 @@ export class ToolRuntime {
         case 'inspect_assembly': { log(true, 'Inspected'); return summarize(this.assembly); }
         case 'define_test': {
           const raw = rawArgs as { test?: Record<string, unknown> };
+          if (raw?.test && Array.isArray(raw.test.direction)) { const v = raw.test.direction as number[]; raw.test.direction = Math.abs(v[0] ?? 0) >= Math.max(Math.abs(v[1] ?? 0), Math.abs(v[2] ?? 0)) ? 'x' : Math.abs(v[1] ?? 0) >= Math.abs(v[2] ?? 0) ? 'y' : 'z'; }
           if (raw?.test && typeof raw.test.direction === 'string') raw.test.direction = raw.test.direction.replace(/^[+-]/, '').toLowerCase();
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
           const a = DefineTestArgs.parse(rawArgs);

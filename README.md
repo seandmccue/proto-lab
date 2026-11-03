@@ -4,8 +4,8 @@ AI-powered invention studio. Describe an invention, watch an engineering agent a
 real catalog parts, test it in a rigid-body physics simulator, revise it from the measured results,
 explore it in 3D, publish it, and remix it.
 
-Hero demo: **Bring My Muse to Life** — a small walking robot built from servos, leg bars and foot
-pads, tested for balance and walking, then asked to dance.
+Featured examples: a walking Muse robot, a mechanical butterfly, a miniature Ferris wheel and a pizza
+catapult, all built live by Muse from the same component library and assembly operations.
 
 ## Quick start
 
@@ -18,29 +18,32 @@ npm run dev              # API on http://localhost:8787, web on http://localhost
 On first boot the API seeds three featured gallery items by running the real agent (a few seconds
 each). Nothing in the gallery is canned: every card opens the actual assembly and simulation trace.
 
-## What is real and what is bounded
+## What is real
 
-- **Parts** come from a curated parametric catalog (42 presets, 17 generators: chassis, servos,
-  leg bars, foot pads, beams, plates, gears, shafts, bearings, wheels, springs, brackets, shells…).
-  Each has mass, dimensions, connectors, limits, material and a CC0 source record.
-- **Assembly** is a versioned JSON manifest (parts, instances, joints with motors, controller),
-  not just a mesh. The bill of materials, blueprint dimensions and the 3D view all derive from it.
-- **Simulation** is Rapier (WASM) with a fixed 1/240 s step. Metrics (distance, tilt, drift, falls,
-  torque demand vs servo rating, energy proxy) are measured; runs are deterministic. Rigid-body
-  simulation is not engineering certification and the UI says so.
-- **Agent decisions** are the model's (or the deterministic planner's) and are labelled as such.
-  Every revision records which test metric it was based on and what parameters changed. The
-  model's tools are search_catalog, get_part, create_parametric_part, build_walker, revise_walker,
-  inspect_assembly, sweep_gait (short simulator sweeps over stride/cadence), run_test and
-  finalize_design; every call is validated against a schema before it executes.
-- **Verified live with Muse Spark 1.3 and Muse Wonder 1.0:** both pick parts from the catalog,
-  create custom parametric parts when the presets do not fit, read measured test results and
-  revise. Runs vary; when the budget runs out the result is reported as "did not pass" with the
-  best measured design, never dressed up.
-- **Bounded family:** today the agent designs one mechanism family — legged walkers with 4 or 6
-  legs — with a parametric chassis, two servos per leg and a crawl/tripod gait. Other prompts are
-  interpreted into that family and the homepage says so.
-- **3D Print** is disabled and marked Coming Soon. No claim of physical buildability is made.
+- **Components** come from a 100-part library built by 35 parametric generators (frames, plates,
+  beams, rods, brackets, enclosures, curved panels, gears with real teeth, shafts, bearings, wheels,
+  spoked wheels, pulleys, flywheels, hinges, sliders, linkages, cranks, pistons, servos, gearmotors,
+  springs, actuators, shaped wings, propellers, gripper fingers, gondolas, tracks, payloads, trays),
+  plus two CC0 scanned parts from Wikimedia Commons with attribution. Each has mass, dimensions,
+  material, connectors (position, axis, kind) and limits.
+- **Autonomous part generation:** the model can create parametric parts with custom parameters, or
+  design a part from primitives, 2D profiles extruded along an axis, and revolved profiles. The
+  geometry engine validates ranges, computes mass from material density, and builds convex-hull
+  colliders. The model never emits code, only validated JSON. See [docs/geometry-engine.md](docs/geometry-engine.md)
+  for the CadQuery investigation.
+- **Assembly** is a versioned JSON manifest built by generic operations: place, mount at a connector
+  (the child is posed so connectors coincide), connect, mirror/polar/linear patterns, remove, move.
+  There is no builder per invention. The walking robot is built from the same operations.
+- **Simulation** is Rapier (WASM) at a fixed 1/240 s step with anchored bases, free projectiles and
+  payloads, revolute/prismatic/spring joints, position and velocity drives, motor saturation at the
+  catalog rating, and collision events for clearance and ground contact. Tests: motion (amplitude,
+  rate, revolutions, tilt, drift, clearance), walk, launch, grip. Runs are deterministic.
+- **The agent's procedure** is the ten-step plan: understand → features and motions → sub-assemblies
+  (write_plan) → search the library → design missing parts → assemble and set drives → define
+  measurable tests → simulate → analyse failures and revise → finalize with the behaviours the
+  physics cannot verify listed as "unverified". Every version records which model made each decision.
+- **Not simulated:** aerodynamics, fluids, deformation, fatigue, manufacturability. A butterfly's
+  wings flap with measured stroke and rate; nobody claims it flies.
 
 ## Model configuration (Meta Model API)
 
