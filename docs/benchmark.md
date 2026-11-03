@@ -111,3 +111,31 @@ after this pass started: a measured note that motor stiffness 8–10 walks 0.48�
 
 With those, all five walker prompts have passed on the current engine, and the hero walker now walks
 about half a metre in six seconds instead of 0.3 m.
+
+
+## Generic engine, 2026-11-03 15:50 UTC (20 runs, current engine)
+
+Same five prompts, four runs each, concurrency 3, after today's engine rules (walk-tilt floor, tower
+auto-place, batch reorder). `bench-results-walkers-v3`:
+
+| Metric | Value |
+| --- | --- |
+| Success rate (walk + requested follow-ups passed) | **100 % (20/20)** |
+| Errors (API/model) | 0 % |
+| Median completion time | **80.9 s** (previous set 166.5 s) |
+| Mean iterations (versions) | 2.3 |
+| Runs with ≥1 meaningful revision citing a measurement | 40 % |
+| Runs that failed a walk test and later passed one | 40 % |
+| Runs using a drive sweep | 10 % |
+| Runs escalated to the specialist | 15 % |
+
+| Prompt | Runs | Passed | Median time | Mean iterations | Escalations |
+| --- | --- | --- | --- | --- | --- |
+| muse (walk, then dance) | 4 | 4/4 | 101 s | 2.0 | 0 |
+| hexapod (50 cm) | 4 | 4/4 | 104 s | 3.3 | 2 |
+| crawler (25 cm, calm) | 4 | 4/4 | 48 s | 1.0 | 0 |
+| sprinter (40 cm) | 4 | 4/4 | 46 s | 1.0 | 0 |
+| pet (walk, then dance) | 4 | 4/4 | 128 s | 4.3 | 1 |
+
+Crawler and sprinter passed first-try every time; the hexapod's 50 cm target and the dance follow-ups
+are where revisions and the three Wonder consults happened, all of which ended in a pass.
