@@ -65,6 +65,17 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     return c.json({ id: job.id, inventionId: job.invention_id, status: job.status, step: job.step, versionId: job.version_id, errorCode: job.error_code, events: events.slice(since), eventCount: events.length, updatedAt: job.updated_at });
   });
 
+  /** Latest in-progress assembly of a running job (before its first recorded version), so the workbench can show the build taking shape. */
+  app.get('/api/jobs/:id/assembly', (c) => {
+    const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(c.req.param('id')) as JobRow | undefined;
+    if (!job) return c.json({ error: 'Not found' }, 404);
+    const inv = getInvention(job.invention_id);
+    if (!inv || !canSee(inv, session(c.req))) return c.json({ error: 'Not found' }, 404);
+    const snap = runner.assemblySnapshot(job.id);
+    if (!snap) return c.json({ error: 'No live assembly for this job' }, 404);
+    return c.json(snap);
+  });
+
   app.get('/api/inventions/:id', (c) => {
     const inv = getInvention(c.req.param('id'));
     if (!inv || !canSee(inv, session(c.req))) return c.json({ error: 'Not found' }, 404);

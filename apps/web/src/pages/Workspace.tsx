@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { VersionRecord } from '@protolab/schema';
+import type { Assembly, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
@@ -18,6 +18,7 @@ export default function Workspace() {
   const [jobStatus, setJobStatus] = useState<string>('queued');
   const [jobStep, setJobStep] = useState<string>('');
   const [versionId, setVersionId] = useState<string | null>(null);
+  const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
   const [testId, setTestId] = useState<string | null>(null);
@@ -63,6 +64,7 @@ export default function Workspace() {
         if (stop) return;
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
+        if (j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {});
         if (j.events.some((e) => e.type === 'version' || e.type === 'done')) await refresh();
         if (j.status === 'queued' || j.status === 'running') setTimeout(tick, 700);
         else await refresh();
@@ -178,7 +180,7 @@ export default function Workspace() {
 
       <div className="workbench-grid">
         <aside className="workbench-panel workbench-parts" data-active={mobilePane === 'tree'} aria-label="Assembly and parts">
-          {version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
+          {version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
         </aside>
 
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
@@ -187,7 +189,12 @@ export default function Workspace() {
             {version && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
           </div>
           <div className="workbench-stage">
-            {version ? (
+            {!version && live ? (
+              <>
+                <Viewer assembly={live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={changedIds} onSelect={setSelected} autoRotate />
+                <div className="workbench-readout"><span className="workbench-readout-model">assembling · {live.assembly.instances.length} components · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
+              </>
+            ) : version ? (
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : (
               <div className="flex h-full items-center justify-center text-slate-400">

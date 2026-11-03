@@ -1,4 +1,4 @@
-import type { VersionRecord } from '@protolab/schema';
+import type { Assembly, VersionRecord } from '@protolab/schema';
 
 export function sessionId(): string {
   try {
@@ -29,6 +29,7 @@ export const api = {
   examples: () => req<{ examples: Example[] }>('/api/examples'),
   create: (body: { prompt?: string; exampleId?: string }) => req<{ inventionId: string; jobId: string }>('/api/inventions', { method: 'POST', body: JSON.stringify(body), headers: { 'idempotency-key': Math.random().toString(36).slice(2, 18) } }),
   job: (id: string, since = 0) => req<JobStatus>(`/api/jobs/${id}?since=${since}`),
+  jobAssembly: (id: string) => req<{ assembly: Assembly; iteration: number; rationale: string; at: string }>(`/api/jobs/${id}/assembly`),
   invention: (id: string) => req<InventionDetail>(`/api/inventions/${id}`),
   version: (id: string, vid: string, trace = true) => req<{ version: VersionRecord }>(`/api/inventions/${id}/versions/${vid}?trace=${trace ? 1 : 0}`),
   remix: (id: string, changeRequest: string) => req<{ inventionId: string; jobId: string }>(`/api/inventions/${id}/remix`, { method: 'POST', body: JSON.stringify({ changeRequest }) }),

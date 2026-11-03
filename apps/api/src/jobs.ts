@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { type AgentEvent } from '@protolab/agent';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
-import type { VersionRecord } from '@protolab/schema';
+import type { Assembly, VersionRecord } from '@protolab/schema';
 import type { ObjectStore } from './store.ts';
 import type { JobRow, InventionRow } from './db.ts';
 
@@ -37,9 +37,11 @@ export class JobRunner {
   private queue: Array<() => Promise<void>> = [];
   private running = false;
   private live = new Map<string, PublicEvent[]>();
+  private liveAssembly = new Map<string, { assembly: Assembly; iteration: number; rationale: string; at: string }>(); // latest in-progress assembly per job, for "watch it assemble"
   constructor(private db: DatabaseSync, private store: ObjectStore) {}
 
   events(jobId: string): PublicEvent[] | null { return this.live.get(jobId) ?? null; }
+  assemblySnapshot(jobId: string) { return this.liveAssembly.get(jobId) ?? null; }
 
   enqueue(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     this.queue.push(() => this.run(job, invention, opts));
@@ -70,7 +72,12 @@ export class JobRunner {
         case 'status': push({ t, type: 'status', message: e.message }); update('running', e.message); break;
         case 'spec': push({ t, type: 'spec', spec: e.spec }); break;
         case 'tool': push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary }); break;
-        case 'assembly': push({ t, type: 'assembly', iteration: e.iteration, rationale: e.rationale, instances: e.assembly.instances.length, mass_kg: e.assembly.parts.length }); break;
+        case 'assembly': {
+          const partMass = new Map(e.assembly.parts.map((p) => [p.id, p.mass_kg]));
+          const mass = e.assembly.instances.reduce((m, i) => m + (partMass.get(i.partId) ?? 0), 0);
+          this.liveAssembly.set(job.id, { assembly: e.assembly, iteration: e.iteration, rationale: e.rationale, at: t });
+          push({ t, type: 'assembly', iteration: e.iteration, rationale: e.rationale, instances: e.assembly.instances.length, mass_kg: +mass.toFixed(3) }); break;
+        }
         case 'test': push({ t, type: 'test', iteration: e.iteration, testId: e.result.testId, kind: e.result.kind, passed: e.result.passed, metrics: e.result.metrics, failureReasons: e.result.failureReasons }); break;
         case 'version': {
           const v = e.version;
@@ -106,7 +113,7 @@ export class JobRunner {
       this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('error', now(), invention.id);
       update('error', 'Error', lastVersionId, 'agent_error');
     } finally {
-      setTimeout(() => this.live.delete(job.id), 5 * 60_000).unref();
+      setTimeout(() => { this.live.delete(job.id); this.liveAssembly.delete(job.id); }, 5 * 60_000).unref();
     }
   }
 }
