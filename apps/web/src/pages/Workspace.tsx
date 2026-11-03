@@ -5,7 +5,7 @@ import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
-import BuildProgress from '../components/BuildProgress.tsx';
+import BuildProgress, { BuildStrip, IterationRibbon } from '../components/BuildProgress.tsx';
 import { api, fmt, type InventionDetail, type JobEvent } from '../api.ts';
 import './Workspace.css';
 
@@ -56,6 +56,7 @@ export default function Workspace() {
     const inst = live.assembly.instances.slice(0, Math.max(1, reveal)); const ids = new Set(inst.map((i) => i.id));
     return { ...live.assembly, instances: inst, joints: live.assembly.joints.filter((j) => ids.has(j.a.instanceId) && ids.has(j.b.instanceId)) } as Assembly;
   }, [live, reveal]);
+  const revealGlow = useMemo(() => { if (!live) return new Set<string>(); const inst = live.assembly.instances; return reveal < inst.length && reveal > 0 ? new Set([inst[reveal - 1].id]) : new Set<string>(); }, [live, reveal]);
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
   const [testId, setTestId] = useState<string | null>(null);
@@ -224,12 +225,13 @@ export default function Workspace() {
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
           <div className="workbench-panel-heading">
             <span className="workbench-label">3D simulation</span>
-            {version && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
+            <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={setVersionId} />
+            {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
           </div>
           <div className="workbench-stage">
             {!version && live ? (
               <>
-                <Viewer assembly={liveShown ?? live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={changedIds} onSelect={setSelected} autoRotate />
+                <Viewer assembly={liveShown ?? live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={revealGlow} onSelect={setSelected} autoRotate />
                 <div className="workbench-readout"><span className="workbench-readout-model">assembling · {Math.min(reveal, live.assembly.instances.length)} of {live.assembly.instances.length} components placed · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
               </>
             ) : version ? (
@@ -237,6 +239,7 @@ export default function Workspace() {
             ) : (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} />
             )}
+            {(version || live) && <BuildStrip events={events} running={running} />}
             {version && (
               <div className="workbench-readout">
                 <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{changedIds.size > 0 && <span className="ml-2 text-warn">● {changedIds.size} parts changed</span>}</span>
