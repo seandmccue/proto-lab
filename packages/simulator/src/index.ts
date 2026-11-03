@@ -174,6 +174,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const linearTravel = (motionMeasure?.linearTravel ?? []).map((target) => ({
     ...target, coordinate: target.axis === 'x' ? 0 : target.axis === 'y' ? 1 : 2, min: Infinity, max: -Infinity,
   }));
+  const synchronizedTravel = motionMeasure?.synchronizedTravel;
   const liftPayload = motionMeasure?.payload;
   if (test.kind === 'motion') {
     const { measure, criteria } = test;
@@ -194,6 +195,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
     for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
     for (const { instance } of linearTravel) if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
+    if (synchronizedTravel) {
+      const { instances } = synchronizedTravel;
+      if (new Set(instances).size !== instances.length) failureReasons.push('Synchronized travel needs different instances');
+      for (const id of instances) if (!instById.has(id)) failureReasons.push(`Synchronized travel instance "${id}" not found`);
+    }
     if (measure.followerTiming) {
       const { shaft, followers, minPhaseGap_deg, maxPhaseGap_deg } = measure.followerTiming;
       if (!sims.some(({ joint }) => joint.type === 'revolute' && joint.motor?.controlId === shaft)) {
@@ -230,7 +236,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !orbits.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !synchronizedTravel && !orbits.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -245,6 +251,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const settle = 0.25;
   let payloadGrounded = false;
   const instancePose = (id: string) => compose(rootT(bodyOf.get(id)!), localOffset.get(id)!);
+  const syncCoordinate = synchronizedTravel?.axis === 'x' ? 0 : synchronizedTravel?.axis === 'y' ? 1 : 2;
+  const syncTracks = synchronizedTravel?.instances.map((instance) => ({
+    instance, start: instancePose(instance).position[syncCoordinate], min: 0, max: 0,
+  })) ?? [];
+  let peakSyncSpread = 0;
   const payloadStartHeight = liftPayload ? instancePose(liftPayload.instance).position[1] : 0;
   let payloadHeight = payloadStartHeight, maxPayloadHeight = payloadStartHeight, maxPayloadSeparation = 0;
   const trackMotionInstances = () => {
@@ -253,6 +264,15 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const position = instancePose(travel.instance).position[travel.coordinate];
       travel.min = Math.min(travel.min, position);
       travel.max = Math.max(travel.max, position);
+    }
+    if (syncTracks.length) {
+      const displacements = syncTracks.map((track) => {
+        const displacement = instancePose(track.instance).position[syncCoordinate] - track.start;
+        track.min = Math.min(track.min, displacement);
+        track.max = Math.max(track.max, displacement);
+        return displacement;
+      });
+      peakSyncSpread = Math.max(peakSyncSpread, Math.max(...displacements) - Math.min(...displacements));
     }
     if (liftPayload) {
       const load = instancePose(liftPayload.instance).position;
@@ -374,6 +394,17 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
         const travel = max - min;
         metrics[`${instance}.travel_${axis}_m`] = +travel.toFixed(4);
         if (travel < minTravel_m) failureReasons.push(`${instance} travelled ${travel.toFixed(3)} m along ${axis}, target ${minTravel_m} m`);
+      }
+      if (synchronizedTravel) {
+        const minTravel = Math.min(...syncTracks.map(({ min, max }) => max - min));
+        metrics.synchronizedMinTravel_m = +minTravel.toFixed(5);
+        metrics.synchronizedMaxSpread_m = +peakSyncSpread.toFixed(5);
+        if (minTravel < synchronizedTravel.minTravel_m) {
+          failureReasons.push(`Shortest synchronized travel was ${(minTravel * 1000).toFixed(1)} mm, target ${synchronizedTravel.minTravel_m * 1000} mm`);
+        }
+        if (peakSyncSpread > synchronizedTravel.maxSpread_m) {
+          failureReasons.push(`Synchronized displacement spread reached ${(peakSyncSpread * 1000).toFixed(1)} mm, limit ${synchronizedTravel.maxSpread_m * 1000} mm`);
+        }
       }
       for (const orbit of test.measure.orbits ?? []) {
         const { body, center, minTurns, direction } = orbit;

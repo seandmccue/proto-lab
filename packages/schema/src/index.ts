@@ -221,6 +221,12 @@ export const TestSpec = z.discriminatedUnion('kind', [
         axis: Axis,
         minTravel_m: z.number().positive(),
       })).max(80).optional(),
+      synchronizedTravel: z.object({
+        instances: z.array(z.string().min(1)).min(2).max(16),
+        axis: Axis,
+        minTravel_m: z.number().positive(),
+        maxSpread_m: z.number().positive(),
+      }).optional(),
       orbits: z.array(z.object({
         body: z.string().min(1),
         center: z.string().min(1),
