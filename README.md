@@ -48,6 +48,9 @@ opens the actual assembly and simulation trace.
 - **Not simulated:** aerodynamics, fluids, deformation, fatigue, manufacturability. A butterfly's
   wings flap with measured stroke and rate; nobody claims it flies.
 
+`npm run preflight` checks the running stack the way a judge would see it: model live, featured builds
+passed, gallery and web serving.
+
 ## Model configuration (Meta Model API)
 
 ProtoLab's engineering agent runs on Meta's Muse models through the
