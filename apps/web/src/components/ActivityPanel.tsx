@@ -54,6 +54,8 @@ export default function ActivityPanel({ events, running, versions, currentVersio
   const end = useRef<HTMLLIElement>(null);
   useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
   const visible = events.filter((e) => e.type !== 'version' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
+  const stage = stageOf(events); const elapsed = useElapsed(events, running);
+  const lastStatus = [...events].reverse().find((e) => e.type === 'status');
   return (
     <div className="flex h-full flex-col">
       <div className="px-3 pt-3 pb-2 flex items-center justify-between">
