@@ -128,3 +128,10 @@ test('drawbridge: a plate deck on a servo horn via hinge_back lifts 60° within 
   const endY = r.trace.frames[r.trace.frames.length - 1].bodies.deck.position[1];
   assert.ok(endY > 0.12, `deck centre should rise, got y=${endY}`);
 });
+
+test('quadruped with motor stiffness 8 walks past 45 cm in 6 s (recipe numbers)', async () => {
+  const fast: WalkerParams = { ...TUNED, gait: { ...TUNED.gait, stiffness: 8 } };
+  const r = await runTest(buildWalker(fast), { env, test: { ...walk, id: 'fast_walk', minDistance_m: 0.45 } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.ok(r.metrics.maxTilt_deg < 8 && r.metrics.motorSaturation_fraction < 0.03, JSON.stringify(r.metrics));
+});

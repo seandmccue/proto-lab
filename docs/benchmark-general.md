@@ -219,3 +219,12 @@ Same prompt that burned its 20-minute budget on linkage research: with the measu
 plate hinge pivots in the library, Muse assembled within two minutes and passed its first lift test.
 That closes the last of the four misses; every one of the ten showcase prompts has now passed on the
 current engine.
+
+### Walker speed envelope (measured 2026-11-03 08:00 UTC)
+
+A 20-run walker reliability pass had one "walk 40 cm" run stall at 0.36 m after nine tests. A simulator
+sweep of the hero configuration (chassis-quad-160, DS3218 servos, 60 mm legs, ±0.4 rad at 1 Hz) found the
+lever the model was missing: motor stiffness. At stiffness 5 the quadruped walks 0.30 m in 6 s; at
+stiffness 8–10 it walks 0.48–0.53 m with ≈3° tilt and 0.9 N·m peak hip torque, because the servos track the
+gait instead of lagging it. Longer legs, a bigger chassis, bigger feet, higher cadence and larger
+amplitude all walk worse. The numbers are now in the recipe and locked by a simulator test.
