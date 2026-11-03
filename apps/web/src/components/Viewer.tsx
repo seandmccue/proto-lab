@@ -173,11 +173,11 @@ function Scene(props: ViewerProps) {
 
   return (
     <>
-      <color attach="background" args={[blueprint ? '#0f172a' : mini ? '#f8fafc' : '#eee9fa']} />
+      <color attach="background" args={[blueprint || mini ? '#15112c' : '#eee9fa']} />
       <hemisphereLight args={['#ffffff', '#b9c4d1', 0.9]} />
       <directionalLight position={[0.6, 1.2, 0.8]} intensity={1.6} castShadow shadow-mapSize={[1024, 1024]} shadow-camera-near={0.1} shadow-camera-far={5} shadow-camera-left={-1} shadow-camera-right={1} shadow-camera-top={1} shadow-camera-bottom={-1} />
       <directionalLight position={[-0.8, 0.5, -0.6]} intensity={0.5} />
-      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.6} cellColor={blueprint ? '#1e3a5f' : mini ? '#c7d0db' : '#cfc3e7'} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : mini ? '#9fb0c4' : '#a293c6'} fadeDistance={2.5} infiniteGrid />
+      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.6} cellColor={blueprint ? '#1e3a5f' : mini ? '#352953' : '#cfc3e7'} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : mini ? '#675384' : '#a293c6'} fadeDistance={2.5} infiniteGrid />
       {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={0.25} /></mesh>}
       <group onPointerMissed={() => onSelect?.(null)}>
         {assembly.instances.map((inst: Instance) => {
@@ -229,8 +229,10 @@ export default function Viewer(props: ViewerProps) {
     const timers = [120, 600].map((ms) => setTimeout(() => window.dispatchEvent(new Event('resize')), ms));
     return () => timers.forEach(clearTimeout);
   }, []);
-  if (!ready) return <div className="h-full w-full bg-slate-100" />;
-  const fallback = (
+  if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-slate-100"} />;
+  const fallback = props.mini ? (
+    <IsoPreview assembly={props.assembly} trace={props.test?.trace} playing={props.playing} className="h-full w-full" />
+  ) : (
     <div className="workbench-stage-fallback">
       <IsoPreview assembly={props.assembly} trace={props.test?.trace} playing={props.playing} />
       <p role="status">Showing an isometric preview. Interactive 3D needs WebGL.</p>
