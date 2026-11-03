@@ -21,8 +21,8 @@ publish and remix. Nothing in the gallery is canned: every card is a real build 
 **Numbers (current engine, Meta Model API).** Latest full ten-prompt pass: 10 of 10, median 96 s, 0 API
 errors, no specialist escalation (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker 81 s). Ten
 passes in all: 92 of 100 runs, every miss traced to a measurable cause and written into a recipe or an
-engine rule with a locking simulator test. 20-run walker reliability set:
-18 of 20, both misses re-passed on the updated recipe.
+engine rule with a locking simulator test. 20-run walker reliability set on
+the same engine: 20 of 20, median 81 s.
 
 **What to try in two minutes.** Open the homepage, pick "Mechanical butterfly" or type "Build a windmill
 with four sails on a tower whose rotor turns", and watch the 3D view fill in as parts are mounted; the

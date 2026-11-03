@@ -110,10 +110,10 @@ wheel 74 s, butterfly 92 s); the rest run 3–10 min, dominated by Meta Model AP
 
 `node packages/agent/src/bench.ts --repeats 4 --concurrency 4` runs five prompts four times each
 through the real models and writes `bench-results/summary.md`. Latest run on the universal engine (see
-[docs/benchmark.md](docs/benchmark.md)): 20 runs, **90 % passed**, 0 API errors, median 167 s, 85 %
-of runs made a revision citing a measured result, 75 % failed a walk test and later passed one,
-60 % escalated to Muse Wonder; both misses were traced and fixed (a measured speed note and a
-never-re-run-a-passed-test rule). The run before the empty-assistant-message fix is kept in
+[docs/benchmark.md](docs/benchmark.md)): 20 runs, **20 of 20 passed**, 0 API errors, median 81 s,
+40 % of runs made a revision citing a measured result, 40 % failed a walk test and later passed one,
+15 % escalated to Muse Wonder (the pass before: 18 of 20 at 167 s, both misses traced and fixed with
+a measured speed note and a never-re-run-a-passed-test rule). The run before the empty-assistant-message fix is kept in
 [docs/benchmark-run1-before-fix.md](docs/benchmark-run1-before-fix.md) for honesty.
 
 ## Layout
