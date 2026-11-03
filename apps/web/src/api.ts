@@ -1,4 +1,4 @@
-import type { Assembly, VersionRecord } from '@protolab/schema';
+import type { Assembly, PartDefinition, VersionRecord } from '@protolab/schema';
 
 export function sessionId(): string {
   try {
@@ -39,6 +39,7 @@ export interface Example { id: string; title: string; prompt: string; blurb: str
 export const api = {
   model: () => req<ModelInfo>('/api/model'),
   load: () => req<{ active: number; queued: number; maxConcurrent: number }>('/api/load'),
+  part: (id: string) => req<{ part: PartDefinition }>(`/api/parts/${encodeURIComponent(id)}`),
   examples: () => req<{ examples: Example[] }>('/api/examples'),
   create: (body: { prompt?: string; exampleId?: string }) => req<{ inventionId: string; jobId: string }>('/api/inventions', { method: 'POST', body: JSON.stringify(body), headers: { 'idempotency-key': Math.random().toString(36).slice(2, 18) } }),
   job: (id: string, since = 0) => req<JobStatus>(`/api/jobs/${id}?since=${since}`),

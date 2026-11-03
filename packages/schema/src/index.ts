@@ -256,7 +256,8 @@ export const TestResult = z.object({
 export type TestResult = z.infer<typeof TestResult>;
 
 // ---------- Agent log / versions ----------
-export const ToolLogEntry = z.object({ t: z.string(), tool: z.string(), args: z.unknown(), ok: z.boolean(), summary: z.string() });
+export const PickedPart = z.object({ id: z.string(), name: z.string(), category: z.string(), mass_kg: z.number(), custom: z.boolean(), part: z.unknown().optional() });
+export const ToolLogEntry = z.object({ t: z.string(), tool: z.string(), args: z.unknown(), ok: z.boolean(), summary: z.string(), parts: z.array(PickedPart).optional() });
 export type ToolLogEntry = z.infer<typeof ToolLogEntry>;
 
 export const Decision = z.object({

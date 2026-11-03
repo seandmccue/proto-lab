@@ -56,8 +56,8 @@ export function SpecPanel({ spec }: { spec: Spec }) {
   );
 }
 
-const STAGES = ['Plan', 'Parts', 'Assemble', 'Test', 'Revise', 'Done'] as const;
-function stageOf(events: JobEvent[]): number {
+export const STAGES = ['Plan', 'Parts', 'Assemble', 'Test', 'Revise', 'Done'] as const;
+export function stageOf(events: JobEvent[]): number {
   let s = 0;
   const tools = events.filter((e) => e.type === 'tool').map((e) => String(e.tool));
   if (events.some((e) => e.type === 'spec' && (e.spec as { plan?: unknown })?.plan)) s = 1;
@@ -68,7 +68,7 @@ function stageOf(events: JobEvent[]): number {
   if (events.some((e) => e.type === 'done')) s = 5;
   return s;
 }
-function useElapsed(events: JobEvent[], running: boolean): string {
+export function useElapsed(events: JobEvent[], running: boolean): string {
   const [, tick] = useState(0);
   useEffect(() => { if (!running) return; const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, [running]);
   const first = events[0]?.t ? new Date(events[0].t).getTime() : null; const last = events[events.length - 1]?.t ? new Date(events[events.length - 1].t).getTime() : null;
