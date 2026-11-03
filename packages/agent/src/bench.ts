@@ -44,14 +44,16 @@ async function one(p: { id: string; prompt: string }, run: number): Promise<Row>
   const model = planner ? null : modelConfigFromEnv();
   const specialist = planner ? null : specialistConfigFromEnv();
   const trail: string[] = [];
+  const logPath = resolve(outDir, `${p.id}_${run}.log`); writeFileSync(logPath, '');
+  const note = (line: string) => { trail.push(line); appendFileSync(logPath, `${new Date().toISOString().slice(11, 19)} ${line}\n`); }; // streamed so a running pass can be watched
   const out = await runAgent({ prompt: p.prompt, inventionId: `bench_${p.id}_${run}`, model, specialist, newVersionId: () => `${p.id}_${run}_v${++n}` }, (e: AgentEvent) => {
-    if (e.type === 'tool') { trail.push(`[${e.entry.ok ? 'ok' : 'ERR'}] ${e.entry.tool}: ${e.entry.summary}`); if (e.entry.ok) { if (e.entry.tool === 'sweep_drive' || e.entry.tool === 'sweep_gait') sweeps++; if (e.entry.tool === 'create_part' || e.entry.tool === 'design_part' || e.entry.tool === 'create_parametric_part') custom++; if (e.entry.tool === 'assemble' || e.entry.tool === 'set_drives' || e.entry.tool === 'revise_walker') revisions++; } }
-    if (e.type === 'status') trail.push(`[status] ${e.message}`);
-    if (e.type === 'handoff') { handoffs++; trail.push(`[handoff] ${e.message}`); }
-    if (e.type === 'error') { error = e.message; trail.push(`[error] ${e.message}`); }
-    if (e.type === 'done') trail.push(`[done] ${e.status}: ${e.summary}`);
+    if (e.type === 'tool') { note(`[${e.entry.ok ? 'ok' : 'ERR'}] ${e.entry.tool}: ${e.entry.summary}`); if (e.entry.ok) { if (e.entry.tool === 'sweep_drive' || e.entry.tool === 'sweep_gait') sweeps++; if (e.entry.tool === 'create_part' || e.entry.tool === 'design_part' || e.entry.tool === 'create_parametric_part') custom++; if (e.entry.tool === 'assemble' || e.entry.tool === 'set_drives' || e.entry.tool === 'revise_walker') revisions++; } }
+    if (e.type === 'status') note(`[status] ${e.message}`);
+    if (e.type === 'handoff') { handoffs++; note(`[handoff] ${e.message}`); }
+    if (e.type === 'error') { error = e.message; note(`[error] ${e.message}`); }
+    if (e.type === 'done') note(`[done] ${e.status}: ${e.summary}`);
   });
-  writeFileSync(resolve(outDir, `${p.id}_${run}.log`), trail.join('\n'));
+  void trail;
   for (const v of out.versions.slice(1)) if (Object.keys(v.decisions[0]?.changes ?? {}).length > 0 || v.decisions[0]?.basedOn) meaningful++;
   const walks = out.versions.flatMap((v) => v.tests);
   const firstFailIdx = walks.findIndex((t) => !t.passed);
