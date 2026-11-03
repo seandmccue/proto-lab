@@ -472,3 +472,32 @@ of guessing (`bench-results-hoist`):
 | --- | --- | --- | --- |
 | ferris | 71 s with one rebuild round | **passed, 29 s, first test** | `reordered: placed tower before the ops that mount onto it` |
 | drawbridge | 172 s | **passed, 168 s, first test** | same reorder on `base`; 64° lift amplitude |
+
+
+## Ninth full pass: criteria floor, tower auto-place, batch reorder (v10, 2026-11-03 15:25 UTC)
+
+Current engine with today's three rules (walk-tilt floor, family-named tower auto-place, hoisting a
+batch's own later `place`). `bench-results-general-v10`, concurrency 3:
+
+| Metric | Value |
+| --- | --- |
+| Passed | **10 of 10** |
+| API/model errors | 0 |
+| Median completion time | **95.8 s** (previous passes 172–457 s) |
+| Specialist escalations | 0 |
+| First-try | 9 of 10 (the Muse walker needed one revision: 0.51 m on v2) |
+
+| Prompt | Time | Result |
+| --- | --- | --- |
+| windmill | 15.8 s | passed, `tower.axle` auto-placed |
+| butterfly | 37.5 s | passed |
+| ferris | 47.7 s | passed |
+| muse | 81.4 s | passed, 0.51 m (v2) |
+| crane | 87.4 s | passed |
+| catapult | 95.8 s | passed, landed 0.55 m |
+| crab | 115.4 s | passed, 0.39 m at 4.0° |
+| drawbridge | 122.2 s | passed, custom deck |
+| novel | 127.5 s | passed |
+| claw | 182.9 s | passed |
+
+Across ten full passes: 92 of 100 runs passed.
