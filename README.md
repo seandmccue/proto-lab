@@ -8,6 +8,8 @@ Featured examples: a walking Muse robot, a mechanical butterfly, a miniature Fer
 catapult and a sideways-scuttling crab (three failed tests, a Muse Wonder diagnosis, then 0.32 m at 4.7°
 tilt), all built live by Muse from the same component library and assembly operations.
 
+One-page pitch for judges: [docs/pitch.md](docs/pitch.md). Demo walkthrough: [docs/demo-script.md](docs/demo-script.md).
+
 ## Quick start
 
 ```bash
