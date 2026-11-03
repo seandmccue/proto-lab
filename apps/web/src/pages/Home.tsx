@@ -48,7 +48,7 @@ export default function Home() {
                   {busy ? 'Starting…' : 'Build this'} <span aria-hidden="true">↗</span>
                 </button>
               </div>
-              <p id="invention-scope">The lab currently builds four- and six-legged walkers. Other prompts are interpreted as walkers.</p>
+              <p id="invention-scope">Any mechanism: walkers, flapping wings, Ferris wheels, catapults, claws, drawbridges, cranes, or something nobody has named yet. Muse plans it, picks or designs real parts, and proves it in physics.</p>
             </form>
             {error && <p className="mt-2 text-sm text-rose-700" role="alert">{error}</p>}
             {examples.length > 0 && <div className="lab-examples">
