@@ -17,7 +17,7 @@ const steps = [
 const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
 const drawingRemixId = 'inv_76b7fae5bdf941c9';
-const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift'];
+const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore'];
 
 function penPathSize(test: TestSummary | null | undefined) {
   const width = test?.metrics['pen_tip.travel_x_m'];
@@ -63,7 +63,7 @@ export default function Home() {
 
   useEffect(() => {
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
-    api.gallery('featured', 12).then((r) => setFeatured(r.items)).catch(() => {});
+    api.gallery('featured', 16).then((r) => setFeatured(r.items)).catch(() => {});
     api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
     api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});

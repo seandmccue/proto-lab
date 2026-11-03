@@ -5,6 +5,7 @@ import { buildTriplexPump, measureTriplexPump, triplexPumpTest } from '@protolab
 import { buildTwinDrawbridge, measureTwinDrawbridge, twinDrawbridgeTest } from '@protolab/simulator/twin-drawbridge';
 import { buildDrawingAutomaton, measureDrawingAutomaton, drawingAutomatonTest } from '@protolab/simulator/drawing-automaton';
 import { buildScissorLift, scissorLiftTest } from '@protolab/simulator/scissor-lift';
+import { buildCamSemaphore, measureCamSemaphore, camSemaphoreTest } from '@protolab/simulator/cam-semaphore';
 import { DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { now, versionSummary } from './jobs.ts';
 import type { ObjectStore } from './store.ts';
@@ -114,9 +115,34 @@ const scissorLift: Reference = {
   testSummary: 'Measure platform travel, tilt, and clearance',
 };
 
+const semaphore: Reference = {
+  id: 'inv_cam_semaphore',
+  versionId: 'ver_cam_semaphore_1',
+  title: 'Cam semaphore · one shaft, alternating flags',
+  description: 'Two cams on one shaft physically lift two passive flags in turn. Gravity lowers each flag, leaving a pause between lifts.',
+  prompt: 'Build a two-flag semaphore that alternates using one continuously turning shaft and two physical cams.',
+  plan: {
+    purpose: 'Turn steady rotation into alternating signals with a dwell between lifts.',
+    features: ['One motorized shaft', 'Two opposing cam lobes', 'Two passive guided flags'],
+    motions: ['Each cam lobe pushes its follower up. As the lobe rotates away, gravity lowers the flag. The opposing cam repeats this on the other flag.'],
+    subassemblies: ['Drive shaft and cams', 'Amber flag and slide', 'Teal flag and slide'],
+    successCriteria: ['Both flags move at least 16 mm', 'Flags peak within 15° of a half-turn apart', 'Each flag dwells low at least 1 s per turn'],
+    unverified: ['Physical wear, noise, and friction outside the simulation'],
+  },
+  build: buildCamSemaphore,
+  test: camSemaphoreTest,
+  verify: (result) => {
+    const cycles = measureCamSemaphore(result);
+    return cycles.length >= 3 && cycles.every(({ flags, phaseGap_deg }) =>
+      phaseGap_deg >= 165 && flags.every(({ stroke_m, lowDwell_s }) => stroke_m >= 0.016 && lowDwell_s >= 1));
+  },
+  decision: 'Put the two cam lobes half a turn apart so their passive followers lift in turn.',
+  testSummary: 'Measure both flag strokes and verify their dwell and phase from the recorded trace',
+};
+
 /** Save verified reference mechanisms once, with their real simulation traces. */
 export async function seedReferenceShowcases(db: DatabaseSync, store: ObjectStore, persist?: () => Promise<void>) {
-  for (const reference of [pump, drawbridge, drawing, scissorLift]) {
+  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore]) {
     try {
       await saveReference(reference, db, store, persist);
     } catch (error) {
