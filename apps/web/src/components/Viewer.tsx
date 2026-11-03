@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { Assembly, Axis, Instance, Shape, TestResult, Transform } from '@protolab/schema';
 import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
 import IsoPreview from './IsoPreview.tsx';
+import { diagnosticColors, type DiagnosticTone } from './diagnosticColors.ts';
 
 export interface ViewerProps {
   assembly: Assembly;
@@ -19,6 +20,7 @@ export interface ViewerProps {
   cameraLock?: string;
   selectedId: string | null;
   changedIds?: Set<string>;
+  diagnosticHighlights?: ReadonlyMap<string, DiagnosticTone>;
   onSelect?: (id: string | null) => void;
   timeRef?: MutableRefObject<number>;  // shared current time (s)
   onTime?: (t: number, duration: number) => void;
@@ -28,12 +30,21 @@ export interface ViewerProps {
   captureRef?: MutableRefObject<(() => string | null) | null>;
 }
 
+const diagnosticOutlines = {
+  failure: new THREE.MeshBasicMaterial({ color: diagnosticColors.failure.outline, side: THREE.BackSide }),
+  change: new THREE.MeshBasicMaterial({ color: diagnosticColors.change.outline, side: THREE.BackSide }),
+};
+const ignoreRaycast = () => {};
+
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
-function material(color: string, role: string, blueprint: boolean, selected: boolean, changed: boolean) {
-  const key = `${color}|${role}|${blueprint}|${selected}|${changed}`;
+function material(color: string, role: string, blueprint: boolean, selected: boolean, changed: boolean, diagnostic?: DiagnosticTone) {
+  const key = `${color}|${role}|${blueprint}|${selected}|${changed}|${diagnostic ?? ''}`;
   let m = materialCache.get(key);
   if (!m) {
-    if (blueprint) m = new THREE.MeshStandardMaterial({ color: selected ? '#f28c1d' : changed ? '#f28c1d' : '#4a90e2', wireframe: true, transparent: true, opacity: selected ? 1 : 0.55 });
+    if (diagnostic) {
+      const { surface } = diagnosticColors[diagnostic];
+      m = new THREE.MeshStandardMaterial({ color: surface, emissive: surface, emissiveIntensity: selected ? 0.65 : 0.32, roughness: 0.5, wireframe: blueprint });
+    } else if (blueprint) m = new THREE.MeshStandardMaterial({ color: selected ? '#f28c1d' : changed ? '#f28c1d' : '#4a90e2', wireframe: true, transparent: true, opacity: selected ? 1 : 0.55 });
     else m = new THREE.MeshStandardMaterial({ color: changed ? '#f28c1d' : color, metalness: role === 'motor' ? 0.2 : role === 'contact' ? 0 : 0.55, roughness: role === 'contact' ? 0.9 : role === 'shell' ? 0.6 : 0.35, emissive: selected ? new THREE.Color('#1d6ff2') : new THREE.Color('#000'), emissiveIntensity: selected ? 0.5 : 0 });
     materialCache.set(key, m);
   }
@@ -75,9 +86,13 @@ function shapeGeometry(s: Shape): THREE.BufferGeometry {
   }
 }
 
-function PieceMesh({ piece, mat, onClick }: { piece: Assembly['parts'][number]['geometry'][number]; mat: THREE.Material; onClick?: (e: { stopPropagation: () => void }) => void }) {
+function PieceMesh({ piece, mat, outline, onClick }: { piece: Assembly['parts'][number]['geometry'][number]; mat: THREE.Material; outline?: THREE.Material; onClick?: (e: { stopPropagation: () => void }) => void }) {
   const geometry = useMemo(() => shapeGeometry(piece.shape), [piece.shape]);
-  return <mesh geometry={geometry} position={vec(piece.offset.position)} quaternion={quat(piece.offset.rotation)} material={mat} onClick={onClick} castShadow receiveShadow />;
+  return (
+    <mesh geometry={geometry} position={vec(piece.offset.position)} quaternion={quat(piece.offset.rotation)} material={mat} onClick={onClick} castShadow receiveShadow>
+      {outline && <mesh geometry={geometry} material={outline} scale={1.1} raycast={ignoreRaycast} />}
+    </mesh>
+  );
 }
 
 interface Frame { t: number; bodies: Record<string, Transform> }
@@ -91,7 +106,7 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 }
 
 function Scene(props: ViewerProps) {
-  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, onSelect, follow = true, cameraLock, timeRef, onTime, seekTo, autoRotate, mini } = props;
+  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
   const enteredAt = useRef(new Map<string, number>());
   const entering = useMemo(() => new Set(enteringInstanceIds), [enteringInstanceIds]);
@@ -183,10 +198,11 @@ function Scene(props: ViewerProps) {
         {assembly.instances.map((inst: Instance) => {
           const part = partById.get(inst.partId);
           if (!part) return null;
+          const diagnostic = diagnosticHighlights?.get(inst.id);
           return (
             <group key={inst.id} ref={(g) => { if (g) groups.current[inst.id] = g; }} visible={!visibleInstanceIds || visibleInstanceIds.has(inst.id)} position={vec(inst.transform.position)} quaternion={quat(inst.transform.rotation)}>
               {part.geometry.map((piece, i) => (
-                <PieceMesh key={i} piece={piece} mat={material(piece.color ?? '#aaa', piece.role, blueprint, selectedId === inst.id, !!changedIds?.has(inst.id))} onClick={(e) => { e.stopPropagation(); onSelect?.(inst.id); }} />
+                <PieceMesh key={i} piece={piece} mat={material(piece.color ?? '#aaa', piece.role, blueprint, selectedId === inst.id, !!changedIds?.has(inst.id), diagnostic)} outline={diagnostic && !blueprint ? diagnosticOutlines[diagnostic] : undefined} onClick={(e) => { e.stopPropagation(); onSelect?.(inst.id); }} />
               ))}
             </group>
           );
@@ -230,11 +246,12 @@ export default function Viewer(props: ViewerProps) {
     return () => timers.forEach(clearTimeout);
   }, []);
   if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-slate-100"} />;
+  const previewProps = { assembly: props.assembly, trace: props.test?.trace, playing: props.playing, speed: props.speed, seekTo: props.seekTo, onTime: props.onTime, diagnosticHighlights: props.diagnosticHighlights };
   const fallback = props.mini ? (
-    <IsoPreview assembly={props.assembly} trace={props.test?.trace} playing={props.playing} className="h-full w-full" />
+    <IsoPreview {...previewProps} className="h-full w-full" />
   ) : (
     <div className="workbench-stage-fallback">
-      <IsoPreview assembly={props.assembly} trace={props.test?.trace} playing={props.playing} />
+      <IsoPreview {...previewProps} />
       <p role="status">Showing an isometric preview. Interactive 3D needs WebGL.</p>
     </div>
   );

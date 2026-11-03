@@ -151,6 +151,26 @@
   font: 0.68rem/1.35 var(--font-mono, ui-monospace, monospace);
 }
 
+.workbench-diagnostic {
+  display: grid;
+  gap: 0.18rem;
+  max-width: min(100%, 24rem);
+  padding: 0.42rem 0.65rem;
+  border: 1px solid currentColor;
+  border-inline-start-width: 4px;
+  border-radius: 0.55rem;
+  background: #ecfdf8;
+  color: #08635d;
+  box-shadow: 0 4px 14px #18102f26;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.workbench-diagnostic.is-failure {
+  background: #fff1f4;
+  color: #a40f33;
+}
+
 .workbench-toolbar {
   display: flex;
   flex-wrap: wrap;

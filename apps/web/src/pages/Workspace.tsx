@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { Assembly, TestSpec, VersionRecord } from '@protolab/schema';
+import { tiltDeg, upVector } from '@protolab/parts';
+import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
+import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
 import BuildProgress, { BuildStrip, IterationRibbon, SimulationStatus, keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
@@ -91,6 +93,41 @@ function movedPart(before: Assembly['instances'][number] | undefined, after: Ass
   return !before || before.partId !== after.partId ||
     after.transform.position.some((value, i) => Math.abs(value - before.transform.position[i]) > 1e-4) ||
     Math.abs(after.transform.rotation.reduce((dot, value, i) => dot + value * before.transform.rotation[i], 0)) < 0.99999;
+}
+
+function walkTiltHighlight(assembly: Assembly, test: TestResult, definition: TestSpec | undefined, time: number) {
+  if (test.kind !== 'walk' || test.passed || definition?.kind !== 'walk') return null;
+  const { frames, dt } = test.trace;
+  if (!frames.length || dt <= 0) return null;
+  const end = Math.min(frames.length - 1, Math.round(time / dt));
+  // Brief failures are easy to miss at normal playback speed. Hold the strongest
+  // recent reading long enough to see which side the chassis leaned toward.
+  const start = Math.max(0, Math.ceil((time - 0.45) / dt));
+  let peak = { index: -1, tilt: definition.maxTilt_deg };
+  for (let index = start; index <= end; index++) {
+    const pose = frames[index].bodies[definition.base];
+    const tilt = pose ? tiltDeg(pose.rotation) : 0;
+    if (tilt > peak.tilt) peak = { index, tilt };
+  }
+  if (peak.index < 0) return null;
+  const frame = frames[peak.index];
+  const base = frame.bodies[definition.base];
+
+  const highlights = new Map<string, DiagnosticTone>([[definition.base, 'failure']]);
+  const [leanX, , leanZ] = upVector(base.rotation);
+  const pads = new Set(assembly.parts.filter((part) => part.kind === 'foot_pad').map((part) => part.id));
+  let feet = 0;
+  for (const foot of assembly.instances) {
+    const pose = frame.bodies[foot.id];
+    if (!pads.has(foot.partId) || !pose) continue;
+    const side = (pose.position[0] - base.position[0]) * leanX + (pose.position[2] - base.position[2]) * leanZ;
+    if (side <= 0) continue;
+    feet++;
+    highlights.set(foot.id, 'failure');
+    const link = assembly.joints.find((joint) => joint.type === 'fixed' && joint.b.instanceId === foot.id);
+    if (link) highlights.set(link.a.instanceId, 'failure');
+  }
+  return { highlights, tilt: peak.tilt, feet, limit: definition.maxTilt_deg };
 }
 
 export default function Workspace() {
@@ -327,12 +364,12 @@ export default function Workspace() {
     const s = new Set<string>();
     for (const i of version.assembly.instances) {
       const p = prevMap.get(i.id);
-      if (!p || p.partId !== i.partId || p.transform.position.some((v, k) => Math.abs(v - i.transform.position[k]) > 1e-4) || p.transform.rotation.some((v, k) => Math.abs(v - i.transform.rotation[k]) > 1e-4)) s.add(i.id);
+      if (movedPart(p, i)) s.add(i.id);
     }
     return s;
   }, [version, prevVersion]);
   const driveChangedIds = useMemo(() => {
-    if (!version || !prevVersion || changedIds.size) return new Set<string>();
+    if (!version || !prevVersion) return new Set<string>();
     const before = new Map(prevVersion.assembly.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
     const after = new Map(version.assembly.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
     const ids = new Set<string>();
@@ -341,7 +378,12 @@ export default function Workspace() {
       if (controlId && before.get(controlId) !== after.get(controlId)) ids.add(joint.b.instanceId);
     }
     return ids;
-  }, [version, prevVersion, changedIds]);
+  }, [version, prevVersion]);
+  const revisionHighlights = useMemo(() => {
+    const highlights = new Map<string, DiagnosticTone>();
+    for (const partId of [...changedIds, ...driveChangedIds]) highlights.set(partId, 'change');
+    return highlights;
+  }, [changedIds, driveChangedIds]);
 
   const act = async (mode: 'follow-up' | 'remix', changeRequest: string) => {
     const baselineId = version?.inventionId === id ? version.id : detail?.invention.currentVersionId;
@@ -400,6 +442,12 @@ export default function Workspace() {
   }, [version, test, testSpecKey, testDefinition, prevVersion, sourceId, sourceParentId]);
   const revisionDecision = version?.decisions.slice().reverse().find((decision) =>
     decision.source === 'model' && (decision.previousTestId || decision.basedOn));
+  const tiltHighlight = !showLive && version && test && version.id === versionId
+    ? walkTiltHighlight(version.assembly, test, testDefinition, time.t)
+    : null;
+  const showRevisionHighlights = !showLive && version?.id === versionId && test && storyStep === 1 &&
+    prevVersion?.id === story[0]?.version.id && revisionHighlights.size > 0;
+  const diagnosticHighlights = tiltHighlight?.highlights ?? (showRevisionHighlights ? revisionHighlights : undefined);
   const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
   const finalEvent = finalVersion && detail?.latestJob?.versionId === finalVersion.id
     ? [...events].reverse().find((event) => event.type === 'done' && event.status === 'passed')
@@ -541,12 +589,20 @@ export default function Workspace() {
                 </div>
               </>
             ) : version ? (
-              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} changedIds={comparing && storyStep === 0 ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
+              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={diagnosticHighlights || (comparing && storyStep === 0) ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : running ? (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
             ) : (
               <div className="p-6 text-sm text-slate-400">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
+            {diagnosticHighlights && <div className="workbench-readout">
+              <div className={`workbench-diagnostic ${tiltHighlight ? 'is-failure' : 'is-change'}`}>
+                <strong>{tiltHighlight ? 'Tilt limit exceeded' : stepDecision ? 'Changed by Muse' : 'Changed in this revision'}</strong>
+                <span>{tiltHighlight
+                  ? `${fmt.deg(tiltHighlight.tilt)} recorded tilt · ${fmt.deg(tiltHighlight.limit)} limit${tiltHighlight.feet ? ' · Legs on the lean side outlined' : ''}`
+                  : `${revisionHighlights.size} parts highlighted · pose or drive changes`}</span>
+              </div>
+            </div>}
             {(version || showLive) && <BuildStrip events={events} running={running} />}
             {version && !showLive && (
               <div className="workbench-readout">
