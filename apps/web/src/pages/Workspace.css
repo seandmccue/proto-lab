@@ -74,7 +74,7 @@
   max-width: 100%;
 }
 .workbench-mobile-details { display: none; }
-@media (width <= 40rem) {
+@media (width <= 40rem), (width < 64rem) and (height <= 34rem) {
   .workbench-heading-actions, .workbench-heading-prompt, .workbench-panel-heading .workbench-view-hint { display: none; }
   .workbench-mobile-details {
     display: grid;
@@ -430,6 +430,30 @@
 
   .workbench-grid > :is(.workbench-parts, .workbench-agent) { max-height: max(24rem, 78dvh); }
   .workbench-mobile-nav { display: none; }
+}
+
+@media (width <= 40rem) and (height <= 44rem), (width < 64rem) and (height <= 34rem) {
+  .workbench-heading { padding-block: .5rem; }
+  .workbench-heading .workbench-label { display: none; }
+  .workbench-title { margin: 0; gap: .3rem .5rem; }
+  .workbench-title h1 {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .workbench-mobile-nav { margin-bottom: .4rem; padding: .2rem; }
+  .workbench-panel-heading { padding-block: .4rem; }
+}
+
+@media (orientation: landscape) and (height <= 28rem) {
+  .workbench-stage { height: clamp(7rem, var(--stage-room, 53dvh), 32rem); }
+}
+
+@media (orientation: landscape) and (width < 64rem) and (height <= 28rem) {
+  .workbench .site-header--compact { padding-block: .2rem; }
+  .workbench .site-attribution { display: none; }
+  .workbench-title h1 { -webkit-line-clamp: 1; }
 }
 
 /* Build progress (waiting view before the first assembly) */

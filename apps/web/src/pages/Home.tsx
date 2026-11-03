@@ -58,8 +58,8 @@ export default function Home() {
     : drawingBaseline?.tests.at(-1));
   const remixPath = penPathSize(drawingRemix?.latestTest);
   const spotlightId = drawingRemix && originalPath && remixPath ? drawingRemix.id : null;
-  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId).slice(0, 6);
-  const recentPrototypes = recent.filter((item) => item.id !== spotlightId).slice(0, 6);
+  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId);
+  const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
   useEffect(() => {
@@ -228,9 +228,9 @@ export default function Home() {
             {references.length > 0 && <div className="invention-grid">{references.map((item) => <GalleryCard key={item.id} item={item} replay />)}</div>}
           </section>
         )}
-        {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} browse={{ to: '/gallery?view=mine', label: 'All your inventions' }} />}
-        <Section title="Prototype gallery" items={featuredPrototypes} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery', label: 'View gallery' }} />
-        <Section title="Recent" items={recentPrototypes} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
+        {mine.length > 0 && <Section title="Your inventions" items={mine} previewCount={3} blurb="Your private and published builds saved in this browser." browse={{ to: '/gallery?view=mine', label: 'All your inventions' }} />}
+        <Section title="Prototype gallery" items={featuredPrototypes} previewCount={6} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery?view=featured', label: 'All featured inventions' }} />
+        <Section title="Recent" items={recentPrototypes} previewCount={6} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
         {(!spotlightId || otherRemixes.length > 0) && <Section title="Remixes" items={otherRemixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />}
         <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
           <div className="lab-section-heading">
@@ -275,7 +275,10 @@ export default function Home() {
   );
 }
 
-function Section({ title, items, blurb, empty, browse }: { title: string; items: InventionPublic[]; blurb?: string; empty?: string; browse?: { to: string; label: string } }) {
+function Section({ title, items, previewCount, blurb, empty, browse }: { title: string; items: InventionPublic[]; previewCount?: number; blurb?: string; empty?: string; browse?: { to: string; label: string } }) {
+  const [expanded, setExpanded] = useState(false);
+  const hiddenCount = Math.max(0, items.length - (previewCount ?? items.length));
+  const visibleItems = expanded || !hiddenCount ? items : items.slice(0, previewCount);
   return (
     <section className="lab-section">
       <div className="lab-section-heading">
@@ -286,7 +289,12 @@ function Section({ title, items, blurb, empty, browse }: { title: string; items:
         {browse && <Link to={browse.to} className="btn-secondary">{browse.label} <span aria-hidden="true">↗</span></Link>}
       </div>
       {items.length === 0 ? <p className="lab-empty">{empty ?? 'Loading…'}</p> : (
-        <div className="invention-grid">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>
+        <div className="invention-grid">{visibleItems.map((i) => <GalleryCard key={i.id} item={i} />)}</div>
+      )}
+      {hiddenCount > 0 && (
+        <button className="btn-secondary mt-4" type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show fewer' : `Show ${hiddenCount} more`} <span className="sr-only">in {title}</span>
+        </button>
       )}
     </section>
   );

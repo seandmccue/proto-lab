@@ -84,6 +84,7 @@ export default function Gallery() {
               <button key={id} type="button" onClick={() => setParams(id === 'recent' ? {} : { view: id })} aria-pressed={view === id}>{label}</button>
             ))}
           </div>
+          {view === 'mine' && <p className="mb-4 text-sm text-muted">Inventions saved in this browser. Private builds appear here and on your homepage.</p>}
           <GalleryResults key={view} view={view} />
         </section>
       </main>

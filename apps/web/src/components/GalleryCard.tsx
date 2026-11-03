@@ -20,6 +20,7 @@ export default function GalleryCard({ item, replay = false }: { item: InventionP
       <div className="invention-card__preview">
         <GalleryPreview key={item.currentVersionId ?? item.id} item={item} hover={hover} testId={lastTest?.testId} />
         <div className="invention-card__tags">
+          {item.visibility === 'private' && <span>Private</span>}
           {item.featured && <span>Featured</span>}
           {item.sourceInventionId && <span>Remix</span>}
         </div>
