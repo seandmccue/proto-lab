@@ -29,7 +29,14 @@ export function driveValue(p: DriveProfile, t: number, ramp: number): number {
 }
 export function controlTargets(ctl: Controller, t: number): Record<string, { value: number; mode: 'position' | 'velocity' }> {
   const out: Record<string, { value: number; mode: 'position' | 'velocity' }> = {};
-  for (const d of ctl.drives) { const ramp = d.rampIn_s > 0 ? Math.min(1, t / d.rampIn_s) : 1; out[d.controlId] = { value: driveValue(d.profile, t, ramp), mode: d.mode }; }
+  for (const d of ctl.drives) {
+    // Blend in over rampIn_s, but never approach a far-away initial position target faster than ~0.6 rad/s (or m/s):
+    // a servo commanded 0.55 rad away from the assembled pose at t = 0 would otherwise spike the controller demand.
+    const p0 = d.mode === 'position' ? Math.abs(driveValue(d.profile, 0, 1)) : 0;
+    const dur = Math.max(d.rampIn_s, p0 / 0.6);
+    const ramp = dur > 0 ? Math.min(1, t / dur) : 1;
+    out[d.controlId] = { value: driveValue(d.profile, t, ramp), mode: d.mode };
+  }
   return out;
 }
 
