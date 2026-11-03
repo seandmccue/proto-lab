@@ -71,3 +71,24 @@ test('launch test: a free ball on a tray flung by a servo arm lands and reports 
   assert.ok(r.metrics.landingDistance_m > 0.05, `distance ${r.metrics.landingDistance_m}`);
   assert.ok(r.trace.frames.length > 50);
 });
+
+test('flapping: catalog butterfly wings on the winged body rise together with one sine drive', async () => {
+  const r0 = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'body', part: 'body-butterfly-80', position: [0, 0.2, 0], anchored: true },
+    { op: 'mount', id: 'wingL', part: 'wing-butterfly-200-left', onto: 'body', connector: 'wing_L0', via: 'hinge', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'flapL', stiffness: 0.5, damping: 0.05 } },
+    { op: 'mount', id: 'wingR', part: 'wing-butterfly-200', onto: 'body', connector: 'wing_R0', via: 'hinge', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'flapR', stiffness: 0.5, damping: 0.05 } },
+  ], getPart);
+  const a = setDrives(r0.assembly, [
+    { controlId: 'flapL', mode: 'position', rampIn_s: 0.2, profile: { kind: 'sine', amplitude: 0.7, offset: 0, frequency_hz: 2, phase: 0 } },
+    { controlId: 'flapR', mode: 'position', rampIn_s: 0.2, profile: { kind: 'sine', amplitude: 0.7, offset: 0, frequency_hz: 2, phase: 0 } },
+  ]);
+  const r = await runTest(a, { env, test: { kind: 'motion', id: 'flap_1', duration_s: 3, measure: { joints: ['flapL', 'flapR'], base: 'body', clearancePairs: [['wingL', 'wingR']], noGroundContact: ['wingL', 'wingR'] }, criteria: { minJointAmplitude_rad: 0.5, torqueWithinRating: true } } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  // both wing tips move up and down in phase: sample the trace at the last frame and a quarter period earlier
+  const frames = r.trace.frames; const last = frames[frames.length - 1];
+  const tipY = (f: typeof last, id: string) => { const b = f.bodies[id]; const q = b.rotation; const [x, y, z, w] = q; const p: [number, number, number] = [0.2, 0, 0]; // rotate local tip
+    const tx = 2 * (y * p[2] - z * p[1]), ty = 2 * (z * p[0] - x * p[2]), tz = 2 * (x * p[1] - y * p[0]);
+    return b.position[1] + p[1] + w * ty + (z * tx - x * tz); };
+  let maxDiff = 0; for (const f of frames.slice(-60)) maxDiff = Math.max(maxDiff, Math.abs(tipY(f, 'wingL') - tipY(f, 'wingR')));
+  assert.ok(maxDiff < 0.02, `wing tips should move together, max height difference ${maxDiff.toFixed(3)} m`);
+});

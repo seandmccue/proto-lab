@@ -66,3 +66,23 @@ test('hexapod walker builds with 6 legs', () => {
   const a = buildWalker({ ...DEFAULT_WALKER, legCount: 6, chassisPartId: 'chassis-hex-200', gait: { ...DEFAULT_WALKER.gait, gaitType: 'tripod', swingDuty: 0.5 } });
   assert.equal(a.instances.filter((i) => i.id.startsWith('foot_')).length, 6);
 });
+
+test('butterfly: catalog wings mount on the winged body, span outward, forewings toward the head', () => {
+  const body = getPart('body-butterfly-80')!, wl = getPart('wing-butterfly-200-left')!, wr = getPart('wing-butterfly-200')!;
+  assert.ok(body.limits.maxTorque_Nm && body.limits.maxTorque_Nm > 0);
+  const r = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'body', part: body.id, position: [0, 0.2, 0], anchored: true },
+    { op: 'mount', id: 'wingL', part: wl.id, onto: 'body', connector: 'wing_L0', via: 'hinge', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'flapL', stiffness: 2, damping: 0.1 } },
+    { op: 'mount', id: 'wingR', part: wr.id, onto: 'body', connector: 'wing_R0', via: 'hinge', joint: 'revolute', spin_deg: 0, offset_m: 0, motor: { controlId: 'flapR', stiffness: 2, damping: 0.1 } },
+  ], getPart);
+  const inst = (id: string) => r.assembly.instances.find((i) => i.id === id)!;
+  const tipL = transformPoint(inst('wingL').transform, [0.2, 0, 0]), tipR = transformPoint(inst('wingR').transform, [0.2, 0, 0]);
+  assert.ok(tipL[2] > 0.15, `left tip should point +Z, got ${tipL}`);
+  assert.ok(tipR[2] < -0.15, `right tip should point −Z, got ${tipR}`);
+  assert.ok(Math.abs(tipL[1] - tipR[1]) < 1e-6 && Math.abs(tipL[0] - tipR[0]) < 1e-6, 'tips are symmetric');
+  // forewing lobe (profile +chord for the right wing, −chord for the mirrored left) must point toward the head (+X) on both sides
+  const foreL = transformPoint(inst('wingL').transform, [0.1, 0, -0.05]), foreR = transformPoint(inst('wingR').transform, [0.1, 0, 0.05]);
+  assert.ok(foreL[0] > 0.03 && foreR[0] > 0.03, `forewings toward +X: ${foreL[0]} ${foreR[0]}`);
+  // both joints run along the body axis (±X) and carry the body's torque rating
+  for (const j of r.assembly.joints) { assert.ok(Math.abs(Math.abs(j.axis![0]) - 1) < 1e-9, `axis ${j.axis}`); assert.equal(j.motor?.maxTorque_Nm, body.limits.maxTorque_Nm); }
+});

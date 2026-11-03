@@ -4,7 +4,7 @@
 apps/web          React + Vite + React Three Fiber. Homepage, workspace (3D replay, tree, BOM, activity, plan, tests), gallery, remix, publish.
 apps/api          Hono on Node. SQLite metadata (node:sqlite), local object store for manifests/traces/previews, in-process job runner.
 packages/schema   zod schema v2: shapes, parts, connectors, instances, joints (fixed/revolute/prismatic/spring), drives, plan/spec, tests, traces, versions.
-packages/parts    geometry engine (profiles, extrusions, revolves, hulls), 35 generators, 100-part catalog, assembly-operations engine, external assets.
+packages/parts    geometry engine (profiles, extrusions, revolves, hulls), 36 generators, 100+-part catalog, assembly-operations engine, external assets.
 packages/simulator Rapier harness: identity-frame rigid groups, anchored/free bodies, motors with saturation, collision events, four test kinds.
 packages/agent    Meta Model API client (Muse Spark / Wonder), validated tool runtime, ten-step planning prompt, Wonder escalation, benchmark harness.
 ```
