@@ -88,6 +88,13 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   return { versions, status, summary, modelId, spec: rt.spec };
 }
 
+/** The assemble/set_drives op lists that produced the parent's final assembly (from its tool log). */
+function parentOps(parent: VersionRecord): unknown[] {
+  const ops: unknown[] = [];
+  for (const e of parent.toolLog) if (e.ok && e.tool === 'assemble') { const a = e.args as { ops?: unknown[] }; if (a?.ops) ops.push(...a.ops); }
+  return ops;
+}
+
 function systemPrompt(parent?: VersionRecord | null): string {
   return `You are the ProtoLab engineering agent: an autonomous mechanical designer. The user describes an invention; you turn it into a working, recognisable, interactive mechanical prototype using real components, structured assembly operations and a rigid-body physics simulator. You act only through tools. Every decision is yours and must come from catalog data or measured test results; never claim a result you did not measure.
 
@@ -110,7 +117,12 @@ Worked recipes (adapt, do not copy blindly):
 • Flapping wing: mount a wing {via:"root", joint:"revolute", motor} onto a body connector whose axis is the hinge axis (wing root hinge is about X: the wing spans +X from the root; a body connector with axis ±Z makes the wing lie flat and flap up/down about the Z... choose the connector axis = desired hinge axis). Drive with sine, amplitude 0.5–1.0 rad, 1–3 Hz, same phase for both wings.
 • Wheel on a tower: place tower anchored at the origin; mount the spoked wheel {onto:"tower",connector:"axle",via:"hub",joint:"revolute",motor:{controlId:"spin",stiffness:0.5,damping:0.2}}; gondolas {onto:"wheel",connector:"rim_0",via:"hanger",joint:"revolute"} then {op:"pattern",instances:["cab"],kind:"polar",axis:"z",center:[0,<axle height>,0],count:8}; drive spin with {mode:"velocity", profile:{kind:"constant", value:1.5}, rampIn_s:1}; test motion with minRevolutions and clearancePairs gondola↔tower.
 • Catapult: anchored base plate; servo on the plate; arm (leg_segment via pivot, spin_deg ≈ 195 so it stands up leaning back) with a tray on its tip; projectile placed free on the tray; drive {kind:"step", before:0, after:-1.4, at_s:0.5}; launch test on the projectile.
-${parent ? `\nThis is a remix of an existing design. Its assembly summary: ${JSON.stringify({ family: parent.assembly.family, instances: parent.assembly.instances.length, parts: parent.assembly.parts.map((p) => p.id), drives: parent.assembly.controller.drives.length })}. Previous tests: ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, passed: t.passed, metrics: t.metrics })))}. Rebuild it with ops, apply the change request, keep what worked.` : ''}`;
+${parent ? `\nThis is a remix of an existing design. Rebuild it from its recorded operations, apply the change request, keep what worked.
+Parent parts: ${JSON.stringify(parent.assembly.parts.map((p) => p.id))}
+Parent assembly ops (last successful build, in order): ${JSON.stringify(parentOps(parent)).slice(0, 6000)}
+Parent drives: ${JSON.stringify(parent.assembly.controller.drives).slice(0, 2000)}
+Parent tests: ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics })))}
+Custom parts the parent created must be re-created with create_part/design_part before use (their definitions: ${JSON.stringify(parent.assembly.parts.filter((p) => p.kind === 'designed' || p.id.startsWith('custom-')).map((p) => ({ id: p.id, kind: p.kind, name: p.name, params: p.params, category: p.category, material: p.material, pieces: p.kind === 'designed' ? p.geometry.map((g) => ({ shape: g.shape, offset: g.offset, color: g.color, role: g.role })) : undefined, connectors: p.kind === 'designed' ? p.connectors : undefined }))).slice(0, 5000)}).` : ''}`;
 }
 
 async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
