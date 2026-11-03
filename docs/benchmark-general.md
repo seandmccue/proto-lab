@@ -327,3 +327,12 @@ The drawbridge re-run also fixed a simulator behaviour: a position drive whose f
 the assembled pose (a sine with offset 0.55 and phase 0) used to be commanded there at t = 0, so
 stiffness 40 × 0.55 rad showed up as a 22 N·m demand spike. Drives now approach such a target no faster
 than 0.6 rad/s (measured: 1.3 N·m instead of 22), the way a real servo would be commanded (PR #83, #84).
+
+### Crane re-run with the servo-sizing note (v7d, 2026-11-03 11:02 UTC)
+
+| Prompt | Before | Re-run | Note |
+| --- | --- | --- | --- |
+| crane | first test failed on torque in every pass (228–391 s, 2–3 versions) | **passed, first test, 161 s** | 3.5 N·m luff servo chosen from the boom length before testing |
+
+With that, every one of the ten showcase prompts has a simulator-measured recipe and has passed on its
+first test at least once on the current engine.
