@@ -516,3 +516,16 @@ position. `bench-results-search-positions`, concurrency 2:
 | crane | 87 s | **passed, 177 s** | 5 → 6 (mounted by id from the index and fetched geometry in two parallel rounds) |
 
 4 of 4, 0 errors. Lookups fell 18 → 7; the crane's time went to deliberation, not lookups.
+
+### Crane, claw, novel gadget with part sizes in the catalog index (v10c, 2026-11-03 16:06 UTC)
+
+The index in the prompt now lists each part's L×H×W. `bench-results-index-dims`, concurrency 3:
+
+| Prompt | Result | get_part calls | Note |
+| --- | --- | --- | --- |
+| crane | **passed, 90 s** | 4 | first-try |
+| claw | **passed, 150 s** | 6 | first-try |
+| novel | **passed, 235 s** | 4 | first combined test put a revolutions criterion on the swinging joint; split into spin and swing tests (both passed), then lost ~90 s trying to redefine the combined test, which the criteria lock refuses. The rejection now says to define a new test id instead |
+
+Sizes in the index did not reduce geometry lookups (claw 1 → 6, crane 6 → 4 is run-to-run noise);
+they stay because they cost ~350 tokens and make sizing decisions possible without a round. 3 of 3, 0 errors.
