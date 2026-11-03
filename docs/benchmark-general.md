@@ -373,3 +373,15 @@ missed this time (nine tests, four sweeps, two Wonder consults, best 0.21 m): se
 Across eight full passes and their re-runs on the current engine, every one of the ten showcase prompts
 has passed on its first test, and the misses in each pass were traced to a measurable cause, measured,
 and written into the recipe with a locking simulator test.
+
+### Windmill and drawbridge after the second batch-recovery round (v8c, 2026-11-03 11:28 UTC)
+
+| Prompt | v8 | Re-run | Note |
+| --- | --- | --- | --- |
+| windmill | 385 s, 3 versions | 99 s, 2 versions | first test still lost to "tower touched rotor" |
+| drawbridge | 506 s | **167 s, first test** | base auto-placed, deck lifted and lowered within rating |
+
+The windmill's recurring "tower touched rotor" turned out to be a simulator artefact, not a design
+fault: the rotor hub and the tower's axle boss overlap at the bearing and were colliding, so every flush
+mount failed clearance and the large rotor jammed at 0.42 rev. Joined parts no longer collide with each
+other and are exempt from clearance checks (PR #92); a flush-mounted windmill-4x600 now spins clear.
