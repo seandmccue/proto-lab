@@ -428,3 +428,11 @@ gains and duty each build used (PR #96).
 | Prompt | v9 | Re-run | Note |
 | --- | --- | --- | --- |
 | crab | failed, 9 tests chasing a self-set 6° limit | **passed, first test, 205 s, 0.37 m at 3.5° tilt** | gait from the recipe (±0.4 rad, 1 Hz, swingDuty 0.3), now visible in the trail |
+
+### Output-budget experiment (v9c, 2026-11-03 11:58 UTC)
+
+The slowest rounds (160–200 s) are long deliberations under the 16k-token output budget. Three slow
+prompts re-run with `MODEL_MAX_TOKENS=8192`: novel 411 s → 122 s, crane 162 s → 152 s, but drawbridge
+172 s → 281 s with one cut-off and three versions. Single runs are noisy and the smaller budget trades
+speed for cut-off risk, so the default stays at 16k; the knob is documented in `.env.example` for anyone
+who wants to try it on their prompts.
