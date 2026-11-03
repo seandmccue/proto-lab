@@ -94,10 +94,10 @@ test('flapping: catalog butterfly wings on the winged body rise together with on
 });
 
 test('hexapod walks with the measured wave gait (recipe numbers)', async () => {
-  const hex: WalkerParams = { ...TUNED, legCount: 6, chassisPartId: 'chassis-hex-200', gait: { ...TUNED.gait, swingDuty: 0.3 } };
-  const r = await runTest(buildWalker(hex), { env, test: { ...walk, id: 'hex_walk' } });
+  const hex: WalkerParams = { ...TUNED, legCount: 6, chassisPartId: 'chassis-hex-200', gait: { ...TUNED.gait, swingDuty: 0.3, stiffness: 8 } };
+  const r = await runTest(buildWalker(hex), { env, test: { ...walk, id: 'hex_walk', minDistance_m: 0.35 } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
-  assert.ok(r.metrics.distance_m >= 0.3 && r.metrics.maxTilt_deg < 10, JSON.stringify(r.metrics));
+  assert.ok(r.metrics.distance_m >= 0.35 && r.metrics.maxTilt_deg < 10, JSON.stringify(r.metrics));
 });
 
 test('hexapod placed across the walk direction scuttles sideways (walk test direction z)', async () => {
