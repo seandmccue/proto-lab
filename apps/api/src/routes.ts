@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import type { VersionRecord } from '@protolab/schema';
-import { catalog, generatorInfo } from '@protolab/parts';
+import { catalog, generatorInfo, getPart } from '@protolab/parts';
 import { modelConfigFromEnv, DETERMINISTIC_MODEL_ID, prettyModelName, explainDesign } from '@protolab/agent';
 import type { ObjectStore } from './store.ts';
 import { JobRunner, newId, now, stripTrace, versionSummary } from './jobs.ts';
@@ -37,6 +37,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.get('/api/model', (c) => c.json({ ...attribution(), detail: modelStatus.detail }));
   app.get('/api/load', (c) => c.json(runner.load()));
+  app.get('/api/parts/:id', (c) => { const part = getPart(c.req.param('id')); return part ? c.json({ part }) : c.json({ error: 'Not found' }, 404); });
   app.get('/api/examples', (c) => c.json({ examples: EXAMPLES }));
 
   app.post('/api/inventions', async (c) => {

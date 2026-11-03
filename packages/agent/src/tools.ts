@@ -125,7 +125,8 @@ export class ToolRuntime {
     this.calls++;
     if (this.calls > this.budget.maxToolCalls) throw new Error(`Tool-call budget (${this.budget.maxToolCalls}) exhausted; call finalize_design.`);
     const t = new Date().toISOString();
-    const log = (ok: boolean, summary: string) => this.events.onLog({ t, tool: name, args: rawArgs, ok, summary });
+    const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
+    const log = (ok: boolean, summary: string, parts?: ReturnType<typeof picked>[]) => this.events.onLog({ t, tool: name, args: rawArgs, ok, summary, parts });
     try {
       switch (name) {
         case 'write_plan': {
@@ -143,13 +144,13 @@ export class ToolRuntime {
           const a = SearchArgs.parse(rawArgs);
           const res = searchCatalog(a.query, { category: a.category, limit: a.limit ?? 8 });
           const custom = [...this.customParts.values()].filter((p) => !a.category || p.category === a.category);
-          log(true, `${res.length + custom.length} parts for "${a.query}"${a.category ? ` in ${a.category}` : ''}`);
+          log(true, `${res.length + custom.length} parts for "${a.query}"${a.category ? ` in ${a.category}` : ''}`, [...custom, ...res].slice(0, 8).map((p) => picked(p)));
           return { parts: [...custom, ...res].map((p) => this.summarisePart(p)), generators: a.query === '' ? generatorInfo().map((g) => `${g.kind}(${Object.keys(g.params).join(',')})`) : undefined };
         }
         case 'get_part': {
           const a = GetPartArgs.parse(rawArgs); const p = this.resolve(a.part_id);
           if (!p) throw new Error(`Unknown part id "${a.part_id}"`);
-          log(true, p.name);
+          log(true, p.name, [picked(p)]);
           return { part: { ...this.summarisePart(p), description: p.description, material: p.material, connectors: p.connectors, geometry: p.geometry.map((g) => ({ shape: g.shape.kind, role: g.role, offset: g.offset.position })) } };
         }
         case 'create_part': {
@@ -159,7 +160,7 @@ export class ToolRuntime {
           if (a.name) p.name = a.name;
           if (a.color) for (const g of p.geometry) if (g.role !== 'contact' && g.role !== 'motor') g.color = a.color;
           this.customParts.set(id, p);
-          log(true, `Created ${p.name} (${id})`);
+          log(true, `Created ${p.name} (${id})`, [picked(p, true)]);
           return { part: this.summarisePart(p) };
         }
         case 'design_part': {
@@ -174,7 +175,7 @@ export class ToolRuntime {
           const ext = pieces.reduce((m, g) => { const h = g.offset.position; return [Math.max(m[0], Math.abs(h[0]) + r * 0.5), Math.max(m[1], Math.abs(h[1]) + r * 0.5), Math.max(m[2], Math.abs(h[2]) + r * 0.5)] as [number, number, number]; }, [0, 0, 0] as [number, number, number]);
           const p = PartDefinition.parse({ id, kind: 'designed', name: a.name, category: a.category, description: a.description || `Designed part: ${a.name}`, params: {}, mass_kg: mass, dimensions_m: ext, material: a.material, geometry: pieces, connectors: a.connectors, limits: {}, cost_usd: 5, source: { kind: 'designed', license: 'CC0-1.0', creator: 'ProtoLab agent (model-designed, geometry-engine validated)' } });
           this.customParts.set(id, p);
-          log(true, `Designed ${p.name} (${id}): ${pieces.length} pieces, ${a.connectors.length} connectors, ${(mass * 1000).toFixed(0)} g`);
+          log(true, `Designed ${p.name} (${id}): ${pieces.length} pieces, ${a.connectors.length} connectors, ${(mass * 1000).toFixed(0)} g`, [picked(p, true)]);
           return { part: this.summarisePart(p) };
         }
         case 'assemble': {

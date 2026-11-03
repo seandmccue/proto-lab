@@ -13,7 +13,7 @@ export const now = () => new Date().toISOString();
 export type PublicEvent =
   | { t: string; type: 'status'; message: string }
   | { t: string; type: 'spec'; spec: unknown }
-  | { t: string; type: 'tool'; tool: string; ok: boolean; summary: string }
+  | { t: string; type: 'tool'; tool: string; ok: boolean; summary: string; parts?: unknown[] }
   | { t: string; type: 'assembly'; iteration: number; rationale: string; instances: number; mass_kg: number }
   | { t: string; type: 'test'; iteration: number; testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] }
   | { t: string; type: 'version'; versionId: string; iteration: number; status: string }
@@ -77,7 +77,7 @@ export class JobRunner {
         case 'spec': push({ t, type: 'spec', spec: e.spec }); break;
         case 'tool':
           if (!e.entry.ok) console.warn(`[agent] ${e.entry.tool} rejected: ${e.entry.summary} | args: ${JSON.stringify(e.entry.args ?? null).slice(0, 600)}`); // so input shorthand the model uses can be added to the normalisers
-          push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary }); break;
+          push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary, parts: e.entry.parts }); break;
         case 'assembly': {
           const partMass = new Map(e.assembly.parts.map((p) => [p.id, p.mass_kg]));
           const mass = e.assembly.instances.reduce((m, i) => m + (partMass.get(i.partId) ?? 0), 0);

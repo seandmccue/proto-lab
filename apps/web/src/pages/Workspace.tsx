@@ -5,6 +5,7 @@ import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
+import BuildProgress from '../components/BuildProgress.tsx';
 import { api, fmt, type InventionDetail, type JobEvent } from '../api.ts';
 import './Workspace.css';
 
@@ -40,6 +41,21 @@ export default function Workspace() {
   const [versionId, setVersionId] = useState<string | null>(null);
   const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
   const [load, setLoad] = useState<{ active: number; queued: number; maxConcurrent: number } | null>(null); // queue hint while this build waits for a worker
+  // Drop-in reveal: when a new live assembly arrives, its parts appear one by one instead of all at once.
+  const [reveal, setReveal] = useState(0);
+  useEffect(() => {
+    if (!live) { setReveal(0); return; }
+    const total = live.assembly.instances.length; let n = Math.min(reveal, total);
+    if (n >= total) return;
+    const id = setInterval(() => { n += 1; setReveal(n); if (n >= total) clearInterval(id); }, 110);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
+  const liveShown = useMemo(() => {
+    if (!live) return null;
+    const inst = live.assembly.instances.slice(0, Math.max(1, reveal)); const ids = new Set(inst.map((i) => i.id));
+    return { ...live.assembly, instances: inst, joints: live.assembly.joints.filter((j) => ids.has(j.a.instanceId) && ids.has(j.b.instanceId)) } as Assembly;
+  }, [live, reveal]);
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
   const [testId, setTestId] = useState<string | null>(null);
@@ -213,17 +229,13 @@ export default function Workspace() {
           <div className="workbench-stage">
             {!version && live ? (
               <>
-                <Viewer assembly={live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={changedIds} onSelect={setSelected} autoRotate />
-                <div className="workbench-readout"><span className="workbench-readout-model">assembling · {live.assembly.instances.length} components · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
+                <Viewer assembly={liveShown ?? live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={changedIds} onSelect={setSelected} autoRotate />
+                <div className="workbench-readout"><span className="workbench-readout-model">assembling · {Math.min(reveal, live.assembly.instances.length)} of {live.assembly.instances.length} components placed · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
               </>
             ) : version ? (
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : (
-              <div className="flex h-full items-center justify-center text-slate-400">
-                <div className="max-w-md text-center"><div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-accent" />{jobStatus === 'queued' && load && load.queued > 0 && <p className="mb-2 text-sm text-slate-600">Queued behind {load.queued} other build{load.queued === 1 ? '' : 's'} ({load.active} of {load.maxConcurrent} workers busy). The lab runs {load.maxConcurrent} builds at once.</p>}<p className="text-sm">{events.length ? String(events[events.length - 1].message ?? events[events.length - 1].summary ?? 'Working…') : 'Starting the engineering agent…'}</p>
-                  <p className="mt-3 text-xs text-slate-400">Muse is planning, choosing parts and assembling before the first simulation. Simple mechanisms finish in about a minute, legged or multi-stage ones in 3–10 minutes; each model round is 5–60 s. The 3D view fills in as soon as the first parts are mounted.</p>
-                  <p className="mt-2 text-xs"><Link to="/gallery" className="text-accent hover:underline">Open a finished build in the gallery while you wait →</Link></p></div>
-              </div>
+              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} />
             )}
             {version && (
               <div className="workbench-readout">

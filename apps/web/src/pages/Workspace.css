@@ -235,3 +235,27 @@
   .workbench-stage { height: auto; flex: 1 1 auto; }
   .workbench-mobile-nav { display: none; }
 }
+
+/* Build progress (waiting view before the first assembly) */
+.build-progress { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem 1.1rem; overflow: auto; }
+.build-progress-stages { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; font: 600 0.72rem/1 var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; text-transform: uppercase; }
+.build-progress-stages li { display: inline-flex; align-items: center; gap: 0.35rem; color: #94a3b8; }
+.build-progress-stages li[data-state='done'] { color: #047857; }
+.build-progress-stages li[data-state='active'] { color: var(--violet-dark, #4c1d95); }
+.build-progress-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #cbd5e1; }
+li[data-state='done'] .build-progress-dot { background: #10b981; }
+li[data-state='active'] .build-progress-dot { background: var(--violet, #6d28d9); animation: bp-pulse 1.2s ease-in-out infinite; }
+.build-progress-blurb { font-size: 0.8rem; color: #64748b; }
+.build-progress-now { display: flex; align-items: center; gap: 0.75rem; border: 1px solid var(--bench-line, #e2e8f0); border-radius: 0.75rem; background: var(--bench-panel, #fff); padding: 0.6rem 0.8rem; }
+.build-progress-spinner { flex: none; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 2px solid #e2e8f0; border-top-color: var(--violet, #6d28d9); animation: bp-spin 0.9s linear infinite; }
+.build-progress-spinner.is-thinking { animation-duration: 2.4s; border-top-color: #f59e0b; }
+@keyframes bp-spin { to { transform: rotate(360deg); } }
+@keyframes bp-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
+
+/* Parts bin */
+.parts-bin { border: 1px solid var(--bench-line, #e2e8f0); border-radius: 0.75rem; background: var(--bench-panel, #fff); padding: 0.6rem 0.8rem; }
+.parts-bin-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+.parts-bin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: 0.5rem; list-style: none; margin: 0; padding: 0; }
+.parts-bin-card { border: 1px solid #eef2f7; border-radius: 0.5rem; padding: 0.4rem; background: #fafafa; animation: pb-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes pb-in { from { opacity: 0; transform: translateY(10px) scale(0.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .parts-bin-card, .build-progress-dot, .build-progress-spinner { animation: none; } }
