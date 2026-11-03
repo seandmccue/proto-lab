@@ -17,7 +17,13 @@ export function Metrics({ metrics, kind }: { metrics: Record<string, number>; ki
     if (k === 'peakHipTorque_Nm' && metrics.hipServoRating_Nm) { rows.push(['Hip torque', `${fmt.nm(v)} / ${fmt.nm(metrics.hipServoRating_Nm)}`]); continue; }
     if (k === 'peakKneeTorque_Nm' && metrics.kneeServoRating_Nm) { rows.push(['Knee torque', `${fmt.nm(v)} / ${fmt.nm(metrics.kneeServoRating_Nm)}`]); continue; }
     if (k.endsWith('.rating')) continue;
-    if (k.includes('.')) { const [j, m] = k.split('.'); if (m.startsWith('peak')) { const rating = metrics[`${j}.rating`]; rows.push([`${j} ${m.startsWith('peakTorque') ? 'torque' : 'force'}`, rating ? `${v.toFixed(3)} / ${rating}` : v.toFixed(3)]); continue; } rows.push([`${j} ${m.replace(/_.*/, '')}`, fmtMetric(m, v)]); continue; }
+    if (k.includes('.')) {
+      const [j, m] = k.split('.');
+      if (m.startsWith('peakTorque') || m.startsWith('peakForce')) { const rating = metrics[`${j}.rating`]; const unit = m.startsWith('peakTorque') ? 'N·m' : 'N'; rows.push([`${j} ${m.startsWith('peakTorque') ? 'torque' : 'force'}`, rating ? `${v.toFixed(3)} / ${rating} ${unit}` : `${v.toFixed(3)} ${unit}`]); continue; }
+      if (m.startsWith('peakRate')) { rows.push([`${j} peak rate`, `${v.toFixed(2)} ${m.endsWith('rad_s') ? 'rad/s' : 'm/s'}`]); continue; }
+      if (m.startsWith('cycles')) { rows.push([`${j} cadence`, `${v.toFixed(2)} Hz`]); continue; }
+      rows.push([`${j} ${m.replace(/_.*/, '')}`, fmtMetric(m, v)]); continue;
+    }
     rows.push([LABELS[k] ?? k, fmtMetric(k, v)]);
   }
   void kind;
