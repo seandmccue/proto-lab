@@ -462,3 +462,13 @@ tower for a family-named structure id, and the summary's vertical extent is tigh
 | --- | --- | --- | --- |
 | windmill | 41 s | **passed, 25 s** | `tower.axle` auto-placed as tower-500 in the first batch |
 | ferris | 74 s | **passed, 71 s** | the model placed its tower later in the same batch; auto-place guessed first and the model's own place orphaned the wheel (one rebuild round). Fixed since: a batch's own later `place` is hoisted ahead of the mounts that use it |
+
+### Ferris wheel and drawbridge after the batch-reorder fix (v9f, 2026-11-03 15:18 UTC)
+
+Both first batches mounted onto an id the batch only placed later; `applyOps` reordered them instead
+of guessing (`bench-results-hoist`):
+
+| Prompt | Before | Re-run | Note |
+| --- | --- | --- | --- |
+| ferris | 71 s with one rebuild round | **passed, 29 s, first test** | `reordered: placed tower before the ops that mount onto it` |
+| drawbridge | 172 s | **passed, 168 s, first test** | same reorder on `base`; 64° lift amplitude |
