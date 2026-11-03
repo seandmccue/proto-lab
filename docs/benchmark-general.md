@@ -174,3 +174,37 @@ Same prompt that had failed after nine tests in 24 minutes: with the measured he
 prompt, Muse built the proven configuration, kept the carapace under the mass budget, and passed on its
 first test. One wasted round (a mount onto an instance it had not placed yet) is now answered with a
 hint that lists the existing instances and the place op to use.
+
+## Fourth pass on the hardened engine (v4, 2026-11-03 07:35 UTC)
+
+All ten prompts, same engine as the gallery (PRs #27–#59: Wonder fallback, wing library, hexapod recipe,
+move-with-attached, torque tolerance, 120-op batches, 20-min budget).
+
+| Metric | Value |
+| --- | --- |
+| Success rate | **90 % (9/10)** |
+| Errors (API/model) | **0 %** |
+| Median completion time | 351 s |
+| Mean iterations (versions) | 2.1 |
+| Runs creating a custom part | 70 % |
+| Runs escalated to the specialist | 20 % |
+
+| Prompt | Result | Time | Versions | Custom parts | Handoffs | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferris | passed | 104 s | 1 | 0 | 0 | 8-spoke Ø400 wheel on tower-300, first try |
+| butterfly | passed | 173 s | 1 | 0 | 0 | Winged body + left/right catalog wings, first try |
+| muse | passed | 242 s | 7 | 2 | 4 | DS3218 quadruped with hood shell; two Wonder consults |
+| catapult | passed | 390 s | 5 | 4 | 2 | 300 mm arm, tray, foam pizza; one Wonder consult |
+| crab | passed | 351 s | 2 | 3 | 0 | Hexapod chassis yawed 90°, scuttles sideways (direction z) |
+| windmill | passed | 277 s | 1 | 1 | 0 | 4-sail rotor hub on tower-500 |
+| claw | passed | 574 s | 2 | 1 | 0 | Two 3.5 N·m servos, mirrored fingers, holds the block |
+| drawbridge | failed | 1391 s | 0 | 4 | 0 | Spent the 20-min budget designing decks and a clevis for an actuator linkage; never assembled (honest finalize) |
+| crane | passed | 377 s | 1 | 1 | 0 | Luffing boom on an A-frame, first try |
+| novel | passed | 157 s | 1 | 0 | 0 | Pinwheel on a pole with a pendulum, first try |
+
+Across the four passes on the current engine that is 36 of 40 runs passed, with every miss traced to a
+specific cause and fixed: a direction-only walk test, two Wonder 503s, the crab's missing recipe, and now
+the drawbridge, whose rounds took 4–5 minutes each while Muse reasoned about a four-bar linkage. The fix
+is the same as for the crab: plates gained `hinge_back` / `hinge_front` pivots, the prompt quotes a
+simulator-measured drawbridge (a 300 × 150 × 6 mm deck needs 1.23 N·m at the hinge; a 3.5 N·m servo lifts it
+to 64°), and after a dozen tool calls with nothing assembled the loop asks for a first build.

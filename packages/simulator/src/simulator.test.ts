@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWalker, walkerOps, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setDrives, getPart, type WalkerParams } from '@protolab/parts';
+import { buildWalker, walkerOps, DEFAULT_WALKER, danceDrives, applyOps, emptyAssembly, setDrives, getPart, generatePart, type WalkerParams } from '@protolab/parts';
 import { runTest, driveValue } from './index.ts';
 
 const env = { gravity_m_s2: 9.81, groundFriction: 0.9 };
@@ -111,4 +111,20 @@ test('hexapod placed across the walk direction scuttles sideways (walk test dire
   const r = await runTest(a, { env, test: { ...walk, id: 'side_walk', direction: 'z' } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics.distance_m >= 0.3, JSON.stringify(r.metrics));
+});
+
+test('drawbridge: a plate deck on a servo horn via hinge_back lifts 60° within rating (recipe numbers)', async () => {
+  const deck = generatePart('plate', { length: 0.3, width: 0.15, thickness: 0.006 }, 'deck-300x150');
+  const resolve = (id: string) => (id === deck.id ? deck : getPart(id));
+  const r0 = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'base', part: 'base-plate-300x200', position: [0, 0.004, 0], anchored: true },
+    { op: 'mount', id: 'servo', part: 'servo-high-torque-35', onto: 'base', connector: 'top_back', via: 'bottom', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'deck', part: deck.id, onto: 'servo', connector: 'horn', via: 'hinge_back', joint: 'revolute', spin_deg: 180, offset_m: 0, motor: { controlId: 'lift', stiffness: 40, damping: 2 } },
+  ], resolve);
+  const a = setDrives(r0.assembly, [{ controlId: 'lift', mode: 'position', rampIn_s: 0, profile: { kind: 'ramp', from: 0, to: 1.1, start_s: 0.5, duration_s: 3 } }]);
+  const r = await runTest(a, { env, test: { kind: 'motion', id: 'lift', duration_s: 5, measure: { joints: ['lift'], base: 'base', clearancePairs: [['deck', 'base']], noGroundContact: ['deck'] }, criteria: { minJointAmplitude_rad: 1.0, torqueWithinRating: true } } });
+  assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
+  assert.ok(r.metrics['lift.peakTorque_Nm'] < 2, `torque ${r.metrics['lift.peakTorque_Nm']}`);
+  const endY = r.trace.frames[r.trace.frames.length - 1].bodies.deck.position[1];
+  assert.ok(endY > 0.12, `deck centre should rise, got y=${endY}`);
 });
