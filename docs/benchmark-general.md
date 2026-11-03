@@ -446,7 +446,7 @@ Two runs, concurrency 2 (`bench-results-crab-tilt`):
 
 | Run | Result | Time | Distance | Tilt |
 | --- | --- | --- | --- | --- |
-| crab #1 | **passed, first test** | 203 s | 0.39 m | 3.95° |
+| crab #1 | **passed, first test** | 171 s | 0.39 m | 3.95° |
 | crab #2 | **passed, first test** | 204 s | 0.37 m | 5.16° |
 
 Both from the recipe (chassis-hex-200 yawed 90°, servo-ds3218 stiffness 8, swingDuty 0.3), no handoff.
