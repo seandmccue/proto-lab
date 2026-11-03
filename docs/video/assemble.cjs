@@ -16,21 +16,21 @@ const plan = [
   { slide: '03-intro', len: 5.2, narr: '03' },
   { slide: '04-muse', len: 5.8, narr: '04' },
   { slide: '05-describe', len: 1.8, narr: '05' },
-  { clip: b, from: 6.0, to: 18.5, speed: 1.6 },          // typing the brief, Build live
+  { clip: b, from: 6.0, to: 18.5, speed: 1.6, cap: 'describe' },          // typing the brief, Build live
   { slide: '06-parts', len: 1.8, narr: '06' },
-  { clip: b, from: 26.5, to: 37.0, speed: 'fit:6' },     // blueprint desk: parts picked and planned
+  { clip: b, from: 26.5, to: 37.0, speed: 'fit:6', cap: 'parts' },     // blueprint desk: parts picked and planned
   { slide: '07-assemble', len: 1.8, narr: '07' },
-  { clip: b, from: 37.2, to: 44.8, speed: 1 },           // first assembly appears, real time
+  { clip: b, from: 37.2, to: 44.8, speed: 1, cap: 'assemble' },           // first assembly appears, real time
   { slide: '08-simulate', len: 1.8, narr: '08' },
-  { clip: b, from: 52.0, to: 60.0, speed: 1.3 },         // walk test running
-  { clip: 'crab', from: 1.0, to: 12.5, speed: 'fit:7' }, // crab: failed revision, Wonder's fix, passed
+  { clip: b, from: 52.0, to: 60.0, speed: 1.3, cap: 'walk' },         // walk test running
+  { clip: 'crab', from: 1.0, to: 12.5, speed: 'fit:7', cap: 'crab' }, // crab: failed revision, Wonder's fix, passed
   { slide: '09-pass', len: 1.8, narr: '09' },
-  { clip: b, from: 64.0, to: 75.0, speed: 'fit:8' },     // dance test runs and passes
-  { clip: b, from: 85.5, to: 91.0, speed: 1 },           // tests passed, orbit
+  { clip: b, from: 64.0, to: 75.0, speed: 'fit:8', cap: 'dance' },     // dance test runs and passes
+  { clip: b, from: 85.5, to: 91.0, speed: 1, cap: 'orbit' },           // tests passed, orbit
   { slide: '09b-proof', len: 7.8, narr: '12' },
   { slide: '10-print', len: 3.4, narr: '10' },
-  { clip: 'workbench', from: 6.0, to: 20.0, speed: 'fit:7', narr: '11' }, // explode, blueprint, tests
-  { clip: 'gallery', from: 2.0, to: 14.0, speed: 'fit:4' },
+  { clip: 'workbench', from: 6.0, to: 20.0, speed: 'fit:7', narr: '11', cap: 'workbench' }, // explode, blueprint, tests
+  { clip: 'gallery', from: 2.0, to: 14.0, speed: 'fit:4', cap: 'gallery' },
   { slide: '11-close', len: 6.5 },
 ];
 // --- render segments ----------------------------------------------------------------------------------
@@ -43,7 +43,9 @@ plan.forEach((p, i) => {
   } else {
     const src = path.join(CLIPS, p.clip + '.webm'); const span = Math.max(0.5, p.to - p.from);
     const speed = typeof p.speed === 'string' ? Math.max(1, span / Number(p.speed.split(':')[1])) : p.speed; len = span / speed;
-    ff(['-ss', String(p.from), '-t', String(span), '-i', src, '-vf', `setpts=PTS/${speed.toFixed(4)},${VF},fade=t=in:st=0:d=0.25,fade=t=out:st=${Math.max(0, len - 0.3).toFixed(2)}:d=0.3`, '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-an', out]);
+    const vchain = `setpts=PTS/${speed.toFixed(4)},${VF}`; const fades = `fade=t=in:st=0:d=0.25,fade=t=out:st=${Math.max(0, len - 0.3).toFixed(2)}:d=0.3`;
+    if (p.cap) ff(['-ss', String(p.from), '-t', String(span), '-i', src, '-i', path.join(V, 'captions', p.cap + '.png'), '-filter_complex', `[0:v]${vchain}[v];[v][1:v]overlay=0:0:format=auto,${fades}[out]`, '-map', '[out]', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-an', out]);
+    else ff(['-ss', String(p.from), '-t', String(span), '-i', src, '-vf', `${vchain},${fades}`, '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-an', out]);
     len = dur(out);
   }
   if (p.narr) narr.push({ id: p.narr, start: t });
