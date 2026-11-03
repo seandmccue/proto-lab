@@ -15,8 +15,10 @@ cp .env.example .env     # add MODEL_API_KEY from dev.meta.ai to use Meta Muse
 npm run dev              # API on http://localhost:8787, web on http://localhost:5173
 ```
 
-On first boot the API seeds three featured gallery items by running the real agent (a few seconds
-each). Nothing in the gallery is canned: every card opens the actual assembly and simulation trace.
+On first boot the API seeds four featured gallery items (Muse walker, butterfly, Ferris wheel, pizza
+catapult) by running the real agent through the Meta Model API; each takes a few minutes, and the
+workbench shows the assembly taking shape while it runs. Nothing in the gallery is canned: every card
+opens the actual assembly and simulation trace.
 
 ## What is real
 
