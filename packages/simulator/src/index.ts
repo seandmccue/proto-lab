@@ -164,6 +164,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const frames: Trace['frames'] = []; const steps = Math.round(test.duration_s / DT); const traceEvery = Math.round(1 / (TRACE_HZ * DT));
   let maxTilt = 0, minHeight = start.position[1], fell = false, fellAt = -1, energy = 0;
   const settle = 0.25;
+  let payloadGrounded = false;
   let clearanceHit: string | null = null, groundHit: string | null = null, landing: Vec3 | null = null, maxProjHeight = projStart?.position[1] ?? 0, released = false;
   const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
   const snapshot = (t: number) => {
@@ -211,7 +212,9 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (!started) return;
       const i1 = colliderOwner.get(h1), i2 = colliderOwner.get(h2);
       const isG = h1 === groundCol.handle || h2 === groundCol.handle;
-      if (isG) { const other = h1 === groundCol.handle ? i2 : i1; if (other && noGround.has(other) && !groundHit) groundHit = other; if (test.kind === 'launch' && other === test.projectile && released && !landing) { const p = projRb!.translation(); landing = [p.x, p.y, p.z]; } }
+      if (isG) { const other = h1 === groundCol.handle ? i2 : i1; if (other && noGround.has(other) && !groundHit) groundHit = other;
+        if (test.kind === 'grip' && other === test.payload && t >= test.supportUntil_s && !payloadGrounded) payloadGrounded = true; // a payload that lands on the floor was not held
+        if (test.kind === 'launch' && other === test.projectile && released && !landing) { const p = projRb!.translation(); landing = [p.x, p.y, p.z]; } }
       else if (i1 && i2 && !clearanceHit && test.kind === 'motion') { for (const [a, b] of test.measure.clearancePairs) if ((a === i1 && b === i2) || (a === i2 && b === i1)) clearanceHit = `${i1} touched ${i2}`; }
     });
     if (support && test.kind === 'grip' && t >= test.supportUntil_s) { world.removeCollider(support, false); support = null; }
@@ -281,7 +284,9 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const pe = payRb!.translation(), he = rootT(bodyOf.get(test.holder)!); const sep = len(sub([pe.x, pe.y, pe.z], he.position)) - len(sub(payStart!.position, holderStart!.position));
       metrics.payloadSeparation_m = +Math.abs(sep).toFixed(4); metrics.payloadHeight_m = +pe.y.toFixed(4); metrics.payloadDrop_m = +(payStart!.position[1] - pe.y).toFixed(4);
       const js = jointStats([...ctlJoints.keys()]); for (const s of js) reportJoint(s, s.joint.motor!.controlId);
-      if (Math.abs(sep) > test.maxSeparation_m || payStart!.position[1] - pe.y > test.maxSeparation_m) failureReasons.push(`Payload slipped: separation ${Math.abs(sep).toFixed(3)} m, dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m (limit ${test.maxSeparation_m} m)`);
+      metrics.payloadGrounded = payloadGrounded ? 1 : 0;
+      if (payloadGrounded) failureReasons.push(`Payload fell to the ground after the support was removed at ${test.supportUntil_s} s (dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m)`);
+      else if (Math.abs(sep) > test.maxSeparation_m || payStart!.position[1] - pe.y > test.maxSeparation_m) failureReasons.push(`Payload slipped: separation ${Math.abs(sep).toFixed(3)} m, dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m (limit ${test.maxSeparation_m} m)`);
       saturationNote();
       break;
     }
