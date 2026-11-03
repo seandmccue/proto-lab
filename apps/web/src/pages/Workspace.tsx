@@ -595,19 +595,17 @@ export default function Workspace() {
             ) : (
               <div className="p-6 text-sm text-slate-400">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
-            {diagnosticHighlights && <div className="workbench-readout">
-              <div className={`workbench-diagnostic ${tiltHighlight ? 'is-failure' : 'is-change'}`}>
-                <strong>{tiltHighlight ? 'Tilt limit exceeded' : stepDecision ? 'Changed by Muse' : 'Changed in this revision'}</strong>
-                <span>{tiltHighlight
-                  ? `${fmt.deg(tiltHighlight.tilt)} recorded tilt · ${fmt.deg(tiltHighlight.limit)} limit${tiltHighlight.feet ? ' · Legs on the lean side outlined' : ''}`
-                  : `${revisionHighlights.size} parts highlighted · pose or drive changes`}</span>
-              </div>
-            </div>}
             {(version || showLive) && <BuildStrip events={events} running={running} />}
             {version && !showLive && (
               <div className="workbench-readout">
-                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!(comparing && storyStep === 0) && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
+                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!diagnosticHighlights && !(comparing && storyStep === 0) && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
                 {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
+                {diagnosticHighlights && <div className={`workbench-diagnostic${tiltHighlight ? ' is-failure' : ''}`}>
+                  <strong>{tiltHighlight ? 'Tilt limit exceeded' : stepDecision ? 'Changed by Muse' : 'Changed in this revision'}</strong>
+                  <span>{tiltHighlight
+                    ? `${fmt.deg(tiltHighlight.tilt)} recorded tilt · ${fmt.deg(tiltHighlight.limit)} limit${tiltHighlight.feet ? ' · Legs on the lean side highlighted' : ''}`
+                    : `${revisionHighlights.size} parts highlighted · pose or drive changes`}</span>
+                </div>}
               </div>
             )}
           </div>
