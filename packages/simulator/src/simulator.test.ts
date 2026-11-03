@@ -179,7 +179,8 @@ test('catapult range is set by arm length: a 140 mm arm on the 8 N·m servo land
     { op: 'mount', id: 'tray', part: 'tray-45', onto: 'arm', connector: 'tip', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
   ], resolve);
   const tray = r0.assembly.instances.find((i) => i.id === 'tray')!;
-  const r1 = applyOps(r0.assembly, [{ op: 'place', id: 'pizza', part: 'foam-pizza-80', position: [tray.transform.position[0], tray.transform.position[1] + 0.03, tray.transform.position[2]], free: true }], resolve);
+  void tray;
+  const r1 = applyOps(r0.assembly, [{ op: 'mount', id: 'pizza', part: 'foam-pizza-80', onto: 'tray', connector: 'payload', via: 'bottom', joint: 'free', spin_deg: 0, offset_m: 0 }], resolve);
   const a = setDrives(r1.assembly, [{ controlId: 'throw', mode: 'position', rampIn_s: 0, profile: { kind: 'step', before: 0, after: -1.4, at_s: 0.5 } }]);
   const r = await runTest(a, { env, test: { kind: 'launch', id: 'l', duration_s: 5, projectile: 'pizza', targetDistance_m: 0.6, tolerance_m: 0.15, direction: 'x' } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));

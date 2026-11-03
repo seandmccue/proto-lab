@@ -19,7 +19,7 @@ export const PlaceOp = z.object({
 export const MountOp = z.object({
   op: z.literal('mount'), id: z.string(), part: z.string(), label: z.string().optional(), group: z.string().optional(),
   onto: z.string(), connector: z.string(), via: z.string().optional(),   // parent instance + connector; child connector (default: first compatible)
-  joint: z.enum(['fixed', 'revolute', 'prismatic']).default('fixed'),
+  joint: z.enum(['fixed', 'revolute', 'prismatic', 'free']).default('fixed'),   // 'free': place the part resting at the connector with no joint (a payload on a tray)
   spin_deg: z.number().default(0),          // rotation of the child about the mate axis
   offset_m: z.number().default(0),          // extra separation along the mate axis
   limits: z.tuple([z.number(), z.number()]).optional(),   // rad or m
@@ -149,7 +149,13 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
       case 'mount': {
         unique(op.id, i); const p = usePart(op.part, i); const parent = inst(op.onto, i); const pp = partById.get(parent.partId)!;
         const pc = connectorOf(pp, op.connector);
-        const cc = connectorOf(p, op.via, op.joint);
+        const cc = connectorOf(p, op.via, op.joint === 'free' ? 'fixed' : op.joint);
+        if (op.joint === 'free') { // a free body (payload / projectile) set down so its connector touches the parent's: no joint is created
+          const T = mateTransform(parent.transform, pc, p, cc, (op.spin_deg * Math.PI) / 180, op.offset_m + 0.002);
+          a.instances.push(Instance.parse({ id: op.id, partId: p.id, label: op.label ?? p.name, group: op.group ?? parent.group, transform: T, anchored: false, free: true }));
+          summary.push(`set ${op.id} (${p.name}) free on ${op.onto}.${pc.id}`);
+          break;
+        }
         if (op.joint === 'revolute' && pc.kind !== 'revolute' && pc.kind !== 'any' && cc.kind !== 'revolute' && cc.kind !== 'any') throw new AssemblyError(`Neither connector ${op.onto}.${pc.id} nor ${op.part}.${cc.id} is revolute`, i);
         if (op.joint === 'prismatic' && pc.kind !== 'prismatic' && pc.kind !== 'any' && cc.kind !== 'prismatic' && cc.kind !== 'any') throw new AssemblyError(`Neither connector is prismatic`, i);
         const T = mateTransform(parent.transform, pc, p, cc, (op.spin_deg * Math.PI) / 180, op.offset_m);
