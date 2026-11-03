@@ -17,6 +17,7 @@ const steps = [
 const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
 const drawingRemixId = 'inv_76b7fae5bdf941c9';
+const gimbalRepairId = 'inv_d3f76fcc393b49d6';
 const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal'];
 
 function penPathSize(test: TestSummary | null | undefined) {
@@ -58,7 +59,9 @@ export default function Home() {
     : drawingBaseline?.tests.at(-1));
   const remixPath = penPathSize(drawingRemix?.latestTest);
   const spotlightId = drawingRemix && originalPath && remixPath ? drawingRemix.id : null;
-  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId);
+  const gimbalRepair = featured.find((item) => item.id === gimbalRepairId && item.latestTest?.passed);
+  const gimbalTilt = gimbalRepair?.latestTest?.metrics['tray.maxTilt_deg'];
+  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id);
   const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
@@ -201,7 +204,7 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {(references.length > 0 || spotlightId || orrery) && (
+        {(references.length > 0 || spotlightId || orrery || gimbalRepair) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">
               <div>
@@ -223,6 +226,20 @@ export default function Home() {
                   <div><dt>Muse remix</dt><dd>{remixPath}</dd></div>
                 </dl>
                 <Link to={`/i/${spotlightId}?replay=1&compare=1`} className="btn-secondary">Compare pen paths <span aria-hidden="true">↗</span></Link>
+              </article>
+            )}
+            {gimbalRepair && Number.isFinite(gimbalTilt) && (
+              <article className="lab-test-example mb-4">
+                <div>
+                  <span className="lab-label">Muse repair</span>
+                  <h3>Two motors move. The camera stays level.</h3>
+                  <p>Watch the first tray tip, then see how Muse’s revision holds it level through both powered sweeps.</p>
+                </div>
+                <dl aria-label="Measured peak tray tilt">
+                  <div><dt>Passing revision</dt><dd>{gimbalTilt?.toFixed(2)}°</dd></div>
+                  <div><dt>Maximum allowed</dt><dd>10°</dd></div>
+                </dl>
+                <Link to={`/i/${gimbalRepair.id}?replay=1&compare=1`} className="btn-secondary">Compare gimbal simulations <span aria-hidden="true">↗</span></Link>
               </article>
             )}
             {references.length > 0 && <div className="invention-grid">{references.map((item) => <GalleryCard key={item.id} item={item} replay />)}</div>}

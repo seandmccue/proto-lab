@@ -196,6 +196,23 @@ if (judge) checks.push(
     }
     return 'both powered axes moved while the tray stayed within 1° of level';
   }],
+  ['Muse two-axis repair', async () => {
+    const id = 'inv_d3f76fcc393b49d6';
+    const { invention, versions } = await publicBuild(id);
+    const first = versions.find(({ iteration }) => iteration === 1);
+    if (!first) throw new Error('Expected the initial two-axis failure');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, invention.currentVersionId)]);
+    const sweeps = (test: TestResult) => ['pitch', 'roll'].every((joint) =>
+      test.metrics[`${joint}.minSwing_rad`] <= -0.35 && test.metrics[`${joint}.maxSwing_rad`] >= 0.35);
+    if (before.modelId !== 'muse-spark-1.3' || after.modelId !== 'muse-wonder-1.0'
+      || after.assembly.controller.drives.length !== 2
+      || !recorded(before, (test) => !test.passed && sweeps(test) && test.metrics['tray.maxTilt_deg'] > 10)
+      || !recorded(after, (test) => test.passed && sweeps(test) && test.metrics['tray.maxTilt_deg'] <= 10
+        && test.metrics.groundContactViolation === 0)) {
+      throw new Error('Expected the initial Spark failure and the Wonder leveling pass with both drives still moving');
+    }
+    return 'Wonder repaired leveling while preserving both signed sweeps';
+  }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
     if (!invention.featured) throw new Error('Expected the clock to be featured');

@@ -302,18 +302,25 @@ export function setDrives(a: Assembly, drives: Drive[]): Assembly {
 }
 
 /** Assembly summary for the model: instances, joints, motors, drives, mass, extents. */
-export function summarize(a: Assembly) {
+export function summarize(a: Assembly, includePoseDetails = false) {
   const partById = new Map(a.parts.map((p) => [p.id, p]));
   let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const x of a.instances) { const p = partById.get(x.partId); const r = p ? piecesBoundingRadius(p.geometry) : 0; const [px, py, pz] = x.transform.position; minX = Math.min(minX, px - r); maxX = Math.max(maxX, px + r); const [lo, hi] = p ? piecesVerticalExtent(p.geometry, x.transform) : [py, py]; minY = Math.min(minY, lo); maxY = Math.max(maxY, hi); minZ = Math.min(minZ, pz - r); maxZ = Math.max(maxZ, pz + r); }
   return {
-    instances: a.instances.map((x) => ({ id: x.id, part: x.partId, group: x.group, position_m: x.transform.position.map((v) => +v.toFixed(4)), anchored: x.anchored || undefined, free: x.free || undefined })),
-    joints: a.joints.map((j) => ({ id: j.id, type: j.type, a: `${j.a.instanceId}.${j.a.connectorId}`, b: `${j.b.instanceId}.${j.b.connectorId}`, axis: j.axis?.map((v) => +v.toFixed(3)), limits: j.limits, motor: j.motor ? { controlId: j.motor.controlId, rating: j.motor.maxTorque_Nm ?? j.motor.maxForce_N } : undefined })),
+    instances: a.instances.map((x) => ({ id: x.id, part: x.partId, group: x.group, position_m: x.transform.position.map((v) => +v.toFixed(4)), anchored: x.anchored || undefined, free: x.free || undefined,
+      ...(includePoseDetails ? {
+        localY_world: rotate(x.transform.rotation, [0, 1, 0]).map((v) => +v.toFixed(3)),
+        mass_kg: partById.get(x.partId)?.mass_kg,
+      } : {}),
+    })),
+    joints: a.joints.map((j) => ({ id: j.id, type: j.type, a: `${j.a.instanceId}.${j.a.connectorId}`, b: `${j.b.instanceId}.${j.b.connectorId}`, axis: j.axis?.map((v) => +v.toFixed(3)), limits: j.limits,
+      ...(includePoseDetails ? { anchor_m: j.anchor?.map((v) => +v.toFixed(4)) } : {}),
+      motor: j.motor ? { controlId: j.motor.controlId, rating: j.motor.maxTorque_Nm ?? j.motor.maxForce_N } : undefined })),
     drives: a.controller.drives,
     totalMass_kg: +totalMass(a).toFixed(4),
     extents_m: a.instances.length ? { x: [+minX.toFixed(3), +maxX.toFixed(3)], y: [+minY.toFixed(3), +maxY.toFixed(3)], z: [+minZ.toFixed(3), +maxZ.toFixed(3)] } : null,
     lowestPoint_m: a.instances.length ? +minY.toFixed(3) : null,
-    note: 'Ground is the plane y = 0. Anchored instances are fixed to the world. Free instances have no joints.',
+    note: 'Ground is the plane y = 0. Anchored instances are fixed to the world. Free instances participate in contact and can have joints.',
   };
 }
 

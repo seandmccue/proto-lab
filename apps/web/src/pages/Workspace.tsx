@@ -256,6 +256,14 @@ export default function Workspace() {
     const before = ownBaseline ?? sourceVersion;
     const after = revisionResultId === undefined ? versions[versions.length - 1] : versions.find((v) => v.id === revisionResultId);
     const saved = replayStory(versions);
+    if (replayLink && detail?.invention.id === 'inv_d3f76fcc393b49d6' && saved[1]) {
+      const initial = versions.find((version) => version.id === 'ver_26bf003825cd48d9');
+      const failure = initial?.tests.find((test) => !test.passed && sameTestName(test, saved[1].test));
+      if (initial && failure) return [
+        { version: initial, test: failure, label: 'Before revision' },
+        ...saved.slice(1),
+      ];
+    }
     if (replayLink && detail?.invention.id === curatedOrreryId) {
       const initial = versions.find((version) => version.id === 'ver_39ff127f0f23431a');
       const revision = versions.at(-1);

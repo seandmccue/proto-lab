@@ -207,6 +207,10 @@ function ModelHandoff({ events, versions, before, after }: {
   const handoff = revision.findIndex((event) => event.type === 'handoff'
     && event.from === from.modelId && event.to === to.modelId);
   if (handoff < 0) return null;
+  const lastTest = revision.slice(0, handoff).reverse().find((event) => event.type === 'test');
+  const failedIteration = lastTest
+    ? lastTest.passed === false && typeof lastTest.iteration === 'number' ? lastTest.iteration : null
+    : from.iteration;
   const actions = revision.slice(handoff + 1);
   const passingTest = actions.findIndex((event) => event.type === 'test' && event.testId === after.testId
     && event.iteration === to.iteration && event.passed === true);
@@ -219,7 +223,7 @@ function ModelHandoff({ events, versions, before, after }: {
   return (
     <div className="workbench-handoff" aria-label="Recorded model handoff">
       <span className="workbench-label">Recorded build log</span>
-      <p><strong>{museLabels[from.modelId] ?? from.modelId}</strong> handed off after v{from.iteration} failed. <strong>{museLabels[to.modelId] ?? to.modelId}</strong> revised the design and passed v{to.iteration}.</p>
+      <p><strong>{museLabels[from.modelId] ?? from.modelId}</strong> handed off{failedIteration !== null && ` after v${failedIteration} failed`}. <strong>{museLabels[to.modelId] ?? to.modelId}</strong> revised the design and passed v{to.iteration}.</p>
       <ul aria-label="Successful tool calls before the passing test">
         {tools.map((tool) => <li key={tool}><code>{tool}</code></li>)}
       </ul>
