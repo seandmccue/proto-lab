@@ -24,7 +24,13 @@ export async function runPlanner(rt: ToolRuntime, spec: Spec, opts: { startParam
     if (r.passed) break;
     const revision = planRevision(rt.params!, r, rt);
     if (!revision) break;
-    await rt.call('revise_walker', { changes: revision.changes, rationale: revision.rationale, based_on: `${r.testId}: ${r.failureReasons[0] ?? 'failed'}` });
+    const rev = (await rt.call('revise_walker', { changes: revision.changes, rationale: revision.rationale, based_on: `${r.testId}: ${r.failureReasons[0] ?? 'failed'}` })) as { error?: string };
+    if (rev.error) {
+      // Constraint hit (e.g. mass limit). Fall back to lowering the mechanical demand instead of adding hardware.
+      const g = rt.params!.gait;
+      const fb = (await rt.call('revise_walker', { changes: { 'gait.frequency_hz': +Math.max(0.4, g.frequency_hz * 0.85).toFixed(3), 'gait.kneeAmplitude_rad': +Math.max(0.1, g.kneeAmplitude_rad * 0.8).toFixed(3), 'gait.damping': +Math.min(5, g.damping * 1.5).toFixed(3) }, rationale: `Could not apply the preferred change (${rev.error}). Reducing cadence and step height instead to bring torque demand down without adding mass.`, based_on: `${r.testId}: ${r.failureReasons[0] ?? 'failed'}` })) as { error?: string };
+      if (fb.error) break;
+    }
   }
 
   if (spec.followUps.includes('dance') && last?.passed) {

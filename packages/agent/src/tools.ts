@@ -198,9 +198,9 @@ export class ToolRuntime {
           const params = WalkerParamsSchema.parse({ shell: true, ...a.params });
           if (params.legCount !== this.spec.constraints.legCount) throw new Error(`Spec requires ${this.spec.constraints.legCount} legs`);
           const asm = buildWalker(params, this.partResolver);
-          this.params = params; this.assembly = asm;
           const summary = this.summariseAssembly(asm);
-          if (summary.totalMass_kg > this.spec.constraints.maxMass_kg) throw new Error(`Assembly mass ${summary.totalMass_kg} kg exceeds limit ${this.spec.constraints.maxMass_kg} kg`);
+          if (summary.totalMass_kg > this.spec.constraints.maxMass_kg) throw new Error(`Assembly mass ${summary.totalMass_kg} kg exceeds limit ${this.spec.constraints.maxMass_kg} kg; choose lighter parts`);
+          this.params = params; this.assembly = asm;
           log(true, `Built ${asm.instances.length} components, ${summary.revoluteJoints} joints, ${summary.totalMass_kg} kg`);
           this.events.onAssembly(asm, params, a.rationale);
           return summary;
@@ -210,9 +210,9 @@ export class ToolRuntime {
           if (!this.params) throw new Error('No assembly yet; call build_walker first');
           const { next, diff } = this.applyChanges(this.params, a.changes);
           const asm = buildWalker(next, this.partResolver);
-          this.params = next; this.assembly = asm;
           const summary = this.summariseAssembly(asm);
-          if (summary.totalMass_kg > this.spec.constraints.maxMass_kg) throw new Error(`Assembly mass ${summary.totalMass_kg} kg exceeds limit`);
+          if (summary.totalMass_kg > this.spec.constraints.maxMass_kg) throw new Error(`Assembly mass ${summary.totalMass_kg} kg exceeds limit ${this.spec.constraints.maxMass_kg} kg; the change was not applied`);
+          this.params = next; this.assembly = asm;
           log(true, `Revised: ${Object.entries(a.changes).map(([k, v]) => `${k}=${typeof v === 'number' ? +v.toFixed(3) : v}`).join(', ')}`);
           this.events.onAssembly(asm, next, a.rationale, a.based_on, diff);
           return summary;

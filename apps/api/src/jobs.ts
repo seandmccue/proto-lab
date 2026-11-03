@@ -1,0 +1,102 @@
+import { randomUUID } from 'node:crypto';
+import type { DatabaseSync } from 'node:sqlite';
+import { runAgent, type AgentEvent } from '@protolab/agent';
+import type { VersionRecord } from '@protolab/schema';
+import type { ObjectStore } from './store.ts';
+import type { JobRow, InventionRow } from './db.ts';
+
+export const newId = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+export const now = () => new Date().toISOString();
+
+export type PublicEvent =
+  | { t: string; type: 'status'; message: string }
+  | { t: string; type: 'spec'; spec: unknown }
+  | { t: string; type: 'tool'; tool: string; ok: boolean; summary: string }
+  | { t: string; type: 'assembly'; iteration: number; rationale: string; instances: number; mass_kg: number }
+  | { t: string; type: 'test'; iteration: number; testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] }
+  | { t: string; type: 'version'; versionId: string; iteration: number; status: string }
+  | { t: string; type: 'done'; status: string; summary: string; modelId: string }
+  | { t: string; type: 'error'; message: string };
+
+export function stripTrace(v: VersionRecord): VersionRecord {
+  return { ...v, tests: v.tests.map((t) => ({ ...t, trace: { dt: t.trace.dt, frames: [] } })) };
+}
+
+export function versionSummary(v: VersionRecord) {
+  return {
+    id: v.id, iteration: v.iteration, status: v.status, modelId: v.modelId, parentVersionId: v.parentVersionId, createdAt: v.createdAt,
+    tests: v.tests.map((t) => ({ testId: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics, failureReasons: t.failureReasons })),
+    decisions: v.decisions,
+  };
+}
+
+export class JobRunner {
+  private queue: Array<() => Promise<void>> = [];
+  private running = false;
+  private live = new Map<string, PublicEvent[]>();
+  constructor(private db: DatabaseSync, private store: ObjectStore) {}
+
+  events(jobId: string): PublicEvent[] | null { return this.live.get(jobId) ?? null; }
+
+  enqueue(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
+    this.queue.push(() => this.run(job, invention, opts));
+    void this.pump();
+  }
+
+  private async pump() {
+    if (this.running) return;
+    this.running = true;
+    while (this.queue.length) { const next = this.queue.shift()!; try { await next(); } catch (e) { console.error('job failed', e); } }
+    this.running = false;
+  }
+
+  private async run(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
+    const events: PublicEvent[] = [];
+    this.live.set(job.id, events);
+    const update = (status: JobRow['status'], step: string, versionId: string | null = null, errorCode: string | null = null) => {
+      this.db.prepare('UPDATE jobs SET status=?, step=?, progress_json=?, version_id=COALESCE(?, version_id), error_code=?, updated_at=? WHERE id=?')
+        .run(status, step, JSON.stringify(events.slice(-200)), versionId, errorCode, now(), job.id);
+    };
+    const push = (e: PublicEvent) => { events.push(e); };
+    update('running', 'Starting');
+    this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('running', now(), invention.id);
+    let lastVersionId: string | null = null;
+    const onEvent = (e: AgentEvent) => {
+      const t = now();
+      switch (e.type) {
+        case 'status': push({ t, type: 'status', message: e.message }); update('running', e.message); break;
+        case 'spec': push({ t, type: 'spec', spec: e.spec }); break;
+        case 'tool': push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary }); break;
+        case 'assembly': push({ t, type: 'assembly', iteration: e.iteration, rationale: e.rationale, instances: e.assembly.instances.length, mass_kg: e.assembly.parts.length }); break;
+        case 'test': push({ t, type: 'test', iteration: e.iteration, testId: e.result.testId, kind: e.result.kind, passed: e.result.passed, metrics: e.result.metrics, failureReasons: e.result.failureReasons }); break;
+        case 'version': {
+          const v = e.version;
+          this.store.putJson(`versions/${v.id}.json`, v);
+          const metrics = JSON.stringify(v.tests.map((x) => ({ testId: x.testId, kind: x.kind, passed: x.passed, metrics: x.metrics, failureReasons: x.failureReasons })));
+          this.db.prepare(`INSERT INTO versions (id, invention_id, parent_version_id, iteration, prompt, spec_json, manifest_key, metrics_json, model_id, status, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET metrics_json=excluded.metrics_json, status=excluded.status, spec_json=excluded.spec_json`)
+            .run(v.id, v.inventionId, v.parentVersionId, v.iteration, v.prompt, JSON.stringify(v.spec), `versions/${v.id}.json`, metrics, v.modelId, v.status, v.createdAt);
+          lastVersionId = v.id;
+          this.db.prepare('UPDATE inventions SET current_version_id=?, updated_at=? WHERE id=?').run(v.id, now(), invention.id);
+          push({ t, type: 'version', versionId: v.id, iteration: v.iteration, status: v.status });
+          update('running', `Version ${v.iteration} recorded`, v.id);
+          break;
+        }
+        case 'done': push({ t, type: 'done', status: e.status, summary: e.summary, modelId: e.modelId }); break;
+        case 'error': push({ t, type: 'error', message: e.message }); break;
+      }
+    };
+    try {
+      const startIteration = (this.db.prepare('SELECT COALESCE(MAX(iteration), 0) AS n FROM versions WHERE invention_id=?').get(invention.id) as { n: number }).n;
+      const out = await runAgent({ prompt: invention.prompt, inventionId: invention.id, parent: opts.parent, changeRequest: opts.changeRequest, startIteration, newVersionId: () => newId('ver') }, onEvent);
+      this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN description=\'\' THEN ? ELSE description END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
+      update(out.status === 'error' ? 'error' : 'done', out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
+    } catch (e) {
+      push({ t: now(), type: 'error', message: (e as Error).message });
+      this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('error', now(), invention.id);
+      update('error', 'Error', lastVersionId, 'agent_error');
+    } finally {
+      setTimeout(() => this.live.delete(job.id), 5 * 60_000).unref();
+    }
+  }
+}
