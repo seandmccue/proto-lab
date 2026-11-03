@@ -14,6 +14,7 @@ export interface ViewerProps {
   explode: number;          // 0..1
   blueprint: boolean;
   follow?: boolean;
+  cameraLock?: string;
   selectedId: string | null;
   changedIds?: Set<string>;
   onSelect?: (id: string | null) => void;
@@ -88,7 +89,7 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 }
 
 function Scene(props: ViewerProps) {
-  const { assembly, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, onSelect, follow = true, timeRef, onTime, seekTo, autoRotate, mini } = props;
+  const { assembly, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, onSelect, follow = true, cameraLock, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
   const tRef = useRef(0);
   const frames = test?.trace.frames ?? [];
@@ -112,13 +113,13 @@ function Scene(props: ViewerProps) {
   const framed = useRef<string>('');
   useEffect(() => {
     // Frame the whole machine once per assembly (size changes from a 150 mm robot to a 600 mm Ferris wheel).
-    const key = `${assembly.instances.length}:${radius.toFixed(3)}:${center.x.toFixed(3)}:${center.y.toFixed(3)}`;
+    const key = cameraLock ?? `${assembly.instances.length}:${radius.toFixed(3)}:${center.x.toFixed(3)}:${center.y.toFixed(3)}`;
     if (framed.current === key) return; framed.current = key;
     const dist = radius * (mini ? 2.6 : 2.4);
     camera.position.set(center.x + dist * 0.72, center.y + dist * 0.5, center.z + dist * 0.78);
     camera.near = Math.max(0.005, dist / 100); camera.far = Math.max(20, dist * 20); camera.updateProjectionMatrix();
     if (controls.current) { controls.current.target.copy(center); controls.current.update(); }
-  }, [assembly, center, radius, camera, mini]);
+  }, [assembly, center, radius, camera, mini, cameraLock]);
   const explodeDir = useMemo(() => {
     const m = new Map<string, THREE.Vector3>();
     for (const i of assembly.instances) {

@@ -97,9 +97,9 @@ body {
 .lab-art-machine { padding: 10% 6% 6%; }
 .lab-art-toggle { position: absolute; right: 5%; bottom: 6%; }
 .lab-art-tag { position: absolute; top: 7%; left: 6%; padding: .4rem .55rem; background: var(--surface); border: 1px solid #c1afe5; border-radius: .35rem; }
-.lab-art figcaption { display: flex; align-items: center; gap: .5rem; padding: .85rem 1rem; }
+.lab-art figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .85rem 1rem; }
 .lab-art figcaption > span:first-child { color: var(--violet); font-size: 1rem; line-height: 1; }
-.lab-art-caption-end { margin-left: auto; color: var(--muted); }
+.lab-art-caption-end { margin-left: auto; color: var(--muted); font-size: .78rem; }
 .lab-process { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
 .lab-process > span { display: flex; align-items: center; gap: .6rem; padding: .75rem 1rem; font-size: .875rem; font-weight: 650; }
 .lab-process > span + span { border-left: 1px solid var(--line); }

@@ -5,6 +5,7 @@ import type { Spec } from '@protolab/schema';
 
 const LABELS: Record<string, string> = { distance_m: 'Distance', speed_m_s: 'Speed', lateralDrift_m: 'Lateral drift', maxTilt_deg: 'Peak tilt', fell: 'Fell', fellAt_s: 'Fell at', minBaseHeight_m: 'Min base height', baseDisplacement_m: 'Base drift', peakHipTorque_Nm: 'Hip torque', peakKneeTorque_Nm: 'Knee torque', energyProxy_J: 'Energy proxy', landingDistance_m: 'Landing distance', maxHeight_m: 'Peak height', targetError_m: 'Target error', released: 'Released', landed: 'Landed', payloadSeparation_m: 'Payload separation', payloadDrop_m: 'Payload drop', clearanceViolation: 'Clearance hit', groundContactViolation: 'Ground contact', motorSaturation_fraction: 'Motor saturation', peakMotorEffort: 'Peak motor effort' };
 const HIDE = new Set(['duration_s', 'startBodyHeight_m', 'hipServoRating_Nm', 'kneeServoRating_Nm']);
+const HIGHLIGHT_LABELS: Record<string, string> = { payloadLift_m: 'Payload lift', maxInstanceTilt_deg: 'Tracked part peak tilt' };
 function fmtMetric(k: string, v: number): string {
   if (k.endsWith('_m_s')) return `${v.toFixed(3)} m/s`;
   if (k.endsWith('_rad_s')) return `${v.toFixed(2)} rad/s`;
@@ -14,7 +15,9 @@ function fmtMetric(k: string, v: number): string {
 }
 export function Metrics({ metrics, kind }: { metrics: Record<string, number>; kind: string }) {
   const rows: Array<[string, string]> = [];
-  const entries = Object.entries(metrics).filter(([k]) => !HIDE.has(k) && !(k === 'fellAt_s' && metrics.fell === 0));
+  const highlighted = Object.entries(HIGHLIGHT_LABELS).filter(([k]) => metrics[k] !== undefined);
+  const entries = Object.entries(metrics).filter(([k]) => !HIDE.has(k) && !HIGHLIGHT_LABELS[k] && !(k === 'fellAt_s' && metrics.fell === 0));
+  for (const [k, label] of highlighted) rows.push([label, fmtMetric(k, metrics[k])]);
   for (const [k, v] of entries) {
     if (k === 'peakHipTorque_Nm' && metrics.hipServoRating_Nm) { rows.push(['Hip torque', `${fmt.nm(v)} / ${fmt.nm(metrics.hipServoRating_Nm)}`]); continue; }
     if (k === 'peakKneeTorque_Nm' && metrics.kneeServoRating_Nm) { rows.push(['Knee torque', `${fmt.nm(v)} / ${fmt.nm(metrics.kneeServoRating_Nm)}`]); continue; }
@@ -82,9 +85,10 @@ export function useElapsed(events: JobEvent[], running: boolean): string {
 export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
   const end = useRef<HTMLLIElement>(null);
   useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
-  const visible = events.filter((e) => e.type !== 'version' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
+  const visible = events.filter((e) => e.type !== 'version' && e.type !== 'timing' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
   const stage = stageOf(events); const elapsed = useElapsed(events, running);
   const lastStatus = [...events].reverse().find((e) => e.type === 'status');
+  const timing = [...events].reverse().find((e) => e.type === 'timing')?.timing as { firstAssemblyMs: number | null; modelMs: number } | undefined;
   return (
     <div className="flex h-full flex-col">
       <div className="px-3 pt-3 pb-2 flex items-center justify-between">
@@ -98,6 +102,9 @@ export default function ActivityPanel({ events, running, versions, currentVersio
             {STAGES.map((name, i) => <li key={name} className={`flex items-center gap-1 ${i < stage ? 'text-emerald-700' : i === stage && running ? 'text-accent' : 'text-slate-400'}`}><span className={`h-1.5 w-1.5 rounded-full ${i < stage ? 'bg-emerald-500' : i === stage && running ? 'bg-accent animate-pulse' : 'bg-slate-300'}`} />{name}{i < STAGES.length - 1 && <span className="mx-0.5 h-px w-3 bg-slate-200" />}</li>)}
           </ol>
           {running && lastStatus && <p className="mt-1 truncate text-[11px] text-slate-500" title={String(lastStatus.message)}>{String(lastStatus.message)}</p>}
+          {timing && timing.firstAssemblyMs !== null && <p className="mt-1 text-[11px] text-slate-500">
+            First assembly in {Math.round(timing.firstAssemblyMs / 1000)} s{!running && timing.modelMs > 0 && ` · Model calls ${Math.round(timing.modelMs / 1000)} s`}
+          </p>}
         </div>
       )}
       {versions.length > 0 && (

@@ -166,18 +166,33 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   if (test.kind === 'launch' && !projRb) failureReasons.push(`Projectile instance "${test.projectile}" not found`);
   const payRb = test.kind === 'grip' ? bodyOf.get(test.payload) : undefined;
   if (test.kind === 'grip' && !payRb) failureReasons.push(`Payload instance "${test.payload}" not found`);
+  const motionMeasure = test.kind === 'motion' ? test.measure : undefined;
+  const uprightTilt = new Map((motionMeasure?.uprightInstances ?? []).map((id) => [id, 0]));
+  const liftPayload = motionMeasure?.payload;
   if (test.kind === 'motion') {
     const { measure, criteria } = test;
     const measured = sims.filter(({ joint }) => joint.motor && (!measure.joints.length || measure.joints.includes(joint.motor.controlId)));
     for (const id of measure.joints) if (!measured.some(({ joint }) => joint.motor?.controlId === id)) failureReasons.push(`Measured motor "${id}" not found`);
     const jointThreshold = criteria.minJointAmplitude_rad !== undefined || criteria.minJointRate_rad_s !== undefined || criteria.minRevolutions !== undefined;
     const baseThreshold = criteria.maxBaseTilt_deg !== undefined || criteria.maxBaseDrift_m !== undefined;
+    const liftThreshold = criteria.minPayloadLift_m !== undefined || criteria.maxPayloadReturnError_m !== undefined;
+    const retentionThreshold = criteria.maxPayloadSeparation_m !== undefined;
+    const tiltThreshold = criteria.maxInstanceTilt_deg !== undefined;
     if (jointThreshold && !measured.length) failureReasons.push('A joint threshold needs a measurable motorized joint');
     if (baseThreshold && !baseRb) failureReasons.push('A base threshold needs a base instance');
+    if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
+    for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
+    if (liftThreshold && !liftPayload) failureReasons.push('A payload height threshold needs a payload instance');
+    if (retentionThreshold && !liftPayload?.holder) failureReasons.push('A retention threshold needs a payload and holder instance');
+    if (liftPayload) {
+      if (!instById.has(liftPayload.instance)) failureReasons.push(`Payload instance "${liftPayload.instance}" not found`);
+      if (liftPayload.holder && !instById.has(liftPayload.holder)) failureReasons.push(`Holder instance "${liftPayload.holder}" not found`);
+      if (liftPayload.holder === liftPayload.instance) failureReasons.push('Payload and holder must be different instances');
+    }
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !baseThreshold && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -191,6 +206,18 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   let maxTilt = 0, minHeight = start.position[1], fell = false, fellAt = -1, energy = 0;
   const settle = 0.25;
   let payloadGrounded = false;
+  const instancePose = (id: string) => compose(rootT(bodyOf.get(id)!), localOffset.get(id)!);
+  const payloadStartHeight = liftPayload ? instancePose(liftPayload.instance).position[1] : 0;
+  let payloadHeight = payloadStartHeight, maxPayloadHeight = payloadStartHeight, maxPayloadSeparation = 0;
+  const trackMotionInstances = () => {
+    for (const [id, maxTilt] of uprightTilt) uprightTilt.set(id, Math.max(maxTilt, tiltDeg(instancePose(id).rotation)));
+    if (liftPayload) {
+      const load = instancePose(liftPayload.instance).position;
+      payloadHeight = load[1];
+      maxPayloadHeight = Math.max(maxPayloadHeight, payloadHeight);
+      if (liftPayload.holder) maxPayloadSeparation = Math.max(maxPayloadSeparation, len(sub(load, instancePose(liftPayload.holder).position)));
+    }
+  };
   let clearanceHit: string | null = null, groundHit: string | null = null, landing: Vec3 | null = null, maxProjHeight = projStart?.position[1] ?? 0, released = false;
   const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
   const snapshot = (t: number) => {
@@ -200,6 +227,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     frames.push({ t: +t.toFixed(4), bodies, joints });
   };
   snapshot(0);
+  trackMotionInstances();
 
   for (let n = 1; n <= steps; n++) {
     const t = n * DT, ct = t - settle;
@@ -246,6 +274,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (support && test.kind === 'grip' && t >= test.supportUntil_s) { world.removeCollider(support, false); support = null; }
     if (baseRb) { const T = rootT(baseRb); const tilt = tiltDeg(T.rotation); maxTilt = Math.max(maxTilt, tilt); minHeight = Math.min(minHeight, T.position[1]); if (!fell && !instById.get(baseId!)!.anchored && (tilt > 60 || T.position[1] < start.position[1] * 0.45)) { fell = true; fellAt = +t.toFixed(2); } }
     if (projRb) { const p = projRb.translation(); maxProjHeight = Math.max(maxProjHeight, p.y); if (!released && ct > 0 && len(sub([p.x, p.y, p.z], projStart!.position)) > 0.08) released = true; }
+    trackMotionInstances();
     if (n % traceEvery === 0) snapshot(t);
   }
 
@@ -291,6 +320,24 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (baseRb && c.maxBaseTilt_deg !== undefined && maxTilt > c.maxBaseTilt_deg) failureReasons.push(`Base tilt ${metrics.maxTilt_deg}° exceeds ${c.maxBaseTilt_deg}°`);
       if (baseRb && c.maxBaseDrift_m !== undefined && metrics.baseDisplacement_m > c.maxBaseDrift_m) failureReasons.push(`Base drifted ${metrics.baseDisplacement_m} m > ${c.maxBaseDrift_m} m`);
       if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);
+      if (uprightTilt.size) {
+        metrics.maxInstanceTilt_deg = +Math.max(...uprightTilt.values()).toFixed(2);
+        for (const [id, tilt] of uprightTilt) {
+          metrics[`${id}.maxTilt_deg`] = +tilt.toFixed(2);
+          if (c.maxInstanceTilt_deg !== undefined && tilt > c.maxInstanceTilt_deg) failureReasons.push(`${id} tilted ${tilt.toFixed(2)}°, limit ${c.maxInstanceTilt_deg}°`);
+        }
+      }
+      if (liftPayload) {
+        const lift = maxPayloadHeight - payloadStartHeight;
+        const returnError = Math.abs(payloadHeight - payloadStartHeight);
+        metrics.payloadLift_m = +lift.toFixed(4);
+        metrics.payloadMaxHeight_m = +maxPayloadHeight.toFixed(4);
+        metrics.payloadReturnError_m = +returnError.toFixed(4);
+        if (liftPayload.holder) metrics.payloadSeparation_m = +maxPayloadSeparation.toFixed(4);
+        if (c.minPayloadLift_m !== undefined && lift < c.minPayloadLift_m) failureReasons.push(`Payload lifted ${lift.toFixed(3)} m, target ${c.minPayloadLift_m} m`);
+        if (c.maxPayloadSeparation_m !== undefined && maxPayloadSeparation > c.maxPayloadSeparation_m) failureReasons.push(`Payload reached ${maxPayloadSeparation.toFixed(3)} m from the holder, limit ${c.maxPayloadSeparation_m} m`);
+        if (c.maxPayloadReturnError_m !== undefined && returnError > c.maxPayloadReturnError_m) failureReasons.push(`Payload ended ${returnError.toFixed(3)} m from its starting height, limit ${c.maxPayloadReturnError_m} m`);
+      }
       if (clearanceHit) { metrics.clearanceViolation = 1; failureReasons.push(`Clearance violated: ${clearanceHit}`); } else metrics.clearanceViolation = 0;
       if (groundHit) { metrics.groundContactViolation = 1; failureReasons.push(`${groundHit} touched the ground`); } else metrics.groundContactViolation = 0;
       if (c.torqueWithinRating && torqueFail.length) { failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`); if (torqueNotes.length) saturationNote(); } else saturationNote();

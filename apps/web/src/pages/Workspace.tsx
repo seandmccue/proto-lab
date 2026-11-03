@@ -16,6 +16,7 @@ function suggestionsFor(version: VersionRecord | null): string[] {
   const kinds = new Set(version.assembly.parts.map((p) => p.kind as string));
   const tests = new Set(version.tests.map((t) => t.kind));
   const out: string[] = [];
+  if (version.assembly.parts.some((part) => /crab/i.test(part.name))) out.push('Scuttle 35 cm in 6 seconds', 'Keep peak tilt below 5°', 'Make the claws larger');
   if (version.assembly.family === 'legged_walker' || cats.has('legs')) out.push('Give it six legs', 'Walk 30% further', 'Make it dance', 'Use longer legs', 'Make it calmer');
   const rotor = kinds.has('big_wheel') || kinds.has('propeller') || kinds.has('wheel');
   // Sails and blades are wing parts too (style 3); only count real flapping wings.
@@ -29,30 +30,65 @@ function suggestionsFor(version: VersionRecord | null): string[] {
   return [...new Set(out)].slice(0, 6);
 }
 
-function replayStory(versions: VersionMeta[]) {
+type ReplayStep = { version: VersionMeta; test: TestSummary; label: string };
+
+function replayStory(versions: VersionMeta[]): ReplayStep[] {
   const results = versions.flatMap((version) => version.tests.map((test) => ({ version, test })));
-  const testName = (test: TestSummary) => test.testId.replace(/#\d+$/, '');
   for (let i = results.length - 1; i >= 1; i--) {
     const passed = results[i];
     if (!passed.test.passed) continue;
     const failed = results.slice(0, i).reverse().find((result) =>
       !result.test.passed && result.version.iteration < passed.version.iteration &&
-      result.test.kind === passed.test.kind && testName(result.test) === testName(passed.test)
+      sameTestName(result.test, passed.test)
     );
     if (!failed) continue;
     const dance = results.slice(i + 1).find((result) => result.test.passed && /^dance\b/i.test(result.test.testId));
     return [
-      { ...failed, label: 'First test' },
-      { ...passed, label: 'Revised test' },
+      { ...failed, label: 'Before revision' },
+      { ...passed, label: 'After revision' },
       ...(dance ? [{ ...dance, label: 'Dance' }] : []),
     ];
   }
   return [];
 }
 
+function revisionStory(before: VersionMeta, after: VersionMeta): ReplayStep[] {
+  const result = after.tests[after.tests.length - 1];
+  if (!result) return [];
+  const baseline = [...before.tests].reverse().find((test) => test.kind === result.kind) ?? before.tests[before.tests.length - 1];
+  return baseline ? [{ version: before, test: baseline, label: 'Before your change' }, { version: after, test: result, label: 'After your change' }] : [];
+}
+
+function sameTestName(before: TestSummary, after: TestSummary) {
+  return before.kind === after.kind && before.testId.replace(/#\d+$/, '') === after.testId.replace(/#\d+$/, '');
+}
+
+function testReadout(test: TestSummary, label: string) {
+  if (test.kind === 'walk' && test.metrics.distance_m !== undefined) {
+    const tilt = test.metrics.maxTilt_deg;
+    return `${fmt.cm(test.metrics.distance_m)} travelled${tilt !== undefined ? ` · ${fmt.deg(tilt)} peak tilt` : ''}`;
+  }
+  if (label === 'Dance' && test.metrics.maxTilt_deg !== undefined) return `tilt ${fmt.deg(test.metrics.maxTilt_deg)}`;
+  return keyMetric(test);
+}
+
+function walkTargets(test: TestSummary): string | null {
+  if (test.kind !== 'walk') return null;
+  const reasons = test.failureReasons.join(' ');
+  const distance = reasons.match(/target (\d+(?:\.\d+)?) m/i)?.[1];
+  const tilt = reasons.match(/limit (\d+(?:\.\d+)?)°/i)?.[1];
+  const duration = test.metrics.duration_s;
+  const values = [
+    distance && `at least ${Number(distance) * 100} cm${duration ? ` in ${duration} s` : ''}`,
+    tilt && `at most ${tilt}° tilt`,
+  ].filter(Boolean);
+  return values.length ? values.join(' · ') : null;
+}
+
 export default function Workspace() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
+  const replayLink = params.get('replay') === '1';
   const nav = useNavigate();
   const [detail, setDetail] = useState<InventionDetail | null>(null);
   const [jobId, setJobId] = useState<string | null>(params.get('job'));
@@ -95,15 +131,41 @@ export default function Workspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [remixOpen, setRemixOpen] = useState(false);
+  const [changeMode, setChangeMode] = useState<'follow-up' | 'remix' | null>(null);
+  const [sourceVersion, setSourceVersion] = useState<VersionRecord | null>(null);
+  const [localRevision, setLocalRevision] = useState<{ jobId: string; versionId: string; changeRequest: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean } | null>(null);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
-  const [stageMode, setStageMode] = useState(params.get('replay') === '1');
+  const [stageMode, setStageMode] = useState(replayLink);
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
   const running = jobStatus === 'queued' || jobStatus === 'running';
-  const story = useMemo(() => replayStory(detail?.versions ?? []), [detail?.versions]);
+  const sourceId = detail?.source?.id;
+  const sourceVersionId = detail?.source?.versionId ?? detail?.invention.parentVersionId;
+  useEffect(() => {
+    if (!sourceId || !sourceVersionId) return;
+    let cancelled = false;
+    api.version(sourceId, sourceVersionId).then(({ version }) => { if (!cancelled) setSourceVersion(version); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [sourceId, sourceVersionId]);
+
+  const ownBaselineId = detail?.latestJob?.baselineVersionId ?? (localRevision?.jobId === jobId ? localRevision?.versionId : null);
+  const revisionResultId = detail?.latestJob?.versionId;
+  const changeBrief = detail?.latestJob?.changeRequest ?? localRevision?.changeRequest ?? detail?.source?.changeRequest;
+  const story = useMemo(() => {
+    const versions = detail?.versions ?? [];
+    const ownBaseline = versions.find((v) => v.id === ownBaselineId);
+    const before = ownBaseline ?? sourceVersion;
+    const after = revisionResultId === undefined ? versions[versions.length - 1] : versions.find((v) => v.id === revisionResultId);
+    const saved = replayStory(versions);
+    if (!ownBaselineId && replayLink && saved.length) return saved;
+    if (before && after && before.id !== after.id && (!ownBaseline || before.iteration < after.iteration)) {
+      const revision = revisionStory(before, after);
+      if (revision.length) return revision;
+    }
+    return saved;
+  }, [detail?.versions, ownBaselineId, sourceVersion, replayLink, revisionResultId]);
 
   const refresh = useCallback(async () => {
     const d = await api.invention(id);
@@ -120,6 +182,7 @@ export default function Workspace() {
     if (!jobId) return;
     let since = 0, stop = false, retries = 0;
     let needsRefresh = false;
+    let wasActive = jobId === params.get('job') || jobId === localRevision?.jobId;
     let timer: ReturnType<typeof setTimeout>;
     setEvents([]);
     setReconnecting(false);
@@ -137,7 +200,12 @@ export default function Workspace() {
         if (stop) return;
         retries = 0;
         setReconnecting(false);
-        if (active) timer = setTimeout(tick, 700);
+        if (active) {
+          wasActive = true;
+          timer = setTimeout(tick, 700);
+        } else if (wasActive && j.versionId) {
+          setVersionId(j.versionId);
+        }
       } catch (e) {
         if (stop) return;
         if (/not found|forbidden|unauthorized|HTTP (400|401|403|404)/i.test((e as Error).message)) {
@@ -150,7 +218,7 @@ export default function Workspace() {
     };
     void tick();
     return () => { stop = true; clearTimeout(timer); };
-  }, [jobId, refresh]);
+  }, [jobId, localRevision?.jobId, params, refresh]);
 
   // Follow the newest version while running, otherwise keep the user's pick
   useEffect(() => {
@@ -166,17 +234,19 @@ export default function Workspace() {
   useEffect(() => {
     if (!versionId || !detail) return;
     let cancelled = false;
-    api.version(id, versionId, true).then((r) => {
+    const requestVersion = sourceVersion?.id === versionId ? Promise.resolve({ version: sourceVersion }) : api.version(id, versionId, true);
+    requestVersion.then((r) => {
       if (cancelled) return;
       setVersion(r.version);
       setTestId((cur) => (cur && r.version.tests.some((t) => t.testId === cur) ? cur : r.version.tests[r.version.tests.length - 1]?.testId ?? null));
     }).catch((e) => setError((e as Error).message));
     const idx = detail.versions.findIndex((v) => v.id === versionId);
-    const prev = idx > 0 ? detail.versions[idx - 1] : null;
-    if (prev) api.version(id, prev.id, false).then((r) => { if (!cancelled) setPrevVersion(r.version); }).catch(() => {});
-    else setPrevVersion(null);
+    const prev = story[1]?.version.id === versionId ? story[0].version : idx > 0 ? detail.versions[idx - 1] : null;
+    setPrevVersion(null);
+    if (prev?.id === sourceVersion?.id) setPrevVersion(sourceVersion);
+    else if (prev) api.version(id, prev.id, false).then((r) => { if (!cancelled) setPrevVersion(r.version); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [id, versionId, detail]);
+  }, [id, versionId, detail, sourceVersion, story]);
 
   // Once a passing version exists and the job is done, capture a thumbnail for the gallery (owner only).
   useEffect(() => {
@@ -202,22 +272,46 @@ export default function Workspace() {
     }
     return s;
   }, [version, prevVersion]);
+  const driveChangedIds = useMemo(() => {
+    if (!version || !prevVersion || changedIds.size) return new Set<string>();
+    const before = new Map(prevVersion.assembly.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
+    const after = new Map(version.assembly.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
+    const ids = new Set<string>();
+    for (const joint of version.assembly.joints) {
+      const controlId = joint.motor?.controlId;
+      if (controlId && before.get(controlId) !== after.get(controlId)) ids.add(joint.b.instanceId);
+    }
+    return ids;
+  }, [version, prevVersion, changedIds]);
 
-  const act = async (fn: () => Promise<{ inventionId: string; jobId: string }>) => {
+  const act = async (mode: 'follow-up' | 'remix', changeRequest: string) => {
+    const baselineId = version?.inventionId === id ? version.id : detail?.invention.currentVersionId;
+    if (!baselineId || busy) return;
     setBusy(true); setError(null);
     try {
-      const r = await fn();
+      const run = mode === 'follow-up' ? api.followUp : api.remix;
+      const r = await run(id, changeRequest, baselineId);
       setRequest('');
+      setChangeMode(null);
       if (r.inventionId !== id) nav(`/i/${r.inventionId}?job=${r.jobId}`);
-      else { setJobId(r.jobId); setJobStatus('queued'); }
+      else {
+        setLocalRevision({ jobId: r.jobId, versionId: baselineId, changeRequest });
+        setStageMode(false);
+        setJobId(r.jobId);
+        setJobStatus('queued');
+      }
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
   const inv = detail?.invention;
   const storyStep = story.findIndex((step) => step.version.id === versionId && step.test.testId === testId);
   const currentStep = story[storyStep];
-  const stepDecision = version?.id === currentStep?.version.id ? version?.decisions.slice().reverse().find((decision) => decision.source === 'model' && decision.basedOn) : undefined;
-  const canFollowUp = !!inv?.isOwner && !running && !!inv.currentVersionId;
+  const stepDecision = storyStep === 1 && version?.id === currentStep?.version.id ? version?.decisions.slice().reverse().find((decision) => decision.source === 'model') : undefined;
+  const canRequestChange = !running && !!inv?.currentVersionId && !!version && version.id === versionId && version.inventionId === id;
+  const comparing = !running && storyStep >= 0 && storyStep < 2;
+  const cameraLock = comparing ? story.slice(0, 2).map((step) => step.version.id).join(':') : undefined;
+  const target = story[0]?.label === 'Before revision' ? walkTargets(story[0].test) : null;
+  const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
   const vmeta = detail?.versions.find((v) => v.id === versionId);
 
   if (missing) {
@@ -250,15 +344,20 @@ export default function Workspace() {
           <p className="workbench-prompt">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button className="btn-secondary" disabled={running || !inv?.currentVersionId} onClick={() => setRemixOpen(true)}>Remix</button>
+          {inv && (
+            <button className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
+              Request a change
+            </button>
+          )}
+          {inv?.isOwner && <button className="btn-secondary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode('remix'); }}>Remix</button>}
           {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
           {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
           <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
         </div>
       </div>
-      {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
+      {error && !changeMode && <div role="alert" className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
       {reconnecting && <div role="status" className="bg-amber-50 px-4 py-2 text-sm text-amber-800">Reconnecting to the build.{version && ' The last recorded simulation is still available.'}</div>}
-      {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'The versions recorded so far are shown below; use “Request change” or Remix to continue from them.' : 'Nothing was recorded; start a new build.'}</div>}
+      {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'Choose “Request a change” to continue from a recorded version.' : 'Start a new build to try again.'}</div>}
 
       <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">
         {(['canvas', 'tree', 'agent'] as const).map((p) => <button key={p} onClick={() => setMobilePane(p)} aria-pressed={mobilePane === p}>{p === 'canvas' ? '3D view' : p === 'tree' ? 'Parts' : 'Agent'}</button>)}
@@ -280,8 +379,9 @@ export default function Workspace() {
             <div className="workbench-story">
               <div className="workbench-story-heading">
                 <span className="workbench-label">Saved simulation</span>
-                <span>Follow the design from its failed test to the result.</span>
+                {target ? <span><strong>Original test target</strong> {target}</span> : <span>{separateChecks ? 'Each version has its own recorded test.' : 'Compare the recorded simulations before and after the revision.'}</span>}
               </div>
+              {changeBrief && <p className="workbench-story-brief"><strong>Requested change</strong> {changeBrief}</p>}
               <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
                 {story.map((step, index) => (
                   <button key={step.test.testId} type="button" aria-pressed={storyStep === index} onClick={() => {
@@ -292,15 +392,16 @@ export default function Workspace() {
                     setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
                   }}>
                     <span className="workbench-story-number">{index + 1}</span>
-                    <span><strong>{step.label}</strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {step.label === 'Dance' && step.test.metrics.maxTilt_deg !== undefined ? `tilt ${fmt.deg(step.test.metrics.maxTilt_deg)}` : keyMetric(step.test)}</small></span>
+                    <span><strong>{step.label} <small className="workbench-story-version">v{step.version.iteration}</small></strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {testReadout(step.test, step.label)}</small></span>
                   </button>
                 ))}
               </div>
               {currentStep && (
                 <p className="workbench-story-caption" aria-live="polite">
-                  {currentStep.test.failureReasons[0] ?? (stepDecision ? `Muse’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.passed ? 'The revised mechanism passed the recorded test.' : 'The first test did not meet its target.')}
+                  {stepDecision ? `${stepDecision.modelId === 'muse-wonder-1.0' ? 'Muse Wonder' : 'Muse'}’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.failureReasons.join(' · ') || (currentStep.test.passed ? 'The mechanism passed the recorded test.' : 'The test did not meet its target.')}
                 </p>
               )}
+              {storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
             </div>
           )}
           <div className="workbench-stage">
@@ -310,7 +411,7 @@ export default function Workspace() {
                 <div className="workbench-readout"><span className="workbench-readout-model">assembling · {Math.min(reveal, live.assembly.instances.length)} of {live.assembly.instances.length} components placed · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
               </>
             ) : version ? (
-              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
+              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} changedIds={comparing && storyStep === 0 ? undefined : changedIds.size ? changedIds : driveChangedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : running ? (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} />
             ) : (
@@ -319,7 +420,7 @@ export default function Workspace() {
             {(version || live) && <BuildStrip events={events} running={running} />}
             {version && (
               <div className="workbench-readout">
-                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{changedIds.size > 0 && <span className="ml-2 text-warn">● {changedIds.size} parts changed</span>}</span>
+                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!(comparing && storyStep === 0) && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
                 {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
               </div>
             )}
@@ -338,16 +439,9 @@ export default function Workspace() {
             <div className="workbench-control-group" role="group" aria-label="View controls">
               <label>Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-16" aria-label="Explode view" /></label>
               <button className="btn-ghost" aria-pressed={blueprint} onClick={() => setBlueprint((b) => !b)}>Blueprint</button>
-              <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>
+              {comparing ? <span className="workbench-view-hint">Same camera for both tests</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>}
             </div>
           </div>
-          {canFollowUp && (
-            <form onSubmit={(e) => { e.preventDefault(); if (request.trim()) void act(() => api.followUp(id, request.trim())); }} className="workbench-followup">
-              <input value={request} onChange={(e) => setRequest(e.target.value)} aria-label="Describe a change" placeholder={`Ask for a change: ${suggestionsFor(version).slice(0, 3).map((x) => `“${x}”`).join(', ')}`} className="min-w-0 flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm outline-none focus:border-accent" maxLength={400} />
-              <button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>Request change</button>
-              {version?.assembly.family === 'legged_walker' && !version?.spec.followUps.includes('dance') && <button type="button" className="btn-secondary" disabled={busy} onClick={() => void act(() => api.followUp(id, 'Make it dance'))}>Make it dance</button>}
-            </form>
-          )}
         </section>
 
         <aside className="workbench-panel workbench-agent" data-active={mobilePane === 'agent'} aria-label="Engineering agent">
@@ -422,14 +516,17 @@ export default function Workspace() {
         </aside>
       </div>
 
-      {remixOpen && inv && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal>
-          <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); const r = String(new FormData(e.currentTarget).get('change') || '').trim(); if (r.length >= 2) { setRemixOpen(false); void act(() => api.remix(id, r)); } }}>
-            <h2 className="text-lg font-semibold">Remix this invention</h2>
-            <p className="mt-1 text-sm text-slate-500">Forks the current version into your own invention, keeps credit to {inv.ownerLabel}, and asks the agent for one change.</p>
-            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus defaultValue={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <div className="mt-2 flex flex-wrap gap-1">{suggestionsFor(version).map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={(e) => { const f = (e.currentTarget.closest('form') as HTMLFormElement); (f.elements.namedItem('change') as HTMLInputElement).value = s; }}>{s}</button>)}</div>
-            <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setRemixOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>Remix</button></div>
+      {changeMode && inv && version && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
+          <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); if (request.trim().length >= 2) void act(changeMode, request.trim()); }}>
+            <h2 id="revision-title" className="text-lg font-semibold">Request a change</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {changeMode === 'remix' ? `Muse will use version ${version.iteration} to build a private remix and keep credit to ${inv.ownerLabel}.` : `Muse will use version ${version.iteration} as the baseline and save a new version of your invention.`}
+            </p>
+            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus value={request} onChange={(e) => setRequest(e.target.value)} placeholder={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
+            <div className="mt-2 flex flex-wrap gap-1">{suggestionsFor(version).map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={() => setRequest(s)}>{s}</button>)}</div>
+            {error && <p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
+            <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" disabled={busy} onClick={() => setChangeMode(null)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>{busy ? 'Starting…' : changeMode === 'remix' ? 'Build my remix' : 'Build revision'}</button></div>
           </form>
         </div>
       )}

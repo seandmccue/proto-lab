@@ -46,7 +46,8 @@ opens the actual assembly and simulation trace.
 - **Simulation** is Rapier (WASM) at a fixed 1/240 s step with anchored bases, free projectiles and
   payloads, revolute/prismatic/spring joints, position and velocity drives, motor saturation at the
   catalog rating, and collision events for clearance and ground contact. Tests: motion (amplitude,
-  rate, revolutions, tilt, drift, clearance), walk, launch, grip. Runs are deterministic.
+  rate, revolutions, tilt, drift, clearance, upright parts, payload lift and retention), walk, launch,
+  grip. Runs are deterministic.
 - **The agent's procedure** is the ten-step plan: understand → features and motions → sub-assemblies
   (write_plan) → search the library → design missing parts → assemble and set drives → define
   measurable tests → simulate → analyse failures and revise → finalize with the behaviours the
@@ -56,6 +57,9 @@ opens the actual assembly and simulation trace.
   and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly
   drops in one part at a time; after that a build strip, pass/fail toasts for each test and an
   iteration ribbon (v1 ✗ 0.12 m → v2 ✓ 0.47 m) keep the one-to-three-minute wait legible.
+- **Comparing revisions:** request a change from a saved version. Owners can continue the original
+  invention, and gallery visitors can start their own remix. The workbench keeps the baseline and
+  pairs comparable measurements with the changed parts and the recorded revision.
 - **Not simulated:** aerodynamics, fluids, deformation, fatigue, manufacturability. A butterfly's
   wings flap with measured stroke and rate; nobody claims it flies.
 
@@ -149,6 +153,9 @@ node packages/agent/src/cli.ts "Build a six-legged walking robot and make it dan
 `GET /api/parts` · `POST /api/reports` · `GET /api/model`
 
 Ownership is an anonymous session id (`x-session-id`); publishing and follow-ups require it.
+Remix and follow-up accept an optional `versionId` for the saved starting point. New job
+responses include timing from request to plan, assembly and first test, plus cumulative model
+time and API-reported token totals when available.
 Rate limits, idempotency keys, input sanitisation and size limits are in place for the POC.
 
 ## Deploying to Cloudflare

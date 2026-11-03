@@ -122,6 +122,8 @@
 .workbench-story-steps strong, .workbench-story-steps small { display: block; }
 .workbench-story-steps strong { font-size: .78rem; }
 .workbench-story-steps small { color: var(--bench-muted); font-size: .68rem; }
+.workbench-story-steps .workbench-story-version { display: inline; margin-inline-start: .25rem; font-weight: 500; }
+.workbench-story-brief { margin: -.1rem 0 .5rem; color: var(--bench-muted); font-size: .75rem; }
 .workbench-story-caption { margin-top: .45rem; color: var(--bench-ink); font-size: .78rem; }
 .workbench-stage-fallback { display: flex; height: 100%; flex-direction: column; padding: 3.5rem 1rem 1rem; text-align: center; }
 .workbench-stage-fallback svg { flex: 1; min-height: 0; width: 100%; }
@@ -149,8 +151,7 @@
   font: 0.68rem/1.35 var(--font-mono, ui-monospace, monospace);
 }
 
-.workbench-toolbar,
-.workbench-followup {
+.workbench-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -194,7 +195,6 @@
 
 .workbench-control-group input { accent-color: var(--bench-violet); }
 .workbench-timeline { width: clamp(4.5rem, 10vw, 8rem); }
-.workbench-followup input { flex: 1 1 12rem; }
 
 .workbench-agent-nav,
 .workbench-mobile-nav {

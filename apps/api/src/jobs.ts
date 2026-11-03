@@ -19,7 +19,29 @@ export type PublicEvent =
   | { t: string; type: 'version'; versionId: string; iteration: number; status: string }
   | { t: string; type: 'handoff'; from: string; to: string; message: string }
   | { t: string; type: 'done'; status: string; summary: string; modelId: string }
-  | { t: string; type: 'error'; message: string };
+  | { t: string; type: 'error'; message: string }
+  | { t: string; type: 'timing'; timing: BuildTiming };
+
+interface BuildTiming {
+  queueMs: number;
+  firstPlanMs: number | null;
+  firstAssemblyMs: number | null;
+  firstTestMs: number | null;
+  modelMs: number;
+  modelCalls: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+export function buildTiming(job: JobRow, events: PublicEvent[]) {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index];
+    if (event.type !== 'timing') continue;
+    const end = job.status === 'queued' || job.status === 'running' ? Date.now() : Date.parse(job.updated_at);
+    return { ...event.timing, totalMs: Math.max(0, end - Date.parse(job.created_at)) };
+  }
+  return null; // Older jobs predate timing instrumentation.
+}
 
 export function stripTrace(v: VersionRecord): VersionRecord {
   return { ...v, tests: v.tests.map((t) => ({ ...t, trace: { dt: t.trace.dt, frames: [] } })) };
@@ -72,12 +94,23 @@ export class JobRunner {
 
   private async run(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     const events: PublicEvent[] = [];
+    const startedAt = Date.now();
+    const timing: BuildTiming = {
+      queueMs: Math.max(0, startedAt - Date.parse(job.created_at)),
+      firstPlanMs: null, firstAssemblyMs: null, firstTestMs: null,
+      modelMs: 0, modelCalls: 0, inputTokens: null, outputTokens: null,
+    };
+    const sinceRequest = () => Math.max(0, Date.now() - Date.parse(job.created_at));
+    const reportTiming = () => {
+      events.push({ t: now(), type: 'timing', timing: { ...timing } });
+    };
     this.live.set(job.id, events);
     const update = (status: JobRow['status'], step: string, versionId: string | null = null, errorCode: string | null = null) => {
       this.db.prepare('UPDATE jobs SET status=?, step=?, progress_json=?, version_id=COALESCE(?, version_id), error_code=?, updated_at=? WHERE id=?')
         .run(status, step, JSON.stringify(events.slice(-200)), versionId, errorCode, now(), job.id);
     };
     const push = (e: PublicEvent) => { events.push(e); };
+    reportTiming();
     update('running', 'Starting');
     this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('running', now(), invention.id);
     let lastVersionId: string | null = null;
@@ -87,15 +120,29 @@ export class JobRunner {
         case 'status': push({ t, type: 'status', message: e.message }); update('running', e.message); break;
         case 'spec': push({ t, type: 'spec', spec: e.spec }); break;
         case 'tool':
+          if (e.entry.tool === 'write_plan' && e.entry.ok && timing.firstPlanMs === null) {
+            timing.firstPlanMs = sinceRequest();
+            reportTiming();
+          }
           if (!e.entry.ok) console.warn(`[agent] ${e.entry.tool} rejected: ${e.entry.summary} | args: ${JSON.stringify(e.entry.args ?? null).slice(0, 600)}`); // so input shorthand the model uses can be added to the normalisers
           push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary, parts: e.entry.parts }); break;
         case 'assembly': {
+          if (timing.firstAssemblyMs === null) {
+            timing.firstAssemblyMs = sinceRequest();
+            reportTiming();
+          }
           const partMass = new Map(e.assembly.parts.map((p) => [p.id, p.mass_kg]));
           const mass = e.assembly.instances.reduce((m, i) => m + (partMass.get(i.partId) ?? 0), 0);
           this.liveAssembly.set(job.id, { assembly: e.assembly, iteration: e.iteration, rationale: e.rationale, at: t });
           push({ t, type: 'assembly', iteration: e.iteration, rationale: e.rationale, instances: e.assembly.instances.length, mass_kg: +mass.toFixed(3) }); break;
         }
-        case 'test': push({ t, type: 'test', iteration: e.iteration, testId: e.result.testId, kind: e.result.kind, passed: e.result.passed, metrics: e.result.metrics, failureReasons: e.result.failureReasons }); break;
+        case 'test':
+          if (timing.firstTestMs === null) {
+            timing.firstTestMs = sinceRequest();
+            reportTiming();
+          }
+          push({ t, type: 'test', iteration: e.iteration, testId: e.result.testId, kind: e.result.kind, passed: e.result.passed, metrics: e.result.metrics, failureReasons: e.result.failureReasons });
+          break;
         case 'version': {
           const v = e.version;
           this.store.putJson(`versions/${v.id}.json`, v);
@@ -106,10 +153,17 @@ export class JobRunner {
           lastVersionId = v.id;
           this.db.prepare('UPDATE inventions SET current_version_id=?, updated_at=? WHERE id=?').run(v.id, now(), invention.id);
           push({ t, type: 'version', versionId: v.id, iteration: v.iteration, status: v.status });
+          reportTiming();
           update('running', `Version ${v.iteration} recorded`, v.id);
           break;
         }
         case 'handoff': push({ t, type: 'handoff', from: e.from, to: e.to, message: e.message }); update('running', e.message); break;
+        case 'model_timing':
+          timing.modelMs += e.ms;
+          timing.modelCalls++;
+          if (e.inputTokens !== undefined) timing.inputTokens = (timing.inputTokens ?? 0) + e.inputTokens;
+          if (e.outputTokens !== undefined) timing.outputTokens = (timing.outputTokens ?? 0) + e.outputTokens;
+          break;
         case 'done': push({ t, type: 'done', status: e.status, summary: e.summary, modelId: e.modelId }); break;
         case 'error': push({ t, type: 'error', message: e.message }); break;
       }
@@ -134,12 +188,14 @@ export class JobRunner {
           if (!returned) void pending.then(() => reject(new Error(`Agent worker exited before returning a result (code ${code})`)), reject);
         });
       });
+      reportTiming();
       // The description follows the latest build's summary until the owner publishes (publishing stores their own text).
       this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN visibility=\'public\' AND description<>\'\' THEN description ELSE ? END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
       update(out.status === 'error' ? 'error' : 'done', out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
       await this.checkpoint(job.id);
     } catch (e) {
       push({ t: now(), type: 'error', message: (e as Error).message });
+      reportTiming();
       this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('error', now(), invention.id);
       update('error', 'Error', lastVersionId, 'agent_error');
       await this.checkpoint(job.id);

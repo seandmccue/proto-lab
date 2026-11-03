@@ -211,6 +211,8 @@ export const TestSpec = z.discriminatedUnion('kind', [
       base: z.string().optional(),                           // instance whose tilt/drift are reported
       clearancePairs: z.array(ClearancePair).default([]),    // instance pairs that must not touch
       noGroundContact: z.array(z.string()).default([]),      // instances that must not touch the ground
+      uprightInstances: z.array(z.string().min(1)).min(1).max(80).optional(),
+      payload: z.object({ instance: z.string().min(1), holder: z.string().min(1).optional() }).optional(),
     }).default({}),
     criteria: z.object({
       minJointAmplitude_rad: z.number().optional(),
@@ -218,6 +220,10 @@ export const TestSpec = z.discriminatedUnion('kind', [
       minRevolutions: z.number().optional(),
       maxBaseTilt_deg: z.number().optional(),
       maxBaseDrift_m: z.number().optional(),
+      maxInstanceTilt_deg: z.number().min(0).max(180).optional(),
+      minPayloadLift_m: z.number().positive().optional(),
+      maxPayloadSeparation_m: z.number().positive().optional(),
+      maxPayloadReturnError_m: z.number().nonnegative().optional(),
       torqueWithinRating: z.boolean().default(true),
     }).default({}),
   }),

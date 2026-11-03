@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import Header, { useModelInfo } from '../components/Header.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import IsoPreview from '../components/IsoPreview.tsx';
-import { api, type Example, type InventionPublic } from '../api.ts';
+import { api, fmt, type Example, type InventionPublic } from '../api.ts';
 import type { VersionRecord } from '@protolab/schema';
 
 export default function Home() {
@@ -19,14 +19,14 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [heroVersion, setHeroVersion] = useState<VersionRecord | null>(null);
   const [heroPlaying, setHeroPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const hero = featured.find((item) => item.status === 'passed' && item.latestDance?.passed && item.latestWalk?.passed);
+  const hero = featured.find((item) => /^mechanical crab$/i.test(item.title) && item.status === 'passed' && item.latestWalk?.passed);
   const heroId = hero?.id;
   const heroVersionId = hero?.currentVersionId;
 
   useEffect(() => {
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
     api.gallery('featured', 6).then((r) => setFeatured(r.items)).catch(() => {});
-    api.gallery('recent', 6).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
+    api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured).slice(0, 6))).catch(() => {});
     api.gallery('remixes', 4).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
   }, []);
@@ -37,7 +37,8 @@ export default function Home() {
     api.version(heroId, heroVersionId).then(({ version }) => { if (!cancelled) setHeroVersion(version); }).catch(() => {});
     return () => { cancelled = true; };
   }, [heroId, heroVersionId]);
-  const heroTrace = heroVersion?.tests.find((test) => test.testId === hero?.latestDance?.testId)?.trace;
+  const heroTest = heroVersion?.tests.find((test) => test.testId === hero?.latestWalk?.testId);
+  const heroTrace = heroTest?.trace;
 
   const start = async (body: { prompt?: string; exampleId?: string }) => {
     setBusy(true); setError(null);
@@ -58,7 +59,7 @@ export default function Home() {
             <form onSubmit={submit} className="lab-form">
               <label htmlFor="invention-prompt" className="lab-label">Your invention brief</label>
               <div className="lab-input">
-                <input id="invention-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Build a small walking robot…" maxLength={600} aria-describedby="invention-scope" />
+                <input id="invention-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Build a mechanical crab that scuttles sideways…" maxLength={600} aria-describedby="invention-scope" />
                 <button type="submit" className="btn-primary" disabled={busy || prompt.trim().length < 3}>
                   {busy ? 'Starting…' : 'Build live'} <span aria-hidden="true">↗</span>
                 </button>
@@ -86,7 +87,12 @@ export default function Home() {
               {heroTrace && <button type="button" className="lab-art-toggle btn-secondary" onClick={() => setHeroPlaying(!heroPlaying)}>{heroPlaying ? 'Pause preview' : 'Play preview'}</button>}
             </div>
             <figcaption>
-              {hero ? <Link to={`/i/${hero.id}?replay=1`} className="btn-primary">Watch Muse fix a robot <span aria-hidden="true">↗</span></Link> : <Link to="/gallery" className="btn-secondary">Explore working prototypes <span aria-hidden="true">↗</span></Link>}
+              {hero ? (
+                <>
+                  <Link to={`/i/${hero.id}?replay=1`} className="btn-primary">Watch Muse fix a mechanical crab <span aria-hidden="true">↗</span></Link>
+                  {heroTest?.metrics.distance_m !== undefined && <span className="lab-art-caption-end">{fmt.cm(heroTest.metrics.distance_m)} sideways</span>}
+                </>
+              ) : <Link to="/gallery" className="btn-secondary">Explore working prototypes <span aria-hidden="true">↗</span></Link>}
             </figcaption>
           </figure>
         </section>
