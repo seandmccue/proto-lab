@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 loadEnv({ path: resolve(process.cwd(), '.env') });
 loadEnv({ path: resolve(process.cwd(), '../../.env') });
 import { initSimulator } from '@protolab/simulator';
-import { modelConfigFromEnv, smokeTest, DETERMINISTIC_MODEL_ID } from '@protolab/agent';
+import { modelConfigFromEnv, smokeTest, DETERMINISTIC_MODEL_ID, prettyModelName } from '@protolab/agent';
 import { openDb } from './db.ts';
 import { ObjectStore } from './store.ts';
 import { JobRunner } from './jobs.ts';
@@ -24,15 +24,15 @@ db.prepare('UPDATE jobs SET status=\'error\', step=\'Interrupted by restart\', e
 db.prepare('UPDATE inventions SET status=\'error\' WHERE status IN (\'queued\',\'running\')').run();
 
 const cfg = modelConfigFromEnv();
-const modelStatus = { modelId: cfg ? cfg.model : DETERMINISTIC_MODEL_ID, live: false, detail: cfg ? 'checking…' : 'No LLM_API_KEY set; using the deterministic planner.' };
+const modelStatus = { modelId: cfg ? cfg.model : DETERMINISTIC_MODEL_ID, live: false, detail: cfg ? 'checking…' : 'No MODEL_API_KEY set; using the deterministic planner.' };
 if (cfg) {
   const r = await smokeTest(cfg);
   modelStatus.live = r.ok;
-  modelStatus.detail = r.ok ? `Live tool-call smoke test passed against ${cfg.baseUrl}` : `Model smoke test failed: ${r.detail}`;
+  modelStatus.detail = r.ok ? `Live tool-call smoke test passed: ${prettyModelName(cfg.model)} (${cfg.model}) at ${cfg.baseUrl}` : `Model smoke test failed: ${r.detail}`;
   console.log(`[model] ${cfg.model} — ${modelStatus.detail}`);
-  if (!r.ok) console.warn('[model] Falling back to the deterministic planner for new jobs.');
-  if (!r.ok) process.env.LLM_API_KEY = '';
-} else console.log('[model] No LLM_API_KEY; deterministic planner.');
+  // No silent substitution: jobs keep using the configured model and surface its errors verbatim.
+  if (!r.ok) console.warn('[model] The configured model is still used for jobs; errors will be reported on each job.');
+} else console.log('[model] No MODEL_API_KEY; deterministic planner.');
 
 const app = buildApp({ db, store, runner, modelStatus });
 seedFeatured(db, runner);

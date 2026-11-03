@@ -11,7 +11,7 @@ pads, tested for balance and walking, then asked to dance.
 
 ```bash
 npm install
-cp .env.example .env     # optional: add LLM_API_KEY to use a real model
+cp .env.example .env     # add MODEL_API_KEY from dev.meta.ai to use Meta Muse
 npm run dev              # API on http://localhost:8787, web on http://localhost:5173
 ```
 
@@ -35,19 +35,24 @@ each). Nothing in the gallery is canned: every card opens the actual assembly an
   interpreted into that family and the homepage says so.
 - **3D Print** is disabled and marked Coming Soon. No claim of physical buildability is made.
 
-## Model configuration
+## Model configuration (Meta Model API)
 
-The agent talks to any OpenAI-compatible chat-completions endpoint with tool calling. Set in `.env`:
+ProtoLab's engineering agent runs on Meta's Muse models through the
+[Meta Model API](https://dev.meta.ai/docs/overview): OpenAI-compatible chat completions with
+tool calling at `https://api.meta.ai/v1`. Set in `.env` (server-side only; the key never reaches
+the browser):
 
 ```
-LLM_BASE_URL=https://api.llama.com/compat/v1
-LLM_MODEL=<model id enabled in your Meta developer account>
-LLM_API_KEY=<your key>
+MODEL_API_BASE=https://api.meta.ai/v1
+MODEL_ID=muse-spark-1.3          # or muse-spark-1.1, muse-wonder-1.0, ...
+MODEL_API_KEY=<key from dev.meta.ai>
 ```
 
-At startup the API runs a live tool-call smoke test and logs the result. The header badge shows the
-real model id; it reads "Powered by Meta Muse …" only when the configured model id contains "Muse".
-Without a key (or if the smoke test fails) the deterministic planner runs and the UI labels it.
+At startup the API runs a live tool-call smoke test and logs the result. The header badge and
+every version record show the exact model id, and the activity log opens with a line naming the
+model. If the model returns an error, the job reports it verbatim; ProtoLab never substitutes
+another model silently. Only when no key is configured does the deterministic planner run, and
+the UI labels it as such. Note: the Meta Model API accepts only `tool_choice: "auto"`.
 
 ## Layout
 

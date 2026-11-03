@@ -1,11 +1,11 @@
 import type { Assembly, Decision, Spec, TestResult, ToolLogEntry, VersionRecord } from '@protolab/schema';
 import { type WalkerParams } from '@protolab/parts';
-import { chat, modelConfigFromEnv, smokeTest, type ChatMessage, type ModelConfig } from './llm.ts';
+import { chat, modelConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { heuristicSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS, WALKER_PARAM_RANGES, DEFAULT_WALKER } from './tools.ts';
 import { runPlanner, applyChangeRequest } from './planner.ts';
 
-export { modelConfigFromEnv, smokeTest, heuristicSpec, ToolRuntime, TOOL_DEFS, applyChangeRequest };
+export { modelConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, heuristicSpec, ToolRuntime, TOOL_DEFS, applyChangeRequest };
 export type { ModelConfig };
 
 export type AgentEvent =
@@ -39,7 +39,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   const maxIterations = input.maxIterations ?? 5;
   const fullPrompt = input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt;
   let spec = heuristicSpec(fullPrompt, input.parent?.spec);
-  emit({ type: 'status', message: model ? `Interpreting the request with ${model.model}` : 'Interpreting the request (deterministic planner; no model key configured)' });
+  emit({ type: 'status', message: model ? `Model: ${prettyModelName(model.model)} (${model.model}) via ${model.baseUrl}. Every design decision below is the model's; test results are the simulator's.` : 'Deterministic planner (no MODEL_API_KEY configured). Decisions below are fixed rules, not a model.' });
   emit({ type: 'spec', spec });
 
   const versions: VersionRecord[] = [];
@@ -114,6 +114,8 @@ Engineering notes (measured in this simulator):
 - Stride per cycle ≈ 2 × hipAmplitude_rad × leg length. Target distance / duration sets the required stride × frequency.
 - Torque demand is reported against the servo rating; pick a servo with ≥ 25 % margin.
 - Stiffness 3–10 N·m/rad and damping 0.1–0.3 work for 0.2–0.4 kg robots.
+- The catalog is small. When no preset fits (chassis length/width for your leg layout, a leg bar length between presets, a lighter or stronger servo), create_parametric_part and use its id in build_walker/revise_walker; custom parts count as real parts in the BOM.
+- Think like an engineer: state what you measured and why the change should fix it; prefer one targeted change per iteration.
 
 Walker parameter ranges:
 ${ranges}
@@ -131,7 +133,7 @@ async function runModelLoop(model: ModelConfig, rt: ToolRuntime, spec: Spec, inp
   ];
   const maxRounds = 14 + maxIterations * 4;
   for (let round = 0; round < maxRounds && !rt.finalized; round++) {
-    const res = await chat(model, messages, TOOL_DEFS, { toolChoice: round === 0 ? 'required' : 'auto' });
+    const res = await chat(model, messages, TOOL_DEFS, { toolChoice: 'auto' });
     messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls.length ? res.toolCalls : undefined });
     if (res.content && res.content.trim()) emit({ type: 'status', message: res.content.trim().slice(0, 240) });
     if (!res.toolCalls.length) {
