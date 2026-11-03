@@ -164,7 +164,24 @@ if (judge) checks.push(
       return test.passed && test.metrics['tray.maxTilt_deg'] <= 8 && test.metrics.groundContactViolation === 0
         && Math.min(...angles) <= -target && Math.max(...angles) >= target;
     })) throw new Error('Expected the recorded swing on both sides and a level tray');
-    return 'one drive, a passive pivot, and a measured swing in both directions';
+    const assembly = structuredClone(replay.assembly);
+    const passivePivot = assembly.joints.find(({ id }) => id === 'j_inner_bracket');
+    if (!passivePivot || !replay.spec) throw new Error('Expected a passive pivot and simulation environment');
+    passivePivot.type = 'fixed';
+    const { runTest } = await import('@protolab/simulator');
+    const locked = await runTest(assembly, {
+      env: replay.spec.environment,
+      test: {
+        id: 'locked_pivot_control', kind: 'motion', duration_s: 12,
+        measure: { joints: [drive], jointSwing: [{ joint: drive, minEachWay_rad: target }], uprightInstances: ['tray'], clearancePairs: [], noGroundContact: ['tray'] },
+        criteria: { maxInstanceTilt_deg: 8, torqueWithinRating: true },
+      },
+    });
+    if (locked.passed || !(locked.metrics['tray.maxTilt_deg'] > 8)
+      || locked.metrics[`${drive}.minSwing_rad`] > -target || locked.metrics[`${drive}.maxSwing_rad`] < target) {
+      throw new Error('Expected the locked pivot to fail tray tilt while keeping the required outer swing');
+    }
+    return `passive replay passed; locked pivot reached ${locked.metrics['tray.maxTilt_deg']}°`;
   }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
