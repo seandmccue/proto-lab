@@ -39,6 +39,7 @@ export default function Workspace() {
   const [jobStep, setJobStep] = useState<string>('');
   const [versionId, setVersionId] = useState<string | null>(null);
   const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
+  const [load, setLoad] = useState<{ active: number; queued: number; maxConcurrent: number } | null>(null); // queue hint while this build waits for a worker
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
   const [testId, setTestId] = useState<string | null>(null);
@@ -84,6 +85,7 @@ export default function Workspace() {
         if (stop) return;
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
+        if (j.status === 'queued') api.load().then(setLoad).catch(() => {}); else setLoad(null);
         if (j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {});
         if (j.events.some((e) => e.type === 'version' || e.type === 'done')) await refresh();
         if (j.status === 'queued' || j.status === 'running') setTimeout(tick, 700);
@@ -218,7 +220,7 @@ export default function Workspace() {
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : (
               <div className="flex h-full items-center justify-center text-slate-400">
-                <div className="max-w-md text-center"><div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-accent" /><p className="text-sm">{events.length ? String(events[events.length - 1].message ?? events[events.length - 1].summary ?? 'Working…') : 'Starting the engineering agent…'}</p>
+                <div className="max-w-md text-center"><div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-accent" />{jobStatus === 'queued' && load && load.queued > 0 && <p className="mb-2 text-sm text-slate-600">Queued behind {load.queued} other build{load.queued === 1 ? '' : 's'} ({load.active} of {load.maxConcurrent} workers busy). The lab runs {load.maxConcurrent} builds at once.</p>}<p className="text-sm">{events.length ? String(events[events.length - 1].message ?? events[events.length - 1].summary ?? 'Working…') : 'Starting the engineering agent…'}</p>
                   <p className="mt-3 text-xs text-slate-400">Muse is planning, choosing parts and assembling before the first simulation. Simple mechanisms finish in about a minute, legged or multi-stage ones in 3–10 minutes; each model round is 5–60 s. The 3D view fills in as soon as the first parts are mounted.</p>
                   <p className="mt-2 text-xs"><Link to="/gallery" className="text-accent hover:underline">Open a finished build in the gallery while you wait →</Link></p></div>
               </div>
