@@ -441,7 +441,7 @@ export default function Workspace() {
       window.removeEventListener('resize', fit);
       window.visualViewport?.removeEventListener('resize', fit);
     };
-  }, [sideBySide, mobilePane, running, reconnecting, Boolean(error), jobStatus, stageMode]);
+  }, [sideBySide, mobilePane, running, reconnecting, Boolean(error), jobStatus, stageMode, inv?.title, version?.id]);
   const canonicalProof = sideBySide && story[0].version.id === crabProofPair.beforeId && story[1].version.id === crabProofPair.afterId;
   const vmeta = detail?.versions.find((v) => v.id === versionId);
   const [earlierTestSpecs, setEarlierTestSpecs] = useState<Record<string, TestSpec>>({});
@@ -566,6 +566,18 @@ export default function Workspace() {
       {!sideBySide && storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
     </div>
   );
+  const workbenchActions = <>
+    {inv && (
+      <button className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
+        Request a change
+      </button>
+    )}
+    {inv?.isOwner && <button className="btn-secondary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode('remix'); }}>Remix</button>}
+    {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
+    {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (sideBySide ? '?replay=1&compare=1' : stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
+    <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
+  </>;
+  const prompt = <>{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</>;
   return (
     <div className={`workbench${stageMode ? ' workbench--stage' : ''}`}>
       <Header compact />
@@ -577,19 +589,9 @@ export default function Workspace() {
             {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
             {inv?.visibility === 'public' && <span className="workbench-badge workbench-published">published</span>}
           </div>
-          <p className="workbench-prompt">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
+          <p className="workbench-prompt workbench-heading-prompt">{prompt}</p>
         </div>
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-          {inv && (
-            <button className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
-              Request a change
-            </button>
-          )}
-          {inv?.isOwner && <button className="btn-secondary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode('remix'); }}>Remix</button>}
-          {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
-          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (sideBySide ? '?replay=1&compare=1' : stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
-          <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
-        </div>
+        <div className="workbench-heading-actions">{workbenchActions}</div>
       </div>
       {error && !changeMode && <div role="alert" className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
       {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} />}
@@ -754,6 +756,13 @@ export default function Workspace() {
         </aside>
       </div>
 
+      {inv && <div className="workbench-mobile-details">
+        <div className="workbench-detail-actions">{workbenchActions}</div>
+        <details>
+          <summary>Build brief</summary>
+          <p className="workbench-prompt">{prompt}</p>
+        </details>
+      </div>}
       {changeMode && inv && version && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
           <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); if (request.trim().length >= 2) void act(changeMode, request.trim()); }}>
