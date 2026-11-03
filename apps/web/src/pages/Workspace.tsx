@@ -36,7 +36,7 @@ export default function Workspace() {
   const [detail, setDetail] = useState<InventionDetail | null>(null);
   const [jobId, setJobId] = useState<string | null>(params.get('job'));
   const [events, setEvents] = useState<JobEvent[]>([]);
-  const [jobStatus, setJobStatus] = useState<string>('queued');
+  const [jobStatus, setJobStatus] = useState<string>(params.get('job') ? 'queued' : ''); // only a fresh ?job= link is known to be running; otherwise wait for the invention's latest job
   const [jobStep, setJobStep] = useState<string>('');
   const [versionId, setVersionId] = useState<string | null>(null);
   const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
@@ -84,7 +84,7 @@ export default function Workspace() {
   const refresh = useCallback(async () => {
     const d = await api.invention(id);
     setDetail(d);
-    if (!jobId && d.latestJob) setJobId(d.latestJob.id);
+    if (!jobId && d.latestJob) { setJobId(d.latestJob.id); setJobStatus(d.latestJob.status); }
     return d;
   }, [id, jobId]);
 
@@ -236,8 +236,10 @@ export default function Workspace() {
               </>
             ) : version ? (
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
-            ) : (
+            ) : running ? (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} />
+            ) : (
+              <div className="p-6 text-sm text-slate-400">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
             {(version || live) && <BuildStrip events={events} running={running} />}
             {version && (
