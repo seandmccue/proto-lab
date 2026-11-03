@@ -24,14 +24,14 @@ export function seedFeatured(db: DatabaseSync, runner: JobRunner) {
   }
 }
 
-/** Featured items whose build was interrupted (dev restarts, transient API errors) and that have no version yet are rebuilt. */
+/** Builds interrupted by a restart (featured or user-owned) that have no version yet are re-queued and rebuilt from scratch. */
 export function requeueInterruptedSeeds(db: DatabaseSync, runner: JobRunner) {
-  const rows = db.prepare("SELECT * FROM inventions WHERE owner_id='protolab' AND status='error' AND current_version_id IS NULL").all() as unknown as InventionRow[];
+  const rows = db.prepare("SELECT i.* FROM inventions i WHERE i.status='error' AND i.current_version_id IS NULL AND EXISTS (SELECT 1 FROM jobs j WHERE j.invention_id=i.id AND j.error_code='interrupted') AND i.source_invention_id IS NULL AND i.created_at > datetime('now', '-1 day')").all() as unknown as InventionRow[];
   for (const inv of rows) {
     const job: JobRow = { id: newId('job'), invention_id: inv.id, version_id: null, status: 'queued', step: 'Queued', progress_json: '[]', error_code: null, created_at: now(), updated_at: now() };
     db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(job.id, job.invention_id, null, 'queued', 'Queued', '[]', null, job.created_at, job.updated_at);
     db.prepare('UPDATE inventions SET status=? WHERE id=?').run('queued', inv.id);
     runner.enqueue(job, inv, { parent: null });
   }
-  if (rows.length) console.log(`[seed] re-queued ${rows.length} interrupted featured build(s)`);
+  if (rows.length) console.log(`[seed] re-queued ${rows.length} interrupted build(s)`);
 }
