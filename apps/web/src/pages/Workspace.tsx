@@ -174,7 +174,9 @@ export default function Workspace() {
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
             ) : (
               <div className="flex h-full items-center justify-center text-slate-400">
-                <div className="text-center"><div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-accent" /><p className="text-sm">{events.length ? String(events[events.length - 1].message ?? events[events.length - 1].summary ?? 'Working…') : 'Starting the engineering agent…'}</p></div>
+                <div className="max-w-md text-center"><div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-accent" /><p className="text-sm">{events.length ? String(events[events.length - 1].message ?? events[events.length - 1].summary ?? 'Working…') : 'Starting the engineering agent…'}</p>
+                  <p className="mt-3 text-xs text-slate-400">Muse is planning, choosing parts and assembling before the first simulation. Measured builds take 2–15 minutes depending on the mechanism; each model round is 5–60 s. The 3D view appears after the first test.</p>
+                  <p className="mt-2 text-xs"><Link to="/gallery" className="text-accent hover:underline">Open a finished build in the gallery while you wait →</Link></p></div>
               </div>
             )}
             {version && (
