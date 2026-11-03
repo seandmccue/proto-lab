@@ -1,6 +1,7 @@
 import { config as loadEnv } from 'dotenv';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { Hono } from 'hono';
 import { resolve, relative } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 // Local .env first, then the repo-root .env (first definition wins).
@@ -11,16 +12,20 @@ import { modelConfigFromEnv, smokeTest, DETERMINISTIC_MODEL_ID, prettyModelName 
 import { openDb } from './db.ts';
 import { ObjectStore } from './store.ts';
 import { JobRunner } from './jobs.ts';
+import { CloudCheckpoint } from './persistence.ts';
 import { buildApp } from './routes.ts';
 import { seedFeatured, requeueInterruptedSeeds } from './seed.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_DIR = resolve(process.env.DATA_DIR ?? './data');
 
+const checkpoint = CloudCheckpoint.fromEnv(DATA_DIR);
+await checkpoint?.restore();
 await initSimulator();
 const db = openDb(DATA_DIR);
 const store = new ObjectStore(resolve(DATA_DIR, 'store'));
-const runner = new JobRunner(db, store);
+const persist = checkpoint ? () => checkpoint.save(db) : undefined;
+const runner = new JobRunner(db, store, { persist });
 // Requeue anything that was running when the process last stopped.
 db.prepare('UPDATE jobs SET status=\'error\', step=\'Interrupted by restart\', error_code=\'interrupted\' WHERE status IN (\'queued\',\'running\')').run();
 db.prepare('UPDATE inventions SET status=\'error\' WHERE status IN (\'queued\',\'running\')').run();
@@ -36,7 +41,20 @@ if (cfg) {
   if (!r.ok) console.warn('[model] The configured model is still used for jobs; errors will be reported on each job.');
 } else console.log('[model] No MODEL_API_KEY; deterministic planner.');
 
-const app = buildApp({ db, store, runner, modelStatus });
+const app = new Hono();
+if (persist) {
+  app.use('/api/*', async (c, next) => {
+    await next();
+    if (c.req.method !== 'POST' || c.res.status >= 400 || c.req.path.endsWith('/explain')) return;
+    try {
+      await persist();
+    } catch (error) {
+      console.error('[storage] checkpoint failed', error);
+      return c.json({ error: 'Cloud storage is temporarily unavailable. Please retry.' }, 503);
+    }
+  });
+}
+app.route('/', buildApp({ db, store, runner, modelStatus }));
 // In production the API also serves the built web app (apps/web/dist) with an SPA fallback, so one process
 // and one port serve the whole product (the Docker image relies on this). In development Vite serves the web.
 const webDist = resolve(process.env.WEB_DIST ?? resolve(import.meta.dirname, '../../web/dist'));

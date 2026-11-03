@@ -32,3 +32,18 @@ test('chat reports a non-transient Meta error verbatim without retrying', async 
     assert.equal(hits, 1);
   } finally { server.close(); }
 });
+
+test('chat cancels backoff when the build deadline expires', async () => {
+  let hits = 0;
+  const server = createServer((_req, res) => { hits++; res.writeHead(503); res.end(); });
+  await new Promise<void>((r) => server.listen(0, r));
+  const port = (server.address() as { port: number }).port;
+  const controller = new AbortController();
+  try {
+    await assert.rejects(() => chat(
+      { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 },
+      [{ role: 'user', content: 'hi' }], [], { signal: controller.signal, onRetry: () => controller.abort() },
+    ), { name: 'AbortError' });
+    assert.equal(hits, 1);
+  } finally { server.close(); }
+});

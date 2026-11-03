@@ -1,59 +1,39 @@
-# Hackathon submission text (draft)
+# ProtoLab submission draft
 
-Copy-ready blocks for the submission form. Numbers are from docs/benchmark-general.md and docs/benchmark.md.
+**Track and theme** · Indie Developer · Push the Frontier
 
-## One-liner (≤ 140 chars)
+## One-liner
 
-ProtoLab: describe an invention, Meta Muse engineers it from real parts, proves it in physics, and hands you a 3D prototype to remix.
+Describe a machine. Meta Muse assembles a prototype, tests its motion, and revises it using measured results you can replay in 3D.
 
-## Short description (≈ 100 words)
+## Short description
 
-ProtoLab is an AI invention studio built on Meta Muse. You type a sentence ("a mechanical crab that
-scuttles sideways"); Muse Spark plans the mechanism, picks or designs parts from a 116-part library,
-assembles them with validated operations, runs measurable tests in a rigid-body physics simulator, and
-revises from the numbers. After three failed tests Muse Wonder steps in with a diagnosis and hands back.
-You watch the assembly take shape, replay the simulation in 3D, publish it, and remix it with a new
-brief. Every gallery item is a real build with its real trace; every version lists what the physics
-cannot verify.
+A student robotics club should be able to find out why a mechanism jams before cutting its first part. ProtoLab turns a plain-English brief into an interactive mechanical prototype. Muse Spark selects or designs parts, assembles them at connectors, specifies a test, and uses Rapier’s measurements to revise the design. In a saved butterfly-to-dragonfly remix, the first test found two wings touching. Muse moved the rear hinges back, then the same test ran at 2 Hz with zero detected wing contacts. Open the saved tests, inspect the parts, and remix the prototype in your browser.
 
-## Long description
+## What to show
 
-**The problem.** Mechanical design is a loop of guess, build, measure, fix. Generative tools stop at a
-picture or a mesh; nothing checks whether the thing moves.
+- **One request, two measured outcomes.** “Give it four wings like a dragonfly.” The first test detected contact between the right forewing and hind wing. Muse Spark cited the contact, remounted the rear wings farther back, and reran the test. The revised rig flapped at 2 Hz with zero detected wing contacts and peak motor demand of 0.126 N·m against a 0.2 N·m rating.
+- **A robot that learns a longer walk.** The saved walker’s first passing walk covered 30.75 cm. A follow-up asked for at least 45 cm in six seconds. It measured 42.97 cm on the first attempt and 47.15 cm after revision. The separate saved dance test passed at 2.4° maximum tilt.
+- **A real model handoff.** After three failed tests on the saved crab, Muse Wonder cited problems with foot placement and the previous gait, then restored a uniform leg pose and wave gait. The crab went from 0.27 cm and 14.28° tilt to 31.73 cm and 4.72° on the next test. The activity record identifies the model behind each version.
 
-**What ProtoLab does.** The model is the engineer and the simulator is the judge. Muse works through a
-ten-step procedure with tools: write a plan with recognisable features, motions and success criteria;
-search the component library (frames, gears, servos, wings, grippers, rotors, hinges, plates with real
-connectors and ratings) or create and design missing parts; assemble with mount/connect/pattern/move
-operations that are validated before they run; set drives; define tests with units; run them in Rapier;
-read the failure reasons and metrics; revise; finalize with an honest list of unverified behaviours.
+## How it works
 
-**Why Muse.** Muse Spark 1.3 makes every design decision; Muse Wonder 1.0 is the engineering specialist
-consulted after three consecutive failures, visibly, with a one-sentence diagnosis. If Wonder is
-unavailable the log says so and Spark continues; nothing is substituted silently.
+Muse Spark 1.3 proposes the plan, issues structured assembly and controller operations, defines tests, and revises from the results. ProtoLab validates those operations and applies generic assembly rules. Rapier runs the rigid-body simulation and records the measurements and motion trace. Muse Wonder 1.0 can diagnose a run after repeated failures, with the handoff visible in the saved history. The application records actual versions and tool actions. The featured gallery contains saved runs that can be inspected and replayed.
 
-**Universal, not templated.** The same library and operations produced a Muse walker that walks and
-dances, a butterfly, a Ferris wheel, a pizza catapult, a crab, a claw, a windmill, a drawbridge, a crane,
-a garden pinwheel, a pendulum desk toy, a see-saw with a rocking bird and a dragonfly remix. Recipes in
-the prompt are simulator-measured numbers (which servo carries which load, which gait slips), not
-templates.
+The v10 general mechanism benchmark recorded ten passes across ten briefs and no API errors in that run. Earlier runs and their failures are included in the benchmark notes. These are measured runs on the documented engine snapshot. The simulator checks defined motion criteria. Flight, deformation, and physical fabrication are outside the demonstrated scope.
 
-**Measured.** Latest full ten-prompt pass through the Meta Model API: 10 of 10, median 96 s, 0 API
-errors, no specialist escalation; ten passes in all, 92 of 100 runs. Every miss was traced to a
-measurable cause and fixed with a locking simulator test.
+## Submission links and checks
 
-**What you can do in the demo.** Start a build and watch parts mount in 3D before the first simulation.
-Open a featured build, scrub the trace, explode the assembly, read the bill of materials with
-"designed by Muse" badges, step through versions including the failures. Ask for a change ("walk 50 %
-further"), publish, remix.
+- Live app · https://protolab.sean-abc.workers.dev
+- Robot repair replay · https://protolab.sean-abc.workers.dev/i/inv_bb9d5f8a170d4d95?replay=1
+- Dragonfly replay · https://protolab.sean-abc.workers.dev/i/inv_fd8fcc242ed8497f?replay=1
+- Judge video · https://protolab.sean-abc.workers.dev/judge-demo.mp4
+- Public source repository · https://github.com/seandmccue/proto-lab
+- Deployed release branch · https://github.com/seandmccue/proto-lab/tree/codex/protolab-hackathon
+- Evidence · [benchmark](benchmark-general.md) and [demo walkthrough](demo-script.md).
 
-## Tech stack
-
-React, Vite, React Three Fiber; Hono on Node with node:sqlite and a worker-thread job runner; zod
-schemas; a parametric parts library and assembly-operations engine; Rapier physics; Meta Model API
-(muse-spark-1.3, muse-wonder-1.0) with the key server-side only.
-
-## Links
-
-- Repository: https://github.com/seandmccue/proto-lab
-- One-page pitch: docs/pitch.md · Demo script: docs/demo-script.md · Benchmarks: docs/benchmark-general.md
+The signed-in Cerebral Valley form shows Indie Developer, Push the Frontier, Public GitHub
+Repository, and a three-minute demo-video field with a YouTube example. The demo is 73 seconds.
+If the form requires a YouTube URL, upload the MP4 as unlisted and check it in a signed-out session.
+The participant should supply the required survey answers and decide whether to grant the
+portal's publication and promotion permission. Save the receipt after submitting.

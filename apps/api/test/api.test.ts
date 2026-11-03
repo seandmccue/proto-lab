@@ -17,7 +17,13 @@ process.env.LLM_API_KEY = '';
 test('API golden path with the deterministic planner', async () => {
   await initSimulator();
   const dir = mkdtempSync(join(tmpdir(), 'protolab-'));
-  const db = openDb(dir); const store = new ObjectStore(join(dir, 'store')); const runner = new JobRunner(db, store);
+  const db = openDb(dir); const store = new ObjectStore(join(dir, 'store'));
+  let completedCheckpoints = 0;
+  const runner = new JobRunner(db, store, { persist: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    const finished = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='done'").get();
+    completedCheckpoints = Number(finished?.n ?? 0);
+  } });
   const app = buildApp({ db, store, runner, modelStatus: { modelId: 'deterministic-planner', live: false, detail: 'test' } });
   const H = { 'x-session-id': 'tester', 'content-type': 'application/json' };
   const j = async (path: string, init?: RequestInit) => { const r = await app.request(path, init); return { status: r.status, body: await r.json() as Record<string, unknown> }; };
@@ -29,6 +35,7 @@ test('API golden path with the deterministic planner', async () => {
   for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${jobId}`, { headers: H }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
   const job = await j(`/api/jobs/${jobId}`, { headers: H });
   assert.equal(job.body.status, 'done', JSON.stringify(job.body).slice(0, 300));
+  assert.equal(completedCheckpoints, 1, 'job completion is acknowledged after its checkpoint');
   const inv = await j(`/api/inventions/${inventionId}`, { headers: H });
   const versions = inv.body.versions as Array<{ id: string; status: string }>;
   assert.ok(versions.length >= 1);

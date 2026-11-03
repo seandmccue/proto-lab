@@ -48,7 +48,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   const maxIterations = input.maxIterations ?? 7;
   const fullPrompt = input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt;
   let spec = baseSpec(fullPrompt, input.parent?.spec);
-  emit({ type: 'status', message: model ? `Model: ${prettyModelName(model.model)} (${model.model}) via ${model.baseUrl}. Every design decision below is the model's; test results are the simulator's.` : 'Deterministic planner (no MODEL_API_KEY configured). It can only build the legged-walker example; decisions are fixed rules, not a model.' });
+  emit({ type: 'status', message: model ? `Model: ${prettyModelName(model.model)} (${model.model}) via ${model.baseUrl}. Muse chooses and revises the design. ProtoLab applies assembly rules, and the simulator measures the results.` : 'Deterministic planner (no MODEL_API_KEY configured). It can only build the legged-walker example; decisions are fixed rules, not a model.' });
   emit({ type: 'spec', spec });
 
   const versions: VersionRecord[] = [];

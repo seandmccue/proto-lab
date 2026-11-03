@@ -226,7 +226,7 @@ export default function Viewer(props: ViewerProps) {
   );
   return (
     <ViewerBoundary fallback={fallback}>
-      <Canvas fallback={fallback} shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
+      <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
         <Scene {...props} />
       </Canvas>
     </ViewerBoundary>
