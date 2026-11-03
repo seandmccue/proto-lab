@@ -10,14 +10,14 @@ Everything below is live. Nothing is pre-rendered; gallery items were built by M
 "What will you invent?" Point at the four featured cards: walking Muse robot, mechanical butterfly, Ferris wheel, pizza catapult. Hover a card: the preview animates the *actual* simulation trace. Say: *same component library, same assembly operations, no template per invention.*
 
 ## 2. Start a build live (measured Muse timings, so pick deliberately)
-Live Meta Model API rounds take 5–60 s each. Measured end-to-end: Ferris wheel ≈ 100 s, windmill ≈ 140 s, novel garden gadget ≈ 170 s, walker ≈ 2–5 min (2 min with the measured notes), catapult ≈ 5 min, claw ≈ 8–15 min, crane ≈ 11 min, crab ≈ 7–13 min, butterfly 9–22 min. For a live slot, start a **Ferris wheel** or **windmill** (or let a judge type one) and, while it runs, open a featured build in a second tab to show the finished experience. While the live run works, narrate the activity log:
+Live Meta Model API rounds take 5–60 s each. Measured end-to-end: Ferris wheel ≈ 100 s, windmill ≈ 140 s, novel garden gadget ≈ 170 s, walker ≈ 2–5 min (2 min with the measured notes), butterfly ≈ 3–4 min on the fixed wing library (first-try pass), catapult ≈ 3–5 min, claw ≈ 8–15 min, crane ≈ 7–11 min, crab ≈ 7–13 min, drawbridge up to 17 min. For a live slot, start a **Ferris wheel**, **windmill** or **butterfly** (or let a judge type one) and, while it runs, open a featured build in a second tab to show the finished experience. The 3D view fills in at the first `assemble` (badge: *assembling · N components · not yet simulated*), so there is something to look at within a minute; the simulated version replaces it after the first test. While the live run works, narrate the activity log:
 - First line names the model. *Every decision below is the model's; results are the simulator's.*
 - **Engineering plan** card: purpose, recognisable features, motions, sub-assemblies, success criteria, and *what the physics cannot verify* (e.g. aerodynamic lift).
 - `search_catalog` / `create_part` / `design_part`: Muse picks real parts and designs missing ones (a thorax, a shaped wing). Custom parts get a **designed by Muse** badge in the BOM.
 - `assemble`: structured, validated operations. Point out a rejected op if one appears: *validation, not vibes.*
 - `define_test` → `run_test`: measured metrics with units. Failures show the exact reason.
 - Revision: the model changes one thing and cites the measurement (**Based on:** in the Tests tab).
-- If three tests fail in a row: **Model handoff** card, Muse Wonder diagnoses in one sentence, fixes, hands back.
+- If three tests fail in a row: **Model handoff** card, Muse Wonder diagnoses in one sentence, fixes, hands back. If Wonder is overloaded (it returned 503s during one benchmark pass), the card says so and Spark continues; nothing is substituted silently.
 
 ## 3. Explore the result (60 s)
 Play / scrub the trace. **Explode** to show the mechanism. **Blueprint** for true dimensions. Click a part: mass, material, connectors, source. BOM with provenance badges. Version chips v1…vn: replay the failed attempts; the fall is real.
