@@ -153,6 +153,15 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
   add('Landing distance', metrics.landingDistance_m, distance);
   add('Peak tracked-part tilt', metrics.maxInstanceTilt_deg, angle, motion?.maxInstanceTilt_deg);
   if (definition?.kind === 'motion') {
+    const degrees = (radians: number) => angle(radians * 180 / Math.PI);
+    for (const { joint, minEachWay_rad } of definition.measure.jointSwing ?? []) {
+      const low = metrics[`${joint}.minSwing_rad`];
+      const high = metrics[`${joint}.maxSwing_rad`];
+      if (Number.isFinite(low) && Number.isFinite(high)) {
+        const label = joint.replace(/[_-]+/g, ' ');
+        items.push({ label: `${label} swing`, value: `${degrees(low)} to ${degrees(high)}`, target: `Reach ±${degrees(minEachWay_rad)}` });
+      }
+    }
     for (const { instance, axis, minTravel_m } of definition.measure.linearTravel ?? []) {
       const name = instance.replace(/[_-]+/g, ' ');
       add(`${name[0].toUpperCase()}${name.slice(1)} travel`, metrics[`${instance}.travel_${axis}_m`], distance, minTravel_m, true);

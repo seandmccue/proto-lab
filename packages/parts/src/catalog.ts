@@ -40,6 +40,7 @@ const PRESETS: Preset[] = [
   { id: 'cam-follower-98', kind: 'cam_follower', params: {} },
   { id: 'follower-guide-6', kind: 'follower_guide', params: { stemSize: 0.006, reach: 0.044 } },
   { id: 'follower-guide-9', kind: 'follower_guide', params: {} },
+  { id: 'camera-cradle-48', kind: 'camera_cradle', params: { length: 0.04, width: 0.048, drop: 0.018, thickness: 0.003 } },
   { id: 'gimbal-frame-100', kind: 'gimbal_frame', params: { opening: 0.084, rim: 0.008, thickness: 0.01 } },
   { id: 'gimbal-frame-74', kind: 'gimbal_frame', params: { opening: 0.062, rim: 0.006, thickness: 0.008 } },
   { id: 'clevis-12', kind: 'clevis', params: { gap: 0.012, rise: 0.016, wall: 0.003 } },

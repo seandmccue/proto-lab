@@ -297,6 +297,39 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
       });
     },
   },
+  camera_cradle: {
+    kind: 'camera_cradle', name: 'Suspended camera cradle', category: 'joints',
+    description: 'Open camera platform under a Z-axis pivot. The deck has a fixed camera mount above and a fixed ballast mount below.',
+    params: {
+      length: { min: 0.025, max: 0.2, default: 0.04, unit: 'm', description: 'Deck length along X' },
+      width: { min: 0.025, max: 0.2, default: 0.048, unit: 'm', description: 'Width across the pivot cheeks along Z' },
+      drop: { min: 0.012, max: 0.1, default: 0.018, unit: 'm', description: 'Distance from the pivot down to the deck top' },
+      thickness: { min: 0.002, max: 0.008, default: 0.003, unit: 'm', description: 'Deck and cheek thickness' },
+    },
+    generate: (p, id) => {
+      const { length, width, drop, thickness } = p;
+      const cheekZ = (width - thickness) / 2;
+      const cheekHeight = drop + thickness;
+      const cheekY = (thickness - drop) / 2;
+      const cheekSize: Vec3 = [length * 0.4, cheekHeight, thickness];
+      const geometry = [
+        piece({ kind: 'box', size: [length, thickness, width] }, [0, -drop - thickness / 2, 0], COLORS.aluminium),
+        piece({ kind: 'box', size: cheekSize }, [0, cheekY, cheekZ], '#304962'),
+        piece({ kind: 'box', size: cheekSize }, [0, cheekY, -cheekZ], '#304962'),
+      ];
+      return finish({
+        id, kind: 'camera_cradle', name: `Suspended camera cradle ${mm(width)} mm`, category: 'joints',
+        description: 'Two pivot cheeks support a deck below the shaft. Secure a camera above the deck and ballast below it.',
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [length, drop + 2 * thickness, width],
+        material: 'aluminium', geometry, connectors: [
+          fx('pivot_front', [0, 0, width / 2], [0, 0, 1], 'revolute', 'Pivot about Z'),
+          fx('pivot_back', [0, 0, -width / 2], [0, 0, -1], 'revolute', 'Pivot about Z'),
+          fx('camera', [0, -drop, 0], [0, 1, 0], 'fixed', 'Mount the camera or test payload above the deck'),
+          fx('ballast', [0, -drop - thickness, 0], [0, -1, 0], 'fixed', 'Mount a counterweight under the deck'),
+        ], cost_usd: 4,
+      });
+    },
+  },
   gimbal_frame: {
     kind: 'gimbal_frame', name: 'Open gimbal frame', category: 'joints',
     description: 'Open horizontal frame with outer pivots along X and inward pivots along Z. Nest a smaller frame on the perpendicular axis for a two-axis gimbal.',

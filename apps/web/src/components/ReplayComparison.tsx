@@ -153,7 +153,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         <TriplexTimingEvidence version={version} time={time} test={test} />
         <OrbitReplayEvidence inventionId={version.inventionId} iteration={version.iteration} time={time} test={test}
           definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
-        <TrayTiltEvidence inventionId={version.inventionId} versionId={version.id} iteration={version.iteration} time={time} test={test} />
+        <TrayTiltEvidence version={version} iteration={version.iteration} time={time} test={test} />
       </article>)}
     </div>
     <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />
