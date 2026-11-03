@@ -110,12 +110,14 @@ body {
 .lab-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .lab-chips .chip { min-height: 44px; font-size: .8rem; }
 .lab-chip-muse { background: var(--lavender); color: var(--violet-dark); border-color: #cec0f3; }
+.lab-hero-links { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .9rem; margin-top: .7rem; }
+.lab-hero-links > a:not(.lab-hero-proof) { display: inline-flex; align-items: center; gap: .35rem; min-height: 44px; color: var(--violet-dark); font-size: .88rem; font-weight: 700; }
+.lab-hero-links > a:hover { text-decoration: underline; }
 .lab-hero-proof {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
   min-height: 44px;
-  margin-top: .7rem;
   padding-inline: .8rem;
   border: 1px solid #cec0f3;
   border-radius: .75rem;
@@ -153,21 +155,34 @@ body {
 .lab-art-results button strong { color: #fff; font-size: 1.08rem; font-variant-numeric: tabular-nums; }
 .lab-art-results button:last-child strong { color: #e4f784; }
 .lab-art-link { justify-self: start; color: #eee4ff; font-size: .8rem; font-weight: 700; }
-.lab-process { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
-.lab-process > span { display: flex; align-items: center; gap: .6rem; padding: .75rem 1rem; font-size: .875rem; font-weight: 650; }
-.lab-process > span + span { border-left: 1px solid var(--line); }
-.lab-process b { color: var(--violet-dark); font: 650 .72rem var(--font-mono); }
 .lab-section { padding-block: 2rem; }
 .lab-section + .lab-section, .lab-footer { border-top: 1px solid var(--line); }
 .lab-section-heading { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: .75rem 1rem; margin-bottom: 1rem; }
 .lab-section h2 { font-size: clamp(1.65rem, 4vw, 2.45rem); font-weight: 800; letter-spacing: -.055em; }
 .lab-section p, .lab-footer p { color: var(--muted); font-size: .875rem; }
 .lab-empty { padding-block: .25rem; }
+.lab-how { scroll-margin-top: 7rem; }
+.lab-how .lab-section-heading .lab-label { color: var(--violet-dark); }
+.lab-how-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; padding: 0; list-style: none; }
+.lab-how-steps li { padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.lab-how-number { display: inline-grid; place-items: center; min-width: 2rem; min-height: 2rem; border-radius: .45rem; background: var(--lavender); color: var(--violet-dark); }
+.lab-how-steps h3 { margin: .65rem 0 .3rem; font-size: 1.05rem; font-weight: 750; letter-spacing: -.025em; }
+.lab-how-steps p { line-height: 1.5; }
+.lab-test-example { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; margin-top: .85rem; padding: clamp(1rem, 3vw, 1.5rem); border: 1px solid #423562; border-radius: .85rem; background: #201735; color: #f7f1ff; }
+.lab-test-example > div { flex: 1 1 19rem; }
+.lab-test-example .lab-label { color: #cab8f3; }
+.lab-test-example h3 { margin-block: .2rem; font-size: clamp(1.15rem, 2vw, 1.45rem); font-weight: 750; }
+.lab-test-example p { max-width: 47ch; color: #dccfed; }
+.lab-test-example dl { display: flex; flex-wrap: wrap; gap: .7rem 1.3rem; }
+.lab-test-example dt { color: #dccfed; font-size: .75rem; }
+.lab-test-example dd { font-size: 1.35rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.lab-test-example dl > div:last-child dd { color: #e4f784; }
 .lab-footer { display: grid; gap: .4rem; padding-block: 1.5rem 2.5rem; }
 
 @media (max-width: 767px) {
   .lab-hero { grid-template-columns: minmax(0, 1fr); gap: .8rem; }
   .lab-art { width: min(100%, 29rem); }
+  .lab-how-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 480px) {
   .site-brand { font-size: 1.07rem; gap: .4rem; }
@@ -176,9 +191,7 @@ body {
   .site-nav a { padding-inline: .65rem; font-size: .8rem; }
   .site-new > [aria-hidden="true"], .site-new-full { display: none; }
   .site-new-short { display: inline; }
-  .lab-process { grid-template-columns: repeat(2, 1fr); }
-  .lab-process > span:nth-child(3) { border-left: 0; }
-  .lab-process > span:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .lab-how-steps { grid-template-columns: minmax(0, 1fr); }
   .lab-input button { padding-inline: .65rem; }
   .lab-hero h1 { margin-block: .55rem .5rem; }
   .lab-form { margin-top: .85rem; }

@@ -2,9 +2,17 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Header, { useModelInfo } from '../components/Header.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
+import PartInventory from '../components/PartInventory.tsx';
 import Viewer from '../components/Viewer.tsx';
 import { api, fmt, type Example, type InventionPublic, type TestSummary } from '../api.ts';
 import type { VersionRecord } from '@protolab/schema';
+
+const steps = [
+  { title: 'Describe your idea', detail: 'Tell Muse what you want to build and what it should do. Give it a target, like a crab that scuttles at least 25 cm.' },
+  { title: 'Watch Muse assemble it', detail: 'Muse selects parts, connects them in 3D, and sets up the motors and joints that make the prototype move.' },
+  { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
+  { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
+];
 
 export default function Home() {
   const nav = useNavigate();
@@ -92,7 +100,10 @@ export default function Home() {
               <p id="invention-scope">Tell Muse what to build and how it should move.</p>
             </form>
             {error && <p className="mt-2 text-sm text-rose-700" role="alert">{error}</p>}
-            <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
+            <div className="lab-hero-links">
+              <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
+              <a href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>
+            </div>
           </div>
           <figure className="lab-art">
             <div className="lab-art-heading">
@@ -128,14 +139,44 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        <div className="lab-process" aria-label="How ProtoLab works">
-          <span><b>01</b> Describe</span><span><b>02</b> AI assembles</span><span><b>03</b> Physics test</span><span><b>04</b> Revise</span>
-        </div>
-
         {mine.length > 0 && <Section title="Your inventions" items={mine.slice(0, 3)} />}
-        <Section title="Featured" items={featured} blurb="Open a prototype to explore its assembly and replay the measured tests." />
+        <Section title="Prototype gallery" items={featured} blurb="Explore featured builds, inspect their parts, and replay their physics tests." gallery />
         <Section title="Recent" items={recent} empty="Nothing published yet. Build something and publish it." />
         <Section title="Remixes" items={remixes} empty="Open any invention and click Remix to create the first one." />
+        <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
+          <div className="lab-section-heading">
+            <div>
+              <span className="lab-label">From idea to prototype</span>
+              <h2 id="lab-how-title">How ProtoLab works</h2>
+              <p>A prompt becomes a 3D assembly you can inspect, simulate, and improve.</p>
+            </div>
+            <a href="#parts" className="btn-secondary">Explore the parts <span aria-hidden="true">↓</span></a>
+          </div>
+          <ol className="lab-how-steps">
+            {steps.map((step, index) => (
+              <li key={step.title}>
+                <span className="lab-label lab-how-number">0{index + 1}</span>
+                <h3>{step.title}</h3>
+                <p>{step.detail}</p>
+              </li>
+            ))}
+          </ol>
+          {beforeDistance !== undefined && afterDistance !== undefined && (
+            <div className="lab-test-example">
+              <div>
+                <span className="lab-label">Inside a saved simulation</span>
+                <h3>How a test changed the crab</h3>
+                <p>The first version barely moved sideways. Muse revised the leg stance and gait, then ran the same test again.</p>
+              </div>
+              <dl aria-label="Sideways distance">
+                <div><dt>Before revision</dt><dd>{fmt.cm(beforeDistance)}</dd></div>
+                <div><dt>After revision</dt><dd>{fmt.cm(afterDistance)}</dd></div>
+              </dl>
+              <Link to={replayUrl} className="btn-secondary">Replay the test <span aria-hidden="true">↗</span></Link>
+            </div>
+          )}
+        </section>
+        <PartInventory />
         <footer className="lab-footer">
           <span className="lab-label">ProtoLab{model && ` · ${model.label}`}</span>
           <p>Rigid-body simulation is not engineering certification. No claim of physical buildability or safety is made.</p>
@@ -145,7 +186,7 @@ export default function Home() {
   );
 }
 
-function Section({ title, items, blurb, empty }: { title: string; items: InventionPublic[]; blurb?: string; empty?: string }) {
+function Section({ title, items, blurb, empty, gallery }: { title: string; items: InventionPublic[]; blurb?: string; empty?: string; gallery?: boolean }) {
   return (
     <section className="lab-section">
       <div className="lab-section-heading">
@@ -153,7 +194,7 @@ function Section({ title, items, blurb, empty }: { title: string; items: Inventi
           <h2>{title}</h2>
           {blurb && <p>{blurb}</p>}
         </div>
-        {title === 'Featured' && <Link to="/gallery" className="btn-secondary">View gallery <span aria-hidden="true">↗</span></Link>}
+        {gallery && <Link to="/gallery" className="btn-secondary">View gallery <span aria-hidden="true">↗</span></Link>}
       </div>
       {items.length === 0 ? <p className="lab-empty">{empty ?? 'Loading…'}</p> : (
         <div className="invention-grid">{items.map((i) => <GalleryCard key={i.id} item={i} />)}</div>
