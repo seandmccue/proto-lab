@@ -1,0 +1,113 @@
+import { useEffect, useMemo, useState } from 'react';
+import { tiltDeg } from '@protolab/parts';
+import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
+import { api, fmt } from '../api.ts';
+import { keyMetric, recordedTestSpec } from './BuildProgress.tsx';
+import type { DiagnosticTone } from './diagnosticColors.ts';
+import Viewer from './Viewer.tsx';
+
+type Replay = { inventionId: string; versionId: string; testId: string; label: string };
+type Tilt = { highlights: ReadonlyMap<string, DiagnosticTone>; tilt: number; limit: number; feet: number };
+
+interface Props {
+  before: Replay;
+  after: Replay;
+  reducedMotion: boolean;
+  baselineDefinition?: TestSpec;
+  findTilt: (assembly: Assembly, test: TestResult, definition: TestSpec | undefined, time: number) => Tilt | null;
+  revisionChanges: (before: Assembly, after: Assembly) => { changed: Set<string>; drives: Set<string> };
+}
+
+export default function ReplayComparison({ before, after, reducedMotion, baselineDefinition, findTilt, revisionChanges }: Props) {
+  const [versions, setVersions] = useState<[VersionRecord, VersionRecord] | null>(null);
+  const [error, setError] = useState(false);
+  const [playing, setPlaying] = useState(!reducedMotion);
+  const [time, setTime] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const { inventionId: beforeInvention, versionId: beforeId } = before;
+  const { inventionId: afterInvention, versionId: afterId } = after;
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.version(beforeInvention, beforeId), api.version(afterInvention, afterId)])
+      .then(([a, b]) => { if (!cancelled) setVersions([a.version, b.version]); })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [beforeInvention, beforeId, afterInvention, afterId]);
+
+  const beforeTest = versions?.[0].tests.find((test) => test.testId === before.testId);
+  const afterTest = versions?.[1].tests.find((test) => test.testId === after.testId);
+  const duration = Math.min(beforeTest?.trace.frames.at(-1)?.t ?? 0, afterTest?.trace.frames.at(-1)?.t ?? 0);
+  useEffect(() => {
+    if (!playing || !duration) return;
+    let last = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      if (now - last >= 30) {
+        const elapsed = (now - last) * speed / 1000;
+        last = now;
+        setTime((current) => (current + elapsed) % duration);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [duration, playing, speed]);
+
+  const changes = useMemo(() => {
+    const highlights = new Map<string, DiagnosticTone>();
+    if (versions) {
+      const { changed, drives } = revisionChanges(versions[0].assembly, versions[1].assembly);
+      for (const id of [...changed, ...drives]) highlights.set(id, 'change');
+    }
+    return highlights;
+  }, [versions, revisionChanges]);
+  const definition = recordedTestSpec(before.testId, [versions?.[0] ?? null]) ?? baselineDefinition;
+  const peakTime = useMemo(() => {
+    if (!beforeTest || beforeTest.passed || definition?.kind !== 'walk') return null;
+    let peakTilt = definition.maxTilt_deg;
+    let peak = null;
+    for (const frame of beforeTest.trace.frames) {
+      if (frame.t > duration) break;
+      const pose = frame.bodies[definition.base];
+      const tilt = pose ? tiltDeg(pose.rotation) : 0;
+      if (tilt > peakTilt) { peakTilt = tilt; peak = frame.t; }
+    }
+    return peak;
+  }, [beforeTest, definition, duration]);
+
+  if (error || (versions && !duration)) return <p className="workbench-comparison-message" role="status">Both recorded traces are needed for side-by-side replay.</p>;
+  if (!versions || !beforeTest || !afterTest) return <p className="workbench-comparison-message" role="status">Loading both recorded simulations…</p>;
+
+  const tilt = findTilt(versions[0].assembly, beforeTest, definition, time);
+  const adjustment = versions[1].decisions.slice().reverse().find((decision) => decision.source === 'model' && (decision.previousTestId || decision.basedOn));
+  const panes = [
+    { replay: before, version: versions[0], test: beforeTest, highlights: tilt?.highlights },
+    { replay: after, version: versions[1], test: afterTest, highlights: changes },
+  ];
+
+  return <section className="workbench-comparison" aria-label="Side-by-side simulation comparison">
+    <div className="workbench-toolbar workbench-comparison-controls">
+      <div className="workbench-control-group" role="group" aria-label="Synchronized replay controls">
+        <button className="btn-secondary" type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+        <button className="btn-ghost" type="button" onClick={() => setTime(0)}>Reset</button>
+        {peakTime !== null && <button className="btn-ghost" type="button" onClick={() => { setPlaying(false); setTime(peakTime); }}>Jump to peak tilt</button>}
+        <input type="range" min={0} max={duration} step={0.01} value={time} onChange={(event) => { setPlaying(false); setTime(Number(event.target.value)); }} className="workbench-timeline" aria-label="Scrub both simulations" />
+        <span className="mono whitespace-nowrap text-xs text-slate-600">{time.toFixed(2)} / {duration.toFixed(1)} s</span>
+        <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
+      </div>
+      <span className="workbench-view-hint">Same clock · Same camera</span>
+    </div>
+    <div className="workbench-comparison-panes">
+      {panes.map(({ replay, version, test, highlights }, index) => <article key={replay.versionId} className="workbench-comparison-pane" aria-label={`${replay.label}, version ${version.iteration}`}>
+        <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
+        <p className="workbench-comparison-metric">{test.metrics.distance_m !== undefined ? `${fmt.cm(test.metrics.distance_m)} travelled` : keyMetric(test)}{test.metrics.maxTilt_deg !== undefined && ` · ${fmt.deg(test.metrics.maxTilt_deg)} peak tilt`}</p>
+        <div className="workbench-comparison-canvas">
+          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraReference={versions[1].assembly} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} />
+        </div>
+        <div className={`workbench-comparison-note${index === 0 ? ' is-failure' : ''}`}>
+          {index === 0 ? <><strong>{tilt ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
+        </div>
+      </article>)}
+    </div>
+  </section>;
+}

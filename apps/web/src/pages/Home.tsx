@@ -63,7 +63,7 @@ export default function Home() {
   const activeTest = showBefore && before ? before.version.tests.find((test) => test.testId === before.test.testId) : heroTest;
   const beforeDistance = before?.test.metrics.distance_m;
   const afterDistance = heroTest?.metrics.distance_m ?? hero?.latestWalk?.metrics.distance_m;
-  const replayUrl = hero ? `/i/${hero.id}?replay=1` : '/gallery';
+  const replayUrl = hero ? `/i/${hero.id}?replay=1&compare=1` : '/gallery';
 
   const start = async (body: { prompt?: string; exampleId?: string }) => {
     setBusy(true); setError(null);
@@ -92,7 +92,7 @@ export default function Home() {
               <p id="invention-scope">Tell Muse what to build and how it should move.</p>
             </form>
             {error && <p className="mt-2 text-sm text-rose-700" role="alert">{error}</p>}
-            <Link to={replayUrl} className="lab-hero-proof">{hero ? 'See the AI fix a mechanical crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">↗</span></Link>
+            <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
           </div>
           <figure className="lab-art">
             <div className="lab-art-heading">
@@ -114,7 +114,7 @@ export default function Home() {
             </div>
             <figcaption>
               {hero && <p>Muse revised the leg stance and gait. The cards show sideways distance from the saved tests.</p>}
-              <Link to={replayUrl} className="lab-art-link">{hero ? 'Open the interactive replay' : 'Explore working prototypes'} <span aria-hidden="true">↗</span></Link>
+              <Link to={replayUrl} className="lab-art-link">{hero ? 'Compare both runs in 3D' : 'Explore working prototypes'} <span aria-hidden="true">↗</span></Link>
             </figcaption>
           </figure>
         </section>

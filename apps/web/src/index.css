@@ -115,7 +115,11 @@ body {
   align-items: center;
   gap: .35rem;
   min-height: 44px;
-  margin-top: .4rem;
+  margin-top: .7rem;
+  padding-inline: .8rem;
+  border: 1px solid #cec0f3;
+  border-radius: .75rem;
+  background: var(--lavender);
   color: var(--violet-dark);
   font-size: .88rem;
   font-weight: 700;

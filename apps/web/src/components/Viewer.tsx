@@ -18,6 +18,8 @@ export interface ViewerProps {
   blueprint: boolean;
   follow?: boolean;
   cameraLock?: string;
+  cameraReference?: Assembly;
+  playbackTime?: number;
   selectedId: string | null;
   changedIds?: Set<string>;
   diagnosticHighlights?: ReadonlyMap<string, DiagnosticTone>;
@@ -106,7 +108,7 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 }
 
 function Scene(props: ViewerProps) {
-  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, timeRef, onTime, seekTo, autoRotate, mini } = props;
+  const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, cameraReference, playbackTime, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
   const enteredAt = useRef(new Map<string, number>());
   const entering = useMemo(() => new Set(enteringInstanceIds), [enteringInstanceIds]);
@@ -118,27 +120,29 @@ function Scene(props: ViewerProps) {
   useEffect(() => { if (props.captureRef) props.captureRef.current = () => { try { return gl.domElement.toDataURL('image/png'); } catch { return null; } }; }, [gl, props.captureRef]);
 
   const partById = useMemo(() => new Map(assembly.parts.map((p) => [p.id, p])), [assembly]);
+  const cameraAssembly = cameraReference ?? assembly;
   const { center, radius } = useMemo(() => {
+    const cameraParts = new Map(cameraAssembly.parts.map((p) => [p.id, p]));
     const min = new THREE.Vector3(Infinity, Infinity, Infinity), max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-    for (const i of assembly.instances) {
-      const part = partById.get(i.partId); const r = part ? boundingRadius(part.geometry) : 0.02; const p = vec(i.transform.position);
+    for (const i of cameraAssembly.instances) {
+      const part = cameraParts.get(i.partId); const r = part ? boundingRadius(part.geometry) : 0.02; const p = vec(i.transform.position);
       min.min(p.clone().subScalar(r)); max.max(p.clone().addScalar(r));
     }
-    if (!assembly.instances.length) return { center: new THREE.Vector3(0, 0.1, 0), radius: 0.2 };
+    if (!cameraAssembly.instances.length) return { center: new THREE.Vector3(0, 0.1, 0), radius: 0.2 };
     const c = min.clone().add(max).multiplyScalar(0.5); c.y = Math.max(c.y, (max.y - min.y) * 0.4);
     return { center: c, radius: Math.max(0.08, max.distanceTo(min) / 2) };
-  }, [assembly, partById]);
+  }, [cameraAssembly]);
   const { camera } = useThree();
   const framed = useRef<string>('');
   useEffect(() => {
     // Frame the whole machine once per assembly (size changes from a 150 mm robot to a 600 mm Ferris wheel).
     const key = cameraLock ?? `${assembly.instances.length}:${radius.toFixed(3)}:${center.x.toFixed(3)}:${center.y.toFixed(3)}`;
     if (framed.current === key) return; framed.current = key;
-    const dist = radius * (mini ? 1.8 : 2.4);
+    const dist = radius * (cameraReference ? 3.1 : mini ? 1.8 : 2.4);
     camera.position.set(center.x + dist * 0.72, center.y + dist * 0.5, center.z + dist * 0.78);
     camera.near = Math.max(0.005, dist / 100); camera.far = Math.max(20, dist * 20); camera.updateProjectionMatrix();
     if (controls.current) { controls.current.target.copy(center); controls.current.update(); }
-  }, [assembly, center, radius, camera, mini, cameraLock]);
+  }, [assembly, center, radius, camera, mini, cameraLock, cameraReference]);
   const explodeDir = useMemo(() => {
     const m = new Map<string, THREE.Vector3>();
     for (const i of assembly.instances) {
@@ -154,7 +158,8 @@ function Scene(props: ViewerProps) {
   useEffect(() => { tRef.current = 0; }, [test?.testId]);
 
   useFrame(({ clock }, delta) => {
-    if (playing && duration > 0) { tRef.current = (tRef.current + delta * speed) % duration; }
+    if (playbackTime !== undefined) tRef.current = Math.min(playbackTime, duration);
+    else if (playing && duration > 0) { tRef.current = (tRef.current + delta * speed) % duration; }
     if (timeRef) timeRef.current = tRef.current;
     onTime?.(tRef.current, duration);
     const { a, b, k } = sampleFrame(frames, tRef.current);
@@ -216,7 +221,7 @@ function Scene(props: ViewerProps) {
           {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-sky-300">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
         </group>
       )}
-      <OrbitControls ref={controls as never} makeDefault enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * 10} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
+      <OrbitControls ref={controls as never} makeDefault enabled={!cameraReference} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * 10} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={!mini} />
     </>
   );
 }
@@ -246,7 +251,7 @@ export default function Viewer(props: ViewerProps) {
     return () => timers.forEach(clearTimeout);
   }, []);
   if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-slate-100"} />;
-  const previewProps = { assembly: props.assembly, trace: props.test?.trace, playing: props.playing, speed: props.speed, seekTo: props.seekTo, onTime: props.onTime, diagnosticHighlights: props.diagnosticHighlights };
+  const previewProps = { assembly: props.assembly, trace: props.test?.trace, playing: props.playing, speed: props.speed, seekTo: props.playbackTime ?? props.seekTo, onTime: props.onTime, diagnosticHighlights: props.diagnosticHighlights };
   const fallback = props.mini ? (
     <IsoPreview {...previewProps} className="h-full w-full" />
   ) : (

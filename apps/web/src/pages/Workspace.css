@@ -125,6 +125,21 @@
 .workbench-story-steps .workbench-story-version { display: inline; margin-inline-start: .25rem; font-weight: 500; }
 .workbench-story-brief { margin: -.1rem 0 .5rem; color: var(--bench-muted); font-size: .75rem; }
 .workbench-story-caption { margin-top: .45rem; color: var(--bench-ink); font-size: .78rem; }
+.workbench-comparison-toggle { margin-inline-start: auto; }
+.workbench-comparison { background: #f9f6ff; }
+.workbench-comparison .workbench-comparison-controls { border-top: 0; border-bottom: 1px solid var(--bench-line); }
+.workbench-comparison-panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--bench-line); }
+.workbench-comparison-pane { display: flex; flex-direction: column; min-width: 0; background: var(--bench-panel); }
+.workbench-comparison-pane header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .3rem .65rem; padding: .7rem .9rem .25rem; }
+.workbench-comparison-metric { padding: 0 .9rem .55rem; color: var(--bench-muted); font-size: .78rem; }
+.workbench-comparison-canvas { height: clamp(15rem, 38dvh, 26rem); background: #eee9fa; }
+.workbench-comparison-note { display: grid; align-content: start; gap: .2rem; flex: 1; padding: .65rem .9rem; border-top: 2px solid #08635d; color: #125a51; background: #edfcf8; font-size: .78rem; }
+.workbench-comparison-note.is-failure { border-color: #a40f33; color: #8c1936; background: #fff3f5; }
+.workbench-comparison-message { padding: 1rem; font-size: .875rem; }
+@media (width < 37rem) {
+  .workbench-comparison-panes { grid-template-columns: minmax(0, 1fr); }
+  .workbench-comparison-canvas { height: 13rem; }
+}
 .workbench-stage-fallback { display: flex; height: 100%; flex-direction: column; padding: 3.5rem 1rem 1rem; text-align: center; }
 .workbench-stage-fallback svg { flex: 1; min-height: 0; width: 100%; }
 .workbench-stage-fallback p { margin-top: .5rem; color: var(--bench-muted); font-size: .78rem; }
@@ -264,6 +279,7 @@
     height: 100dvh;
     min-height: 46rem;
   }
+  .workbench--compare { height: auto; }
 
   .workbench-grid {
     grid-template-columns: minmax(12rem, 0.74fr) minmax(0, 2.3fr) minmax(15rem, 1fr);

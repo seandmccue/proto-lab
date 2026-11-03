@@ -1,6 +1,6 @@
 # ProtoLab judge demo
 
-## 73-second recording
+## Earlier 73-second recording
 
 The 3D shots replay saved simulator traces in the application. The opening shows the prompt interaction. It does not start a live build in the recording.
 
@@ -16,16 +16,17 @@ The 3D shots replay saved simulator traces in the application. The opening shows
 
 ## Live version
 
-1. In a signed-out browser, run preflight against the deployed URL and open the saved walker and dragonfly workbenches. Check that both versions play, their test results agree with the recording, and a judge can start a fresh build.
-2. Start a fresh flapping butterfly or Ferris wheel with the judge’s choice of constraint. Leave that tab open while showing the saved dragonfly remix. Use the 3D stage, the version controls, and the Tests tab to show the failure, the rear-hinge edit, and the retest.
-3. Return to the live job when it has reached a milestone. If it is still processing, show the actual current stage and finish the saved walkthrough. Keep the labels for live jobs and saved simulation distinct.
-4. If asked how Meta’s models participate, open the saved crab v3 and v4. Spark’s failed v3 traveled 0.27 cm at 14.28° tilt. Wonder’s revision restored a uniform stance and wave gait and passed at 31.73 cm at 4.72° tilt.
-5. Show the parts panel or exploded view if asked what was built. Explain that the saved metrics are from rigid-body simulation and that the flapping test measures joint movement and contact.
+1. In a signed-out browser, open the homepage and click **Watch Muse fix the crab**. Play the comparison and point out the shared 25 cm distance target and 10° tilt limit.
+2. Pause near the tilt spike. Spark’s v3 traveled 0.27 cm at 14.28° peak tilt. Wonder revised the stance and gait. V4 passed at 31.73 cm and 4.72°. Open the controlled comparison if the judge asks which change mattered.
+3. Show the Gravity Clock and Cargo Crane to demonstrate two different mechanisms. In a second tab, start a fresh crane with a constraint the judge chooses. One rehearsal brief asked it to lift a block at least 8 cm, hold it, then lower it to within 2 cm of its start.
+4. Return to the live job when it reaches a milestone. Call the recorded crab comparison a saved run and the crane job a live build. Both use simulated motion.
 
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
 - Dragonfly · `/i/inv_fd8fcc242ed8497f`
-- Crab · `/i/inv_633b4887ad7f4cdc`
+- Crab comparison · `/i/inv_633b4887ad7f4cdc?replay=1&compare=1`
+- Gravity Clock · `/i/inv_a1f1665e649b41c2`
+- Cargo Crane · `/i/inv_0868f2ea889f4bcc`
 
 Confirm the deployment preserved these records before publishing the links.

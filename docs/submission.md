@@ -8,7 +8,7 @@ Describe a machine. Meta Muse assembles a prototype, tests its motion, and revis
 
 ## Short description
 
-A student robotics club should be able to find out why a mechanism jams before cutting its first part. ProtoLab turns a plain-English brief into an interactive mechanical prototype. Muse Spark selects or designs parts, assembles them at connectors, specifies a test, and uses Rapier’s measurements to revise the design. In a saved butterfly-to-dragonfly remix, the first test found two wings touching. Muse moved the rear hinges back, then the same test ran at 2 Hz with zero detected wing contacts. Open the saved tests, inspect the parts, and remix the prototype in your browser.
+A student robotics club should be able to find out why a mechanism tips or jams before cutting its first part. ProtoLab turns a plain-English brief into an interactive mechanical prototype. Muse selects or designs parts, assembles them at connectors, and revises the mechanism using measurements from a physics simulation. Watch two versions of the same mechanical crab run side by side. The first barely moves and tilts beyond the limit. Muse Wonder repositions all six legs and adjusts the gait. The next version travels 31.7 cm and stays within the tilt limit. Open the saved tests, inspect the parts, and remix the prototype in your browser.
 
 ## What to show
 
@@ -25,15 +25,19 @@ The v10 general mechanism benchmark recorded ten passes across ten briefs and no
 ## Submission links and checks
 
 - Live app · https://protolab.sean-abc.workers.dev
+- Crab side-by-side replay · https://protolab.sean-abc.workers.dev/i/inv_633b4887ad7f4cdc?replay=1&compare=1
+- Gravity Clock · https://protolab.sean-abc.workers.dev/i/inv_a1f1665e649b41c2
+- Cargo Crane · https://protolab.sean-abc.workers.dev/i/inv_0868f2ea889f4bcc
 - Robot repair replay · https://protolab.sean-abc.workers.dev/i/inv_bb9d5f8a170d4d95?replay=1
 - Dragonfly replay · https://protolab.sean-abc.workers.dev/i/inv_fd8fcc242ed8497f?replay=1
-- Judge video · https://protolab.sean-abc.workers.dev/judge-demo.mp4
+- Earlier narrated demo · https://protolab.sean-abc.workers.dev/judge-demo.mp4
 - Public source repository · https://github.com/seandmccue/proto-lab
-- Deployed release branch · https://github.com/seandmccue/proto-lab/tree/codex/protolab-hackathon
+- Deployed release branch · https://github.com/seandmccue/proto-lab/tree/codex/simulation-explanations
 - Evidence · [benchmark](benchmark-general.md) and [demo walkthrough](demo-script.md).
 
 The signed-in Cerebral Valley form shows Indie Developer, Push the Frontier, Public GitHub
-Repository, and a three-minute demo-video field with a YouTube example. The demo is 73 seconds.
-If the form requires a YouTube URL, upload the MP4 as unlisted and check it in a signed-out session.
+Repository, and a three-minute demo-video field with a YouTube example.
+Record the voice-over for the new crab cut. If the form requires a YouTube URL, upload the
+finished MP4 as unlisted and check it in a signed-out session.
 The participant should supply the required survey answers and decide whether to grant the
 portal's publication and promotion permission. Save the receipt after submitting.

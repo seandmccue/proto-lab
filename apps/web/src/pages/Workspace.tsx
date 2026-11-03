@@ -4,6 +4,8 @@ import { tiltDeg, upVector } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
+import ReplayComparison from '../components/ReplayComparison.tsx';
+import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -95,6 +97,19 @@ function movedPart(before: Assembly['instances'][number] | undefined, after: Ass
     Math.abs(after.transform.rotation.reduce((dot, value, i) => dot + value * before.transform.rotation[i], 0)) < 0.99999;
 }
 
+function revisionChanges(before: Assembly, after: Assembly) {
+  const previousParts = new Map(before.instances.map((part) => [part.id, part]));
+  const changed = new Set(after.instances.filter((part) => movedPart(previousParts.get(part.id), part)).map((part) => part.id));
+  const previousDrives = new Map(before.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
+  const nextDrives = new Map(after.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
+  const drives = new Set<string>();
+  for (const joint of after.joints) {
+    const controlId = joint.motor?.controlId;
+    if (controlId && previousDrives.get(controlId) !== nextDrives.get(controlId)) drives.add(joint.b.instanceId);
+  }
+  return { changed, drives };
+}
+
 function walkTiltHighlight(assembly: Assembly, test: TestResult, definition: TestSpec | undefined, time: number) {
   if (test.kind !== 'walk' || test.passed || definition?.kind !== 'walk') return null;
   const { frames, dt } = test.trace;
@@ -133,7 +148,8 @@ function walkTiltHighlight(assembly: Assembly, test: TestResult, definition: Tes
 export default function Workspace() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
-  const replayLink = params.get('replay') === '1';
+  const compareLink = params.get('compare') === '1';
+  const replayLink = compareLink || params.get('replay') === '1';
   const nav = useNavigate();
   const [detail, setDetail] = useState<InventionDetail | null>(null);
   const [jobId, setJobId] = useState<string | null>(params.get('job'));
@@ -205,6 +221,7 @@ export default function Workspace() {
   const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean; error?: string } | null>(null);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
   const [stageMode, setStageMode] = useState(replayLink);
+  const [comparisonOpen, setComparisonOpen] = useState(compareLink);
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
   const running = jobStatus === 'queued' || jobStatus === 'running';
@@ -358,26 +375,9 @@ export default function Workspace() {
   }, [detail, running, version, id]);
 
   const test = useMemo(() => version?.tests.find((t) => t.testId === testId) ?? null, [version, testId]);
-  const changedIds = useMemo(() => {
-    if (!version || !prevVersion) return new Set<string>();
-    const prevMap = new Map(prevVersion.assembly.instances.map((i) => [i.id, i]));
-    const s = new Set<string>();
-    for (const i of version.assembly.instances) {
-      const p = prevMap.get(i.id);
-      if (movedPart(p, i)) s.add(i.id);
-    }
-    return s;
-  }, [version, prevVersion]);
-  const driveChangedIds = useMemo(() => {
-    if (!version || !prevVersion) return new Set<string>();
-    const before = new Map(prevVersion.assembly.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
-    const after = new Map(version.assembly.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
-    const ids = new Set<string>();
-    for (const joint of version.assembly.joints) {
-      const controlId = joint.motor?.controlId;
-      if (controlId && before.get(controlId) !== after.get(controlId)) ids.add(joint.b.instanceId);
-    }
-    return ids;
+  const { changed: changedIds, drives: driveChangedIds } = useMemo(() => {
+    if (!version || !prevVersion) return { changed: new Set<string>(), drives: new Set<string>() };
+    return revisionChanges(prevVersion.assembly, version.assembly);
   }, [version, prevVersion]);
   const revisionHighlights = useMemo(() => {
     const highlights = new Map<string, DiagnosticTone>();
@@ -398,6 +398,7 @@ export default function Workspace() {
       else {
         setLocalRevision({ jobId: r.jobId, versionId: baselineId, changeRequest });
         setStageMode(false);
+        setComparisonOpen(false);
         setJobId(r.jobId);
         setJobStatus('queued');
       }
@@ -413,6 +414,9 @@ export default function Workspace() {
   const cameraLock = comparing ? story.slice(0, 2).map((step) => step.version.id).join(':') : undefined;
   const target = story[0]?.label === 'Before revision' ? walkTargets(story[0].test) : null;
   const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
+  const canCompare = !running && !!story[1] && !separateChecks && story[0].version.id !== story[1].version.id;
+  const sideBySide = comparisonOpen && canCompare;
+  const canonicalProof = sideBySide && story[0].version.id === crabProofPair.beforeId && story[1].version.id === crabProofPair.afterId;
   const vmeta = detail?.versions.find((v) => v.id === versionId);
   const [earlierTestSpecs, setEarlierTestSpecs] = useState<Record<string, TestSpec>>({});
   const testSpecKey = version && test ? `${version.id}/${test.testId}` : null;
@@ -497,7 +501,7 @@ export default function Workspace() {
     );
   }
   return (
-    <div className={`workbench${stageMode ? ' workbench--stage' : ''}`}>
+    <div className={`workbench${stageMode ? ' workbench--stage' : ''}${sideBySide ? ' workbench--compare' : ''}`}>
       <Header compact />
       <div className="workbench-heading">
         <div className="min-w-0">
@@ -509,7 +513,7 @@ export default function Workspace() {
           </div>
           <p className="workbench-prompt">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           {inv && (
             <button className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
               Request a change
@@ -517,7 +521,7 @@ export default function Workspace() {
           )}
           {inv?.isOwner && <button className="btn-secondary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode('remix'); }}>Remix</button>}
           {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
-          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
+          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (sideBySide ? '?replay=1&compare=1' : stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
           <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
         </div>
       </div>
@@ -545,7 +549,7 @@ export default function Workspace() {
             )}
             {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
             {finalVersion && <a href="#prototype-explanation" className="btn-ghost">How it works ↓</a>}
-            {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
+            {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setComparisonOpen(false); setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {!running && story.length > 0 && (
@@ -553,9 +557,17 @@ export default function Workspace() {
               <div className="workbench-story-heading">
                 <span className="workbench-label">Saved simulation</span>
                 {target ? <span><strong>Original test target</strong> {target}</span> : <span>{separateChecks ? 'Each version has its own recorded test.' : 'Compare the recorded simulations before and after the revision.'}</span>}
+                {canCompare && <button type="button" className="btn-secondary workbench-comparison-toggle" aria-pressed={sideBySide} onClick={() => {
+                  setComparisonOpen(!sideBySide);
+                  if (sideBySide) return;
+                  setVersionId(story[0].version.id);
+                  setTestId(story[0].test.testId);
+                  setStageMode(true);
+                  setMobilePane('canvas');
+                }}>{sideBySide ? 'Show one replay' : 'Compare side by side'}</button>}
               </div>
               {changeBrief && <p className="workbench-story-brief"><strong>Requested change</strong> {changeBrief}</p>}
-              <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
+              {!sideBySide && <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
                 {story.map((step, index) => (
                   <button key={step.test.testId} type="button" aria-pressed={storyStep === index} onClick={() => {
                     setVersionId(step.version.id);
@@ -568,15 +580,19 @@ export default function Workspace() {
                     <span><strong>{step.label} <small className="workbench-story-version">v{step.version.iteration}</small></strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {testReadout(step.test, step.label)}</small></span>
                   </button>
                 ))}
-              </div>
-              {currentStep && (
+              </div>}
+              {!sideBySide && currentStep && (
                 <p className="workbench-story-caption" aria-live="polite">
                   {stepDecision ? `${stepDecision.modelId === 'muse-wonder-1.0' ? 'Muse Wonder' : 'Muse'}’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.failureReasons.join(' · ') || (currentStep.test.passed ? 'The mechanism passed the recorded test.' : 'The test did not meet its target.')}
                 </p>
               )}
-              {storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
+              {!sideBySide && storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
             </div>
           )}
+          {sideBySide ? <>
+            <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} />
+            {canonicalProof && <CrabProofPanel />}
+          </> : <>
           <SimulationStatus events={events} running={running} replay={!showLive && version && test ? { iteration: version.iteration, test, playing, definition: testDefinition, adjustment: revisionDecision?.summary } : null} />
           <div className="workbench-stage">
             {showLive && live ? (
@@ -626,6 +642,7 @@ export default function Workspace() {
               {!showLive && (comparing ? <span className="workbench-view-hint">Same camera for both tests</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
+          </>}
           {finalVersion && (
             <section id="prototype-explanation" className="workbench-explanation" aria-label="How the final prototype works">
               <div className="workbench-explanation-heading">
