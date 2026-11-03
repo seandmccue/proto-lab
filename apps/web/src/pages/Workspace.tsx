@@ -49,7 +49,8 @@ export default function Workspace() {
     return d;
   }, [id, jobId]);
 
-  useEffect(() => { refresh().catch((e) => setError((e as Error).message)); }, [refresh]);
+  const [missing, setMissing] = useState(false);
+  useEffect(() => { refresh().catch((e) => { if (/not found|HTTP 404/i.test((e as Error).message)) setMissing(true); else setError((e as Error).message); }); }, [refresh]);
 
   // Poll the job while it runs
   useEffect(() => {
@@ -132,6 +133,22 @@ export default function Workspace() {
   const canFollowUp = !!inv?.isOwner && !running && !!inv.currentVersionId;
   const vmeta = detail?.versions.find((v) => v.id === versionId);
 
+  if (missing) {
+    return (
+      <div className="min-h-screen">
+        <Header />
+        <main className="mx-auto max-w-2xl px-4 py-20 text-center">
+          <p className="text-xs font-mono uppercase tracking-widest text-slate-500">Invention unavailable</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight">This invention is private or doesn’t exist</h1>
+          <p className="mt-3 text-slate-600">Builds are private until their owner publishes them to the gallery. If someone sent you this link, ask them to publish it, or start your own.</p>
+          <div className="mt-8 flex justify-center gap-3">
+            <Link to="/" className="btn-primary">Start a new invention</Link>
+            <Link to="/gallery" className="btn-secondary">Browse the gallery</Link>
+          </div>
+        </main>
+      </div>
+    );
+  }
   return (
     <div className="workbench">
       <Header compact />
