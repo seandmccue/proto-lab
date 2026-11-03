@@ -152,6 +152,12 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
   add('Return error', metrics.payloadReturnError_m, (v) => `${(v * 1000).toFixed(1)} mm`, motion?.maxPayloadReturnError_m);
   add('Landing distance', metrics.landingDistance_m, distance);
   add('Peak tracked-part tilt', metrics.maxInstanceTilt_deg, angle, motion?.maxInstanceTilt_deg);
+  if (definition?.kind === 'motion') {
+    for (const { instance, axis, minTravel_m } of definition.measure.linearTravel ?? []) {
+      const name = instance.replace(/[_-]+/g, ' ');
+      add(`${name[0].toUpperCase()}${name.slice(1)} travel`, metrics[`${instance}.travel_${axis}_m`], distance, minTravel_m, true);
+    }
+  }
   const rotation = Object.entries(metrics).find(([name, value]) => name.endsWith('.revolutions') && value >= .5);
   const swing = Object.entries(metrics).find(([name]) => name.endsWith('.amplitude_rad'));
   if (rotation) add('Rotation', rotation[1], revolutions, motion?.minRevolutions, true);

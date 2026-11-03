@@ -212,6 +212,11 @@ export const TestSpec = z.discriminatedUnion('kind', [
       clearancePairs: z.array(ClearancePair).default([]),    // instance pairs that must not touch
       noGroundContact: z.array(z.string()).default([]),      // instances that must not touch the ground
       uprightInstances: z.array(z.string().min(1)).min(1).max(80).optional(),
+      linearTravel: z.array(z.object({
+        instance: z.string().min(1),
+        axis: Axis,
+        minTravel_m: z.number().positive(),
+      })).max(80).optional(),
       payload: z.object({ instance: z.string().min(1), holder: z.string().min(1).optional() }).optional(),
     }).default({}),
     criteria: z.object({

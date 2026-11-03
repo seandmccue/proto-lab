@@ -13,6 +13,7 @@ export const EXAMPLES = [
   ...SEED_EXAMPLES,
   { id: 'flower', title: 'Clockwork Bloom', prompt: 'Build a recognizable mechanical flower with six rounded petals on a stem. Open and close the petals together on motorized hinges. Measure at least 35 degrees of travel per petal and check petal clearance.', blurb: 'A flower whose hinged petals open and close together.' },
   { id: 'crane', title: 'Cargo Crane', prompt: 'Build a tabletop cargo crane that raises and lowers a secured block with a hinged boom. Measure at least 6 cm of actual payload lift, retain the block within 4 cm of the hook, and return it within 2.5 cm of its starting height.', blurb: 'A crane that measures the cargo’s lift and retention.' },
+  { id: 'triplex', title: 'Triplex Pump', prompt: 'Build a tabletop triplex pump mechanism. Use one powered shaft, three eccentric discs offset by 120 degrees, connecting rods, and three passive pistons in linear guides. Give the pistons no drives of their own. Run a motion test that measures shaft rotation and at least 30 mm of linear travel on each piston. Simulate the linkage motion.', blurb: 'Three passive pistons driven by one shaft.' },
 ];
 
 /** Seed featured gallery items (owned by ProtoLab) if the gallery is empty. They are built by the real agent, not canned. */

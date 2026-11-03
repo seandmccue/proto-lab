@@ -21,6 +21,37 @@ test('generatePart rejects out-of-range params', () => {
   assert.throws(() => generatePart('beam', { bogus: 1 }), ParamError);
 });
 
+test('drive discs, clevises, and bell cranks expose usable pivots in both catalog sizes', () => {
+  for (const id of ['eccentric-disc-40', 'eccentric-disc-70']) {
+    const part = getPart(id)!;
+    assert.ok(searchCatalog('eccentric', { category: 'cranks' }).some((result) => result.id === id));
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'pin')?.position, [part.params.throw, 0, part.params.thickness * 1.5]);
+  }
+  for (const id of ['clevis-12', 'clevis-20']) {
+    const part = getPart(id)!;
+    assert.ok(searchCatalog('clevis', { category: 'joints' }).some((result) => result.id === id));
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'pin')?.position, [0, part.params.rise, 0]);
+  }
+  for (const id of ['bell-crank-30x40', 'bell-crank-50x65']) {
+    const part = getPart(id)!;
+    assert.ok(searchCatalog('bell crank', { category: 'linkages' }).some((result) => result.id === id));
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'input')?.position.slice(0, 2), [part.params.input, 0]);
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'output')?.position.slice(0, 2), [0, part.params.output]);
+  }
+  assert.throws(() => generatePart('eccentric_disc', { radius: 0.02, throw: 0.03 }), ParamError);
+
+  const { assembly } = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'drive', part: 'eccentric-disc-40', position: [0, 0.1, 0], anchored: true },
+    { op: 'mount', id: 'link', part: 'link-40', onto: 'drive', connector: 'pin', via: 'pivot_a_back', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+  ], getPart);
+  assert.deepEqual(assembly.joints[0].axis, [0, 0, 1]);
+  const drivePin = getPart('eccentric-disc-40')!.connectors.find((connector) => connector.id === 'pin')!;
+  const linkPivot = getPart('link-40')!.connectors.find((connector) => connector.id === 'pivot_a_back')!;
+  const drivePoint = transformPoint(assembly.instances[0].transform, drivePin.position);
+  const linkPoint = transformPoint(assembly.instances[1].transform, linkPivot.position);
+  assert.ok(drivePoint.every((coordinate, axis) => Math.abs(coordinate - linkPoint[axis]) < 1e-9));
+});
+
 test('mount places the child so connectors coincide and face each other', () => {
   const beam = getPart('beam-100')!, servo = getPart('servo-mg996r')!;
   const r = applyOps(emptyAssembly(), [

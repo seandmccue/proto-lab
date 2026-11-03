@@ -168,6 +168,9 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   if (test.kind === 'grip' && !payRb) failureReasons.push(`Payload instance "${test.payload}" not found`);
   const motionMeasure = test.kind === 'motion' ? test.measure : undefined;
   const uprightTilt = new Map((motionMeasure?.uprightInstances ?? []).map((id) => [id, 0]));
+  const linearTravel = (motionMeasure?.linearTravel ?? []).map((target) => ({
+    ...target, coordinate: target.axis === 'x' ? 0 : target.axis === 'y' ? 1 : 2, min: Infinity, max: -Infinity,
+  }));
   const liftPayload = motionMeasure?.payload;
   if (test.kind === 'motion') {
     const { measure, criteria } = test;
@@ -182,6 +185,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (baseThreshold && !baseRb) failureReasons.push('A base threshold needs a base instance');
     if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
     for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
+    for (const { instance } of linearTravel) if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
     if (liftThreshold && !liftPayload) failureReasons.push('A payload height threshold needs a payload instance');
     if (retentionThreshold && !liftPayload?.holder) failureReasons.push('A retention threshold needs a payload and holder instance');
     if (liftPayload) {
@@ -192,7 +196,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -211,6 +215,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   let payloadHeight = payloadStartHeight, maxPayloadHeight = payloadStartHeight, maxPayloadSeparation = 0;
   const trackMotionInstances = () => {
     for (const [id, maxTilt] of uprightTilt) uprightTilt.set(id, Math.max(maxTilt, tiltDeg(instancePose(id).rotation)));
+    for (const travel of linearTravel) {
+      const position = instancePose(travel.instance).position[travel.coordinate];
+      travel.min = Math.min(travel.min, position);
+      travel.max = Math.max(travel.max, position);
+    }
     if (liftPayload) {
       const load = instancePose(liftPayload.instance).position;
       payloadHeight = load[1];
@@ -320,6 +329,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (baseRb && c.maxBaseTilt_deg !== undefined && maxTilt > c.maxBaseTilt_deg) failureReasons.push(`Base tilt ${metrics.maxTilt_deg}° exceeds ${c.maxBaseTilt_deg}°`);
       if (baseRb && c.maxBaseDrift_m !== undefined && metrics.baseDisplacement_m > c.maxBaseDrift_m) failureReasons.push(`Base drifted ${metrics.baseDisplacement_m} m > ${c.maxBaseDrift_m} m`);
       if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);
+      for (const { instance, axis, minTravel_m, min, max } of linearTravel) {
+        const travel = max - min;
+        metrics[`${instance}.travel_${axis}_m`] = +travel.toFixed(4);
+        if (travel < minTravel_m) failureReasons.push(`${instance} travelled ${travel.toFixed(3)} m along ${axis}, target ${minTravel_m} m`);
+      }
       if (uprightTilt.size) {
         metrics.maxInstanceTilt_deg = +Math.max(...uprightTilt.values()).toFixed(2);
         for (const [id, tilt] of uprightTilt) {

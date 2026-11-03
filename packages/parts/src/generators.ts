@@ -80,6 +80,93 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.width, p.length, p.thickness] }, [0, -p.length / 2, 0], COLORS.titanium), piece({ kind: 'cylinder', radius: p.width * 0.7, height: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'leg_segment', name: `Leg bar ${mm(p.length)} mm`, category: 'legs', description: 'Aluminium leg bar.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.width, p.length, p.thickness], material: 'aluminium', geometry: g, connectors: [fx('pivot', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'top pivot; mount onto a servo horn'), fx('pivot_front', [0, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('tip', [0, -p.length, 0], [0, -1, 0]), fx('tip_side', [0, -p.length + p.width / 2, p.thickness / 2], [0, 0, 1])], cost_usd: 1.2 }); } },
   crank: { kind: 'crank', name: 'Crank arm', category: 'cranks', description: 'Crank: "shaft" bore (revolute Z) at origin and "pin" (revolute Z) at radius `throw` along +X for a connecting rod.', params: { throw: { min: 0.005, max: 0.3, default: 0.03, unit: 'm', description: 'Crank radius' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Arm width' }, thickness: { min: 0.002, max: 0.02, default: 0.005, unit: 'm', description: 'Thickness' } },
     generate: (p, id) => { const g = [piece({ kind: 'extrude', profile: profiles.roundedRect(p.throw + p.width, p.width, p.width / 2), depth: p.thickness, axis: 'z' }, [p.throw / 2, 0, 0], COLORS.steel), piece({ kind: 'cylinder', radius: p.width * 0.3, height: p.thickness * 2, axis: 'z' }, [p.throw, 0, p.thickness], COLORS.brass)]; return finish({ id, kind: 'crank', name: `Crank ${mm(p.throw)} mm throw`, category: 'cranks', description: 'Steel crank arm with pin.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.throw + p.width, p.width, p.thickness * 3], material: 'steel', geometry: g, connectors: [fx('shaft', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'mount onto a motor shaft or axle'), fx('pin', [p.throw, 0, p.thickness * 2], [0, 0, 1], 'revolute', 'crank pin for a connecting rod')], cost_usd: 2 }); } },
+  eccentric_disc: {
+    kind: 'eccentric_disc', name: 'Eccentric drive disc', category: 'cranks',
+    description: 'Round crank with a rear "shaft" bore, fixed front "hub" for a shaft extension, and an offset front "pin" to drive a connecting rod. Both pivots rotate about Z.',
+    params: {
+      radius: { min: 0.012, max: 0.12, default: 0.02, unit: 'm', description: 'Disc radius' },
+      throw: { min: 0.004, max: 0.1, default: 0.01, unit: 'm', description: 'Shaft-to-pin distance' },
+      thickness: { min: 0.003, max: 0.02, default: 0.006, unit: 'm', description: 'Disc thickness' },
+    },
+    generate: (p, id) => {
+      const pinRadius = Math.min(p.thickness / 2, p.radius * 0.15);
+      const boreRadius = p.radius * 0.18;
+      if (p.throw + pinRadius > p.radius || p.throw - pinRadius < boreRadius) {
+        throw new ParamError('Eccentric disc pin must sit on the disc between the shaft bore and rim.');
+      }
+      const disc = piece({ kind: 'revolve', profile: profiles.rim(p.radius, boreRadius, p.thickness), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.steel);
+      const pin = piece({ kind: 'cylinder', radius: pinRadius, height: p.thickness, axis: 'z' }, [p.throw, 0, p.thickness], COLORS.brass);
+      return finish({
+        id, kind: 'eccentric_disc', name: `Eccentric drive disc Ø${mm(p.radius * 2)} mm`, category: 'cranks',
+        description: `Converts shaft rotation into reciprocating motion through a connecting rod. The pin sits ${mm(p.throw)} mm from the shaft.`,
+        params: p, mass_kg: vol([disc, pin]) * DENSITY.steel, dimensions_m: [p.radius * 2, p.radius * 2, p.thickness * 2],
+        material: 'steel', geometry: [disc, pin],
+        connectors: [
+          fx('shaft', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'mount to a motor or axle'),
+          fx('hub', [0, 0, p.thickness / 2], [0, 0, 1], 'fixed', 'coaxial mount for a shaft extension'),
+          fx('pin', [p.throw, 0, p.thickness * 1.5], [0, 0, 1], 'revolute', 'offset pin for a connecting rod'),
+        ],
+        cost_usd: 3,
+      });
+    },
+  },
+  clevis: {
+    kind: 'clevis', name: 'Forked clevis', category: 'joints',
+    description: 'Forked bracket with a fixed bottom "mount" and a revolute crosswise "pin" along Z, for a rod or linkage.',
+    params: {
+      gap: { min: 0.006, max: 0.05, default: 0.012, unit: 'm', description: 'Inside width of the fork' },
+      rise: { min: 0.01, max: 0.08, default: 0.016, unit: 'm', description: 'Height of pin above base centre' },
+      wall: { min: 0.002, max: 0.008, default: 0.003, unit: 'm', description: 'Thickness of each cheek and base' },
+    },
+    generate: (p, id) => {
+      const width = p.wall * 3;
+      const depth = p.gap + 2 * p.wall;
+      const geometry = [
+        piece({ kind: 'box', size: [width, p.wall, depth] }, [0, 0, 0], COLORS.aluminium),
+        ...[-1, 1].map((side) => piece({ kind: 'box', size: [width, p.rise, p.wall] }, [0, (p.wall + p.rise) / 2, side * (p.gap + p.wall) / 2], COLORS.aluminium)),
+        piece({ kind: 'cylinder', radius: p.wall / 2, height: p.gap, axis: 'z' }, [0, p.rise, 0], COLORS.brass),
+      ];
+      return finish({
+        id, kind: 'clevis', name: `Forked clevis ${mm(p.gap)} mm gap`, category: 'joints',
+        description: `Holds a rod or linkage between two cheeks on a single cross pin. The fork has ${mm(p.gap)} mm of inside clearance.`,
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [width, p.rise + p.wall, depth],
+        material: 'aluminium', geometry,
+        connectors: [
+          fx('mount', [0, -p.wall / 2, 0], [0, -1, 0]),
+          fx('pin', [0, p.rise, 0], [0, 0, 1], 'revolute', 'pin centre inside the fork'),
+        ],
+        cost_usd: 2,
+      });
+    },
+  },
+  bell_crank: {
+    kind: 'bell_crank', name: 'Bell crank', category: 'linkages',
+    description: 'Right-angle lever with a rear centre "pivot", an "input" along +X, and an "output" along +Y. All three joints rotate about Z.',
+    params: {
+      input: { min: 0.01, max: 0.2, default: 0.03, unit: 'm', description: 'Input arm pivot-to-pin length' },
+      output: { min: 0.01, max: 0.2, default: 0.04, unit: 'm', description: 'Output arm pivot-to-pin length' },
+      width: { min: 0.004, max: 0.024, default: 0.01, unit: 'm', description: 'Arm width' },
+      thickness: { min: 0.002, max: 0.02, default: 0.004, unit: 'm', description: 'Plate thickness' },
+    },
+    generate: (p, id) => {
+      const geometry = [
+        piece({ kind: 'box', size: [p.input + p.width, p.width, p.thickness] }, [p.input / 2, 0, 0], COLORS.orange),
+        piece({ kind: 'box', size: [p.width, p.output, p.thickness] }, [0, (p.width + p.output) / 2, 0], COLORS.orange),
+      ];
+      return finish({
+        id, kind: 'bell_crank', name: `Bell crank ${mm(p.input)}×${mm(p.output)} mm`, category: 'linkages',
+        description: 'Redirects motion through a right angle. Different arm lengths change the travel and leverage.',
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [p.input + p.width, p.output + p.width, p.thickness],
+        material: 'aluminium', geometry,
+        connectors: [
+          fx('pivot', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'central support pivot'),
+          fx('input', [p.input, 0, p.thickness / 2], [0, 0, 1], 'revolute', 'input link pin'),
+          fx('output', [0, p.output, p.thickness / 2], [0, 0, 1], 'revolute', 'output link pin'),
+        ],
+        cost_usd: 2.5,
+      });
+    },
+  },
   piston: { kind: 'piston', name: 'Piston in cylinder', category: 'pistons', description: 'Cylinder body (fixed "base") with a piston rod that slides along +X ("rod": prismatic, travel = stroke); rod end has a revolute "rod_end" (Z) for a connecting rod.', params: { bore: { min: 0.005, max: 0.08, default: 0.02, unit: 'm', description: 'Bore diameter' }, stroke: { min: 0.01, max: 0.3, default: 0.05, unit: 'm', description: 'Stroke' } },
     generate: (p, id) => { const L = p.stroke * 1.3; const g = [piece({ kind: 'cylinder', radius: p.bore / 2 + 0.002, height: L, axis: 'x' }, [0, 0, 0], COLORS.aluminium)]; return finish({ id, kind: 'piston', name: `Cylinder Ø${mm(p.bore)} stroke ${mm(p.stroke)} mm`, category: 'pistons', description: 'Pneumatic-style cylinder body; use with a rod part mounted prismatically.', params: p, mass_kg: vol(g) * DENSITY.aluminium * 0.5, dimensions_m: [L, p.bore + 0.004, p.bore + 0.004], material: 'aluminium', geometry: g, connectors: [fx('base', [-L / 2, 0, 0], [-1, 0, 0]), fx('mount', [0, -(p.bore / 2 + 0.002), 0], [0, -1, 0]), fx('rod', [L / 2, 0, 0], [1, 0, 0], 'prismatic', 'rod slides along +X')], limits: { travel_m: p.stroke, maxForce_N: 50 }, cost_usd: 8 }); } },
   // ---------- actuation ----------

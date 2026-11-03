@@ -28,6 +28,12 @@ const PRESETS: Preset[] = [
   { id: 'link-40', kind: 'link', params: { length: 0.04, width: 0.012, thickness: 0.004 } }, { id: 'link-80', kind: 'link', params: { length: 0.08, width: 0.012, thickness: 0.004 } }, { id: 'link-150', kind: 'link', params: { length: 0.15, width: 0.015, thickness: 0.005 } },
   { id: 'leg-bar-40', kind: 'leg_segment', params: { length: 0.04, width: 0.012, thickness: 0.004 } }, { id: 'leg-bar-60', kind: 'leg_segment', params: { length: 0.06, width: 0.012, thickness: 0.004 } }, { id: 'leg-bar-80', kind: 'leg_segment', params: { length: 0.08, width: 0.014, thickness: 0.004 } }, { id: 'leg-bar-100', kind: 'leg_segment', params: { length: 0.1, width: 0.015, thickness: 0.005 } },
   { id: 'crank-30', kind: 'crank', params: { throw: 0.03, width: 0.012, thickness: 0.005 } }, { id: 'crank-60', kind: 'crank', params: { throw: 0.06, width: 0.015, thickness: 0.006 } },
+  { id: 'eccentric-disc-40', kind: 'eccentric_disc', params: { radius: 0.02, throw: 0.01, thickness: 0.006 } },
+  { id: 'eccentric-disc-70', kind: 'eccentric_disc', params: { radius: 0.035, throw: 0.02, thickness: 0.008 } },
+  { id: 'clevis-12', kind: 'clevis', params: { gap: 0.012, rise: 0.016, wall: 0.003 } },
+  { id: 'clevis-20', kind: 'clevis', params: { gap: 0.02, rise: 0.026, wall: 0.004 } },
+  { id: 'bell-crank-30x40', kind: 'bell_crank', params: { input: 0.03, output: 0.04, width: 0.01, thickness: 0.004 } },
+  { id: 'bell-crank-50x65', kind: 'bell_crank', params: { input: 0.05, output: 0.065, width: 0.014, thickness: 0.006 } },
   { id: 'cylinder-20x50', kind: 'piston', params: { bore: 0.02, stroke: 0.05 } },
   // actuation
   { id: 'servo-micro-sg90', kind: 'servo_motor', params: { size: 0.023, torque: 0.18, speed: 10 } }, { id: 'servo-mg90s', kind: 'servo_motor', params: { size: 0.023, torque: 0.22, speed: 10 } }, { id: 'servo-mg996r', kind: 'servo_motor', params: { size: 0.04, torque: 1.1, speed: 7 } }, { id: 'servo-ds3218', kind: 'servo_motor', params: { size: 0.04, torque: 2.0, speed: 6.5 } }, { id: 'servo-high-torque-35', kind: 'servo_motor', params: { size: 0.045, torque: 3.5, speed: 5 } }, { id: 'servo-giant-8', kind: 'servo_motor', params: { size: 0.065, torque: 8, speed: 4 } },
