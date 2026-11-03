@@ -54,6 +54,9 @@ opens the actual assembly and simulation trace.
 `npm run preflight` checks the running stack the way a judge would see it: model live, featured builds
 passed, gallery and web serving.
 
+Production: `npm run build` then `npm start` serves the built web app and the API from one process on
+port 8787 (the Dockerfile does the same; `WEB_DIST` overrides the bundle path).
+
 ## Model configuration (Meta Model API)
 
 ProtoLab's engineering agent runs on Meta's Muse models through the

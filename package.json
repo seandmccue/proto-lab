@@ -12,7 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "preflight": "node scripts/preflight.ts"
+    "preflight": "node scripts/preflight.ts",
+    "start": "NODE_ENV=production tsx apps/api/src/server.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

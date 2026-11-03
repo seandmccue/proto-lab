@@ -1,6 +1,8 @@
 import { config as loadEnv } from 'dotenv';
 import { serve } from '@hono/node-server';
-import { resolve } from 'node:path';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { resolve, relative } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 // Local .env first, then the repo-root .env (first definition wins).
 loadEnv({ path: resolve(process.cwd(), '.env') });
 loadEnv({ path: resolve(process.cwd(), '../../.env') });
@@ -35,6 +37,17 @@ if (cfg) {
 } else console.log('[model] No MODEL_API_KEY; deterministic planner.');
 
 const app = buildApp({ db, store, runner, modelStatus });
+// In production the API also serves the built web app (apps/web/dist) with an SPA fallback, so one process
+// and one port serve the whole product (the Docker image relies on this). In development Vite serves the web.
+const webDist = resolve(process.env.WEB_DIST ?? resolve(import.meta.dirname, '../../web/dist'));
+if (existsSync(resolve(webDist, 'index.html'))) {
+  const root = relative(process.cwd(), webDist) || '.';
+  app.use('/assets/*', serveStatic({ root }));
+  app.use('/*', serveStatic({ root }));
+  const indexHtml = readFileSync(resolve(webDist, 'index.html'), 'utf8');
+  app.get('*', (c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'Not found' }, 404) : c.html(indexHtml)));
+  console.log(`[web] serving the built web app from ${webDist}`);
+}
 seedFeatured(db, runner);
 requeueInterruptedSeeds(db, runner);
 serve({ fetch: app.fetch, port: PORT }, () => console.log(`[api] ProtoLab API on http://localhost:${PORT} (data: ${DATA_DIR})`));
