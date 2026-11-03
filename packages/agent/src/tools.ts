@@ -134,7 +134,7 @@ export class ToolRuntime {
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
     // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
-    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
+    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'test', 'motor', 'criteria', 'measure']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*[\[{]/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
     this.calls++;
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
