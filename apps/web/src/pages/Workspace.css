@@ -230,10 +230,14 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: .55rem 1.15rem;
+  gap: .65rem 1.15rem;
   padding: .65rem .75rem;
   border-top: 1px solid var(--bench-line);
   background: #f7f4fc;
+}
+.workbench-follower-metrics, .workbench-follower-chart {
+  flex: 1 1 21rem;
+  min-width: 0;
 }
 .workbench-follower-evidence p,
 .workbench-follower-evidence dt,
@@ -242,8 +246,8 @@
   font-size: .75rem;
 }
 .workbench-follower-evidence dl {
-  flex: 1 1 22rem;
   display: flex;
+  margin-top: .35rem;
   flex-wrap: wrap;
   gap: .45rem 1rem;
 }
@@ -254,6 +258,44 @@
   font-variant-numeric: tabular-nums;
 }
 .workbench-follower-evidence small { font-weight: 500; }
+.workbench-follower-chart {
+  display: grid;
+  gap: .15rem;
+  color: var(--bench-muted);
+  font-size: .7rem;
+}
+.workbench-follower-chart figcaption {
+  color: var(--bench-ink);
+  font-weight: 650;
+}
+.workbench-follower-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .15rem .75rem;
+}
+.workbench-follower-legend span { display: inline-flex; align-items: center; gap: .3rem; }
+.workbench-follower-legend span::before {
+  content: "";
+  flex: 0 0 .9rem;
+  border-top: 2px solid var(--follower-line);
+}
+.workbench-follower-chart [data-line="0"] { --follower-line: #884600; }
+.workbench-follower-chart [data-line="1"] { --follower-line: #006e67; }
+.workbench-follower-legend [data-line="1"]::before { border-top-style: dashed; }
+.workbench-follower-plot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: .35rem;
+}
+.workbench-follower-axis, .workbench-follower-time { display: flex; justify-content: space-between; }
+.workbench-follower-axis { height: 4.5rem; flex-direction: column; text-align: right; line-height: 1; }
+.workbench-follower-plot svg { display: block; width: 100%; height: 4.5rem; overflow: visible; }
+.workbench-follower-plot svg :is(line, polyline) { vector-effect: non-scaling-stroke; }
+.workbench-follower-gridline { stroke: #d6cce2; }
+.workbench-follower-plot polyline { fill: none; stroke: var(--follower-line); stroke-width: 2; stroke-linejoin: round; }
+.workbench-follower-plot polyline[data-line="1"] { stroke-dasharray: 5 3; }
+.workbench-follower-cursor { stroke: var(--bench-violet); stroke-width: 1.5; }
+
 
 .workbench-control-group {
   display: flex;
