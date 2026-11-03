@@ -35,6 +35,7 @@ export default function Workspace() {
   const [error, setError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [remixOpen, setRemixOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
@@ -146,6 +147,7 @@ export default function Workspace() {
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button className="btn-secondary" disabled={running || !inv?.currentVersionId} onClick={() => setRemixOpen(true)}>Remix</button>
           {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
+          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
           <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
         </div>
       </div>
