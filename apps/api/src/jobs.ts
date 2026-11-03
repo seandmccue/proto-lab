@@ -71,7 +71,9 @@ export class JobRunner {
       switch (e.type) {
         case 'status': push({ t, type: 'status', message: e.message }); update('running', e.message); break;
         case 'spec': push({ t, type: 'spec', spec: e.spec }); break;
-        case 'tool': push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary }); break;
+        case 'tool':
+          if (!e.entry.ok) console.warn(`[agent] ${e.entry.tool} rejected: ${e.entry.summary} | args: ${JSON.stringify(e.entry.args ?? null).slice(0, 600)}`); // so input shorthand the model uses can be added to the normalisers
+          push({ t, type: 'tool', tool: e.entry.tool, ok: e.entry.ok, summary: e.entry.summary }); break;
         case 'assembly': {
           const partMass = new Map(e.assembly.parts.map((p) => [p.id, p.mass_kg]));
           const mass = e.assembly.instances.reduce((m, i) => m + (partMass.get(i.partId) ?? 0), 0);
