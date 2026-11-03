@@ -11,6 +11,7 @@ const slides = [
   { id: '07-assemble', lines: ['3 · Assemble the prototype.'], sub: 'Mounted at real connectors, part by part.', theme: 'light' },
   { id: '08-simulate', lines: ['4 · Simulate. Fail. Iterate.'], sub: 'Rigid-body physics measures it. Muse revises from the numbers.', theme: 'light' },
   { id: '09-pass', lines: ['5 · Until it passes.'], sub: 'Every claim is a measured test.', theme: 'light' },
+  { id: '09b-proof', lines: ['112 of 120 builds passed.'], sub: 'Twelve benchmark passes · median about one minute · 0 API errors · every claim a replayable physics test', theme: 'dark' },
   { id: '10-print', lines: ['6 · 3D-print the parts.'], sub: 'Coming soon', theme: 'violet' },
   { id: '11-close', lines: ['Think SolidWorks,', 'powered by AI.'], sub: 'Anyone can build physical products.  ·  protolab.sean-abc.workers.dev', theme: 'dark' },
 ];
