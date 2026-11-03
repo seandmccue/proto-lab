@@ -17,7 +17,8 @@ export default function GalleryCard({ item }: { item: InventionPublic }) {
     if (!hover || traced || !item.currentVersionId || reduced) return;
     api.version(item.id, item.currentVersionId, true).then((r) => { setVersion(r.version); setTraced(true); }).catch(() => {});
   }, [hover, traced, item, reduced]);
-  const walk = item.tests.find((t) => t.kind === 'walk');
+  const walk = item.latestWalk ?? item.tests.find((t) => t.kind === 'walk');
+  const passed = item.status === 'passed';
   const test = version?.tests.find((t) => t.kind === 'walk') ?? version?.tests[0] ?? null;
   return (
     <Link to={`/i/${item.id}`} className="card group block overflow-hidden transition hover:shadow-lg hover:-translate-y-0.5" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} aria-label={`${item.title}: ${item.description || item.prompt}. Explore in 3D.`}>
@@ -33,7 +34,7 @@ export default function GalleryCard({ item }: { item: InventionPublic }) {
           {item.featured && <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-medium text-accent">Featured</span>}
           {item.sourceInventionId && <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-medium text-slate-600">Remix</span>}
         </div>
-        <span className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium ${walk?.passed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{walk?.passed ? 'Walk test passed' : 'Did not pass'}</span>
+        <span className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium ${passed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{passed ? (item.latestDance?.passed ? 'Walk + dance passed' : 'Walk test passed') : 'Did not pass'}</span>
       </div>
       <div className="p-4">
         <div className="flex items-start justify-between gap-2">

@@ -190,8 +190,13 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   function ownerLabel(inv: InventionRow) { return inv.owner_id === 'protolab' ? 'ProtoLab featured' : `Maker ${inv.owner_id.slice(0, 6)}`; }
   function publicInvention(inv: InventionRow, sid: string) {
     const v = inv.current_version_id ? (db.prepare('SELECT * FROM versions WHERE id=?').get(inv.current_version_id) as VersionRow | undefined) : undefined;
-    const tests = v ? (JSON.parse(v.metrics_json) as Array<{ testId: string; kind: string; passed: boolean; metrics: Record<string, number> }>) : [];
+    type T = { testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] };
+    const tests = v ? (JSON.parse(v.metrics_json) as T[]) : [];
+    // Latest walk and dance results across all versions (a dance-only revision does not re-run the walk).
+    const rows = db.prepare('SELECT metrics_json FROM versions WHERE invention_id=? ORDER BY iteration DESC, created_at DESC').all(inv.id) as unknown as Array<{ metrics_json: string }>;
+    const latest = (kind: string): T | null => { for (const r of rows) { const t = (JSON.parse(r.metrics_json) as T[]).filter((x) => x.kind === kind).pop(); if (t) return t; } return null; };
     return {
+      latestWalk: latest('walk'), latestDance: latest('dance'),
       id: inv.id, title: inv.title, description: inv.description, prompt: inv.prompt, visibility: inv.visibility, status: inv.status,
       currentVersionId: inv.current_version_id, featured: !!inv.featured, isOwner: inv.owner_id === sid, ownerLabel: ownerLabel(inv),
       sourceInventionId: inv.source_invention_id, parentVersionId: inv.parent_version_id, modelId: v?.model_id ?? null,
