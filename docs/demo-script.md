@@ -21,6 +21,8 @@ The 3D shots replay saved simulator traces in the application. The opening shows
 3. Open the triplex pump comparison. Scrub both versions together and point to the three piston traces. Muse adjusted one crank disc. The gaps between peaks tightened from 102.2°–137.6° to 119.4°–120.3°, and each piston still moved more than 40 mm. Both versions passed the original stroke test. The phase readout comes from the saved motion.
 4. In a second tab, start a fresh crane with a constraint the judge chooses. One rehearsal brief asked it to lift a block at least 8 cm, hold it, then lower it to within 2 cm of its start. While it runs, show the Gravity Clock or the orrery. The orrery’s first joint test passed, but the Moon barely moved around Earth in the arm’s frame. Scrub the revised orbit, which completed 5.49 turns in 12 seconds. Return to the crane when it reaches a milestone.
 
+For a short demonstration of passive motion, open the self-leveling tray and scrub to the cradle’s steepest angle. The cradle reached 31.0° while the tray stayed within 3.14° of level. Locking only the inner pivot in a separate simulation raised peak tray tilt to 29.84°.
+
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
@@ -29,6 +31,7 @@ The 3D shots replay saved simulator traces in the application. The opening shows
 - Triplex pump comparison · `/i/inv_c618332e234d447d?replay=1&compare=1`
 - Drawing remix comparison · `/i/inv_76b7fae5bdf941c9?replay=1&compare=1`
 - Orrery comparison · `/i/inv_adc081059ea44ab9?replay=1&compare=1`
+- Self-leveling tray · `/i/inv_f72fb06c611342eb?replay=1`
 - Gravity Clock · `/i/inv_a1f1665e649b41c2`
 - Cargo Crane · `/i/inv_0868f2ea889f4bcc`
 
