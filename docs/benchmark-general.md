@@ -336,3 +336,30 @@ than 0.6 rad/s (measured: 1.3 N·m instead of 22), the way a real servo would be
 
 With that, every one of the ten showcase prompts has a simulator-measured recipe and has passed on its
 first test at least once on the current engine.
+
+
+## Seventh full pass: every recipe measured (v8, 2026-11-03 11:17 UTC)
+
+| Metric | Value |
+| --- | --- |
+| Success rate | 90 % (9/10) |
+| Errors (API/model) | 0 % |
+| Median completion time | 181 s |
+| First-try builds | 6 of 10 |
+
+| Prompt | Result | Time | Versions | Custom parts | Handoffs | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| muse | passed | 51 s | 3 | 0 | 0 | Small Muse-inspired quadruped: chassis-quad-160 with 4x 2-DOF legs (ds3218 servos, leg-bar… |
+| ferris | passed | 105 s | 1 | 1 | 0 | Miniature Ferris wheel: anchored tower-300 with custom 8-spoke 300mm wheel on the axle (ve… |
+| catapult | passed | 81 s | 1 | 1 | 0 | Tabletop catapult: anchored base-plate-300x200 + servo-giant-8 (8 N·m) + custom 130 mm arm… |
+| butterfly | passed | 174 s | 1 | 0 | 0 | Mechanical butterfly on an anchored stand: base-plate-300x200 base with beam-200 vertical … |
+| claw | passed | 181 s | 1 | 0 | 0 | Robotic grabbing claw: anchored plate-120x80 base, beam-100 post, plate-120x80 palm, two s… |
+| windmill | passed | 385 s | 3 | 0 | 0 | Windmill: anchored tower-500 with a 200 mm shaft on its top axle boss, hub plate, and four… |
+| crane | passed | 137 s | 1 | 0 | 0 | Miniature crane: anchored base-plate-300x200, tower-150, 3.5 N·m luff servo, 150mm link bo… |
+| drawbridge | passed | 506 s | 1 | 1 | 0 | Automated drawbridge: anchored 300x200 base, 3.5 N·m hinge servo at rear edge, 300x150 dec… |
+| novel | passed | 244 s | 2 | 0 | 0 | Garden bird-scarer: anchored base-plate foot + tower-500 pole, windmill-4x600 pinwheel on … |
+| crab | failed | 856 s | 9 | 0 | 4 | Six-legged crab on chassis-hex-200 with 12x servo-ds3218 (hip+knee per leg), leg-bar-60 up… |
+
+Catapult (81 s), claw (181 s), crane (137 s) and drawbridge now pass first-try where they used to burn
+tests; the walker walked and danced in 51 s. The crab, which passed first-try in the two passes before,
+missed this time (nine tests, four sweeps, two Wonder consults, best 0.21 m): see the follow-up below.
