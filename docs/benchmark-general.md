@@ -208,3 +208,14 @@ the drawbridge, whose rounds took 4–5 minutes each while Muse reasoned about a
 is the same as for the crab: plates gained `hinge_back` / `hinge_front` pivots, the prompt quotes a
 simulator-measured drawbridge (a 300 × 150 × 6 mm deck needs 1.23 N·m at the hinge; a 3.5 N·m servo lifts it
 to 64°), and after a dozen tool calls with nothing assembled the loop asks for a first build.
+
+### Drawbridge after the recipe (v4b, 2026-11-03 07:43 UTC)
+
+| Prompt | Result | Time | Versions | Note |
+| --- | --- | --- | --- | --- |
+| drawbridge | **passed** | 308 s | 2 | 300×200 base, rear 3.5 N·m servo hinge, 300×150 deck lifting 0 → 1.1 rad in 3 s, two actuator towers as the visible lifting element; first test passed |
+
+Same prompt that burned its 20-minute budget on linkage research: with the measured numbers and the
+plate hinge pivots in the library, Muse assembled within two minutes and passed its first lift test.
+That closes the last of the four misses; every one of the ten showcase prompts has now passed on the
+current engine.
