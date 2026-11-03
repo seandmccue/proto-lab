@@ -9,6 +9,7 @@ cd docs/video
 npm i playwright            # once; uses the cached Chromium
 node record.cjs ./clips     # records four clips from https://protolab.sean-abc.workers.dev (≈3 min, one live build)
 node slides.cjs ./slides    # renders the title slides at 1920×1080
+mkdir -p captions && node captions.cjs ./captions   # transparent caption overlays for the footage (readable muted)
 mkdir -p audio && while IFS='|' read -r id text; do say -v Samantha -r 178 -o "audio/seg$id.aiff" "$text"; ffmpeg -y -loglevel error -i "audio/seg$id.aiff" -ar 48000 -ac 2 "audio/seg$id.wav"; done < narration.txt
 node assemble.cjs           # cuts, time-lapses the waits, mixes narration → protolab-judge-demo.mp4
 ```
