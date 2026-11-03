@@ -36,7 +36,7 @@ export function SpecPanel({ spec }: { spec: Spec }) {
   );
 }
 
-export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void }) {
+export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
   const visible = events.filter((e) => e.type !== 'spec' && e.type !== 'version');
@@ -56,7 +56,7 @@ export default function ActivityPanel({ events, running, versions, currentVersio
         </div>
       )}
       <ol className="min-h-0 flex-1 overflow-auto px-3 pb-3 text-xs space-y-1.5">
-        {visible.length === 0 && <li className="text-slate-400">Waiting for the agent…</li>}
+        {visible.length === 0 && <li className="text-slate-400">{status === 'error' ? 'This build was interrupted; its activity log was not kept.' : 'Waiting for the agent…'}</li>}
         {visible.map((e, i) => <li key={i}><EventRow e={e} /></li>)}
         <div ref={end} />
       </ol>
