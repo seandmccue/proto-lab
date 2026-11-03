@@ -3,6 +3,20 @@ import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyMod
 import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
 import { runPlanner } from './planner.ts';
+import { catalog } from '@protolab/parts';
+
+/** One line per library part so the model can mount directly instead of spending rounds on search_catalog / get_part. */
+function catalogIndex(): string {
+  const ax = (a: number[]) => { const i = a.findIndex((v) => Math.abs(v) > 0.5); return i < 0 ? '?' : `${a[i] < 0 ? '−' : '+'}${'xyz'[i]}`; };
+  const byCat = new Map<string, string[]>();
+  for (const p of catalog()) {
+    const conns = p.connectors.slice(0, 6).map((c) => `${c.id}${c.kind === 'revolute' ? '⟳' : c.kind === 'prismatic' ? '↔' : ''}${ax(c.axis)}`).join(' ');
+    const extra = p.limits.maxTorque_Nm ? ` ${p.limits.maxTorque_Nm} N·m` : p.limits.maxForce_N ? ` ${p.limits.maxForce_N} N` : '';
+    const list = byCat.get(p.category) ?? []; list.push(`${p.id} (${Math.round(p.mass_kg * 1000)} g${extra}; ${conns}${p.connectors.length > 6 ? ' …' : ''})`); byCat.set(p.category, list);
+  }
+  return [...byCat.entries()].map(([cat, items]) => `${cat}: ${items.join(' · ')}`).join('\n');
+}
+const CATALOG_INDEX = catalogIndex();
 
 export { modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, DEFAULT_MODEL, DEFAULT_BASE_URL, baseSpec, ToolRuntime, TOOL_DEFS };
 export type { ModelConfig };
@@ -115,6 +129,9 @@ Rules of thumb:
 - One behaviour at a time, and never re-run a passed test: when the brief asks for several behaviours (walk, then dance), get the first to pass, record it, then change drives for the next and test only that. Each passing test is a recorded version; a later drive set for another behaviour does not undo it. When every requested behaviour has a passing test, finalize with status "passed".
 - Be economical: search results already include connector ids/axes, so avoid get_part lookups unless you need geometry; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
+
+Component library index (part id, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
+${CATALOG_INDEX}
 
 Worked recipes (adapt, do not copy blindly):
 • 2-DOF leg on a chassis side connector hip_L0 (axis +Z): first place the chassis {op:"place", id:"body", part:"chassis-quad-160", position:[0,0.1,0]} (every batch that mounts onto "body" must have placed it earlier in the same design), then mount hip servo {onto:"body",connector:"hip_L0",via:"mount",joint:"fixed"}; upper leg {onto:"hip_servo_L0",connector:"horn",via:"pivot",joint:"revolute",spin_deg:17,motor:{controlId:"hip_L0",stiffness:5,damping:0.2}}; knee servo {onto:"upper_leg_L0",connector:"tip_side",via:"mount",joint:"fixed"}; lower leg {onto:"knee_servo_L0",connector:"horn",via:"pivot",joint:"revolute",spin_deg:-12,motor:{controlId:"knee_L0",...}}; foot {onto:"lower_leg_L0",connector:"tip",via:"mount",joint:"fixed"}. Right-side legs use the hip_R* connectors (axis −Z) and the opposite sign of spin and drive amplitudes. Place the chassis so feet touch y = 0 (inspect_assembly reports lowestPoint_m; one move of the root instance by its negative carries everything mounted on it). Gait drives: hips {kind:"gait",role:"swing",amplitude:±0.4,frequency_hz:1,phase,swingDuty:0.2}, knees {kind:"gait",role:"lift",amplitude:∓0.3,...}; crawl phases 0, π/2, π, 3π/2 in the order left-front, left-rear, right-front, right-rear. Measured in this simulator: chassis-quad-160 + leg-bar-60 upper and lower + foot-pad-12 + servo-ds3218 (2 N·m), hips ±0.4 rad at 1 Hz, swingDuty 0.2: motor stiffness 5 / damping 0.2 walks ≈ 0.30 m in 6 s (< 6° tilt); stiffness 8–10 / damping 0.2 walks 0.48–0.53 m with ≈ 3° tilt and 0.9 N·m peak hip torque (the servo tracks the gait instead of lagging it) — use stiffness 8 whenever the target is above 30 cm. 1.1 N·m servos saturate under this load; 80 mm legs, chassis-quad-220 and 16 mm feet all walk worse; swingDuty 0.3, frequencies above ~1.2 Hz or amplitudes above ~0.45 rad slip or tip. If a test reports negative distance, only the hip drive signs are reversed.
