@@ -11,6 +11,15 @@ export interface LargeShowcase {
 // Add an entry after reviewing the exact saved Muse assembly and recorded tests.
 export const largeShowcases: readonly LargeShowcase[] = [
   {
+    inventionId: 'inv_616e8b95ede04b8d',
+    versionId: 'ver_52c54f258ec24abf',
+    testIds: ['atlas_12s#1'],
+    baseline: { versionId: 'ver_4bc3d25991af4466', testId: 'atlas_12s#1' },
+    componentCount: 56,
+    detail: 'A 1.42 m cutaway with one motor, six passive copper pistons and two large flywheels. Every piston travels about 11 cm in a staggered sequence.',
+    showStrokeGuidesInitially: false,
+  },
+  {
     inventionId: 'inv_359fbaf0800a4c94',
     versionId: 'ver_0cb1ed656e1d43e7',
     testIds: ['lumen_full216#1'],
