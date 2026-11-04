@@ -61,10 +61,11 @@
   grid-template-rows: auto minmax(0, 1fr);
   height: clamp(7rem, 13vw, 10rem);
   padding: .65rem .75rem .35rem;
-  background-color: var(--viewport);
-  background-image: linear-gradient(rgba(47,124,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(47,124,255,.08) 1px, transparent 1px);
+  /* Blueprint plate in both themes: the same navy and cyan as the live-build blueprint panel. */
+  background-color: #0b1f36;
+  background-image: linear-gradient(rgba(116,187,223,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(116,187,223,.14) 1px, transparent 1px);
   background-size: 1rem 1rem;
-  color: var(--ink-2);
+  color: #a3ddf5;
 }
 .part-inventory-illustration svg { width: 100%; height: 100%; }
 .part-inventory-detail { padding: .7rem .75rem .85rem; overflow-wrap: anywhere; }
