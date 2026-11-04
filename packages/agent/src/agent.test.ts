@@ -185,6 +185,84 @@ test('a live follow-up edits the saved assembly, reuses authored parts and recor
   }
 });
 
+test('a failed setup call skips dependent calls in its reply and a corrected batch still runs', async () => {
+  type Call = [name: string, args: object];
+  const drive = (value: number): Call => ['set_drives', {
+    drives: [{ controlId: 'spin', mode: 'velocity', rampIn_s: 0, profile: { kind: 'constant', value } }],
+  }];
+  const define: Call = ['define_test', { test: {
+    kind: 'motion', id: 'spin_check', duration_s: 1, measure: { joints: ['spin'] },
+    criteria: { minJointRate_rad_s: 0.2, torqueWithinRating: false },
+  } }];
+  const run: Call = ['run_test', { test_id: 'spin_check' }];
+  const finalize: Call = ['finalize_design', { status: 'passed', summary: 'The wheel spun.' }];
+  const rounds: Call[][] = [
+    [['assemble', { rationale: 'Place the original wheel', ops: [
+      { op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true },
+      { op: 'mount', id: 'wheel', part: 'spoked-wheel-400', onto: 'tower', connector: 'axle', via: 'hub',
+        joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+    ] }], drive(1), define],
+    [['assemble', { rationale: 'Raise a missing support', ops: [
+      { op: 'move', id: 'missing', translate: [0, 0.01, 0] },
+    ] }], ['inspect_assembly', {}], drive(3), define, run, finalize],
+    [['assemble', { rationale: 'Raise the correct support', ops: [
+      { op: 'move', id: 'tower', translate: [0, 0.01, 0] },
+    ] }], drive(2), define, run, finalize],
+  ];
+  let hits = 0;
+  let failedReplies: { tool_call_id: string; content: string }[] = [];
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const { messages } = JSON.parse(Buffer.concat(chunks).toString());
+    const round = hits++;
+    if (round === 2) {
+      failedReplies = messages.filter((message: { tool_call_id?: string }) => message.tool_call_id?.startsWith('1-'));
+    }
+    if (!rounds[round]) {
+      res.writeHead(400);
+      res.end('Unexpected extra model round');
+      return;
+    }
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: {
+      content: null, tool_calls: rounds[round].map(([name, args], index) => ({
+        id: `${round}-${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) },
+      })),
+    } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const events: AgentEvent[] = [];
+    let count = 0;
+    const result = await runAgent({
+      prompt: 'Raise a spinning wheel', inventionId: 'batch-guard',
+      newVersionId: () => `batch-version-${++count}`,
+      model: { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 },
+      specialist: null,
+    }, (event) => events.push(event));
+
+    assert.equal(hits, 3);
+    assert.deepEqual(failedReplies.map(({ tool_call_id }) => tool_call_id), ['1-0', '1-1', '1-2', '1-3', '1-4', '1-5']);
+    const [failed, inspection, ...skips] = failedReplies.map(({ content }) => JSON.parse(content));
+    assert.match(failed.error, /missing/);
+    assert.deepEqual(inspection.instances[0].position_m, [0, 0, 0]);
+    assert.deepEqual(inspection.drives[0].profile, { kind: 'constant', value: 1 });
+    for (const [index, name] of ['set_drives', 'define_test', 'run_test', 'finalize_design'].entries()) {
+      assert.match(skips[index].error, new RegExp(`Skipped ${name} because assemble failed`));
+    }
+    assert.equal(events.filter(({ type }) => type === 'test_start').length, 1);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.versions.length, 1);
+    assert.equal(result.versions[0].tests.length, 1);
+    assert.deepEqual(result.versions[0].assembly.instances[0].transform.position, [0, 0.01, 0]);
+    assert.deepEqual(result.versions[0].assembly.controller.drives[0].profile, { kind: 'constant', value: 2 });
+  } finally {
+    server.close();
+  }
+});
+
 test('deterministic planner builds a walker from generic ops, tests and revises honestly', async () => {
   const events: AgentEvent[] = []; let n = 0;
   const out = await runAgent({ prompt: 'Design a small walking robot inspired by my Muse character, test its walking, then make it dance.', inventionId: 'inv_test', model: null, newVersionId: () => `v${++n}` }, (e) => events.push(e));

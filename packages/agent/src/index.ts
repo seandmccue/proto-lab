@@ -168,6 +168,7 @@ Rules of thumb:
 - One behaviour at a time, and never re-run a passed test: when the brief asks for several behaviours (walk, then dance), get the first to pass, record it, then change drives for the next and test only that. Each passing test is a recorded version; a later drive set for another behaviour does not undo it. When every requested behaviour has a passing test, finalize with status "passed".
 - Closed linkages: mount the moving parts at a feasible starting pose, then use bridge to fit each passive rod between its two revolute endpoints. When editing a fit, add inspect_instance_ids to assemble to get the new world connector positions and axes in the same call. Use inspect_assembly with instance_ids for an existing pose without an edit.
 - Be economical: search results already include connector ids/axes, so use get_part only when you need exact geometry and use part_ids to inspect several known parts together; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- When the parts, joint IDs and test criteria are known, group assemble, set_drives, define_test and run_test in that order in one reply. If a setup call fails, correct it before retrying the skipped steps.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
 
 Component library index (part id, size L×H×W in mm, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
@@ -190,6 +191,9 @@ Worked recipes (adapt, do not copy blindly):
 • Catapult: anchored base-plate-300x200; servo-giant-8 {onto:"base",connector:"top_back",via:"bottom",joint:"fixed",offset_m:0.03}; arm (leg_segment via "pivot" onto the servo horn, spin_deg 195 so it stands up leaning back, motor stiffness 30 / damping 0.5) with tray-45 on its "tip"; projectile set down on the tray in the same batch with {op:"mount", id:"pizza", part:"foam-pizza-80", onto:"tray", connector:"payload", via:"bottom", joint:"free"} (no world coordinates to compute); drive {kind:"step", before:0, after:-1.4, at_s:0.5}; launch test with duration_s 5. Measured (8 N·m servo, foam-pizza-80): the throw is torque-limited, so the step amplitude (−0.8 … −1.4) barely matters and the ARM LENGTH sets the range — leg-bar-80 → 0.29 m, leg-bar-100 → 0.35 m, create_part leg_segment length 0.14 → 0.59 m, 0.18 → 0.76 m, 0.22 → 0.98 m; foam-ball-60 flies ≈ 20 % further than the pizza. 2–3.5 N·m servos do not fling the pizza off the tray (the test reports "had not landed"); a 350 mm arm overshoots a 0.5 m target by a metre. Pick the arm length from the target first, then test once.
 `;
 }
+
+const setupTools = new Set(['write_plan', 'create_part', 'design_part', 'assemble', 'set_drives', 'define_test']);
+const dependentTools = new Set(['run_test', 'sweep_drive', 'finalize_design']);
 
 async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, savedParent: VersionRecord | null, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
   const savedAssembly = savedParent ? rt.assembly : null;
@@ -253,19 +257,28 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : nextTool });
       continue;
     }
+    let failedSetup: string | undefined;
     for (const call of res.toolCalls) {
       if (deadline.aborted) break;
+      const name = call.function.name;
+      if (failedSetup && (setupTools.has(name) || dependentTools.has(name))) {
+        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({
+          error: `Skipped ${name} because ${failedSetup} failed earlier in this reply. Fix that call before retrying the skipped steps.`,
+        }) });
+        continue;
+      }
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
-      const result = await rt.call(call.function.name, args);
+      const result = await rt.call(name, args);
+      if (setupTools.has(name) && result && typeof result === 'object' && 'error' in result) failedSetup = name;
       const serialized = JSON.stringify(result);
       // Geometry must reach the model intact. Large compound parts can be read in smaller selections.
       let reply = serialized.slice(0, 5000);
-      if (call.function.name === 'get_part') {
+      if (name === 'get_part') {
         reply = serialized.length <= 65_536 ? serialized : JSON.stringify({
           error: 'Part geometry exceeds the tool reply limit. Request one part at a time or narrow with piece_indices.',
         });
-      } else if (call.function.name === 'assemble' && serialized.length > 5000
+      } else if (name === 'assemble' && serialized.length > 5000
         && result && typeof result === 'object' && 'connectorPoses' in result) {
         reply = JSON.stringify({
           connectorPoses: result.connectorPoses,
