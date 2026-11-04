@@ -102,6 +102,7 @@ test('native success waits for review, caches a veto and finalizes a repaired an
   assert.deepEqual(evidence[0].testDefinitions, evidence[1].testDefinitions);
   assert.deepEqual(evidence[0].instances.map(({ id }: { id: string }) => id), ['tower', 'wheel']);
   assert.deepEqual(evidence[1].instances.map(({ id }: { id: string }) => id), ['tower', 'wheel', 'display_foot']);
+  assert.ok(evidence.every((review) => review.clearanceObservations.length === 1 && review.clearanceObservations[0].complete));
 
   const reviews = events.flatMap((event) => event.type === 'tool' && event.entry.tool === 'review_design' ? [event.entry] : []);
   assert.deepEqual(reviews.map(({ ok, args }) => [ok, (args as { cached: boolean }).cached]), [[false, false], [false, true], [true, false]]);
@@ -117,6 +118,29 @@ test('native success waits for review, caches a veto and finalizes a repaired an
   assert.ok(finalVersion.toolLog.some(({ tool, ok, summary }) => tool === 'review_design' && ok && summary === approved.summary));
   assert.equal(events.filter((event) => event.type === 'done').length, 1);
   assert.equal(events.at(-1)?.type, 'done');
+});
+
+test('a native pass with an omitted wheel-to-brace collision reaches the independent review as measured evidence', async () => {
+  const collision = { passed: false, summary: 'The extra brace intersects the spinning wheel.', issues: [{
+    message: 'The complete-machine observation reports wheel-to-brace penetration that the rotation-only test omitted.',
+    instanceIds: ['wheel', 'brace'], suggestion: 'Repair the brace and explicitly test its clearance.',
+  }] };
+  const { result, requests, events } = await scriptedBuild([
+    [...setup, ['brace', 'assemble', { rationale: 'Fit a grounded axle brace.', ops: [
+      { op: 'mount', id: 'brace', part: 'beam-100', onto: 'tower', connector: 'axle', via: 'end_a', joint: 'fixed' },
+    ] }], ['define', 'define_test', { test: definition }], runSpin('run-overlap'), finish('submit-overlap')],
+    [finish('stop', 'failed')],
+  ], [JSON.stringify(collision)]);
+  assert.equal(result.status, 'failed');
+  assert.ok(result.versions[0].tests[0].passed, 'the saved native result stays truthful');
+  const evidence = JSON.parse(requests.reviewers[0].messages[1].content!);
+  const observation = evidence.clearanceObservations[0];
+  assert.ok(observation.complete && observation.samplesChecked > 1);
+  assert.ok(observation.issues.some(({ firstId, secondId, penetration_m }: { firstId: string; secondId: string; penetration_m: number }) =>
+    new Set([firstId, secondId]).has('wheel') && new Set([firstId, secondId]).has('brace') && penetration_m > 0.001));
+  const saved = events.filter((event) => event.type === 'version').at(-1)!.version;
+  assert.ok(saved.toolLog.some(({ tool }) => tool === 'review_clearance'));
+  assert.ok(saved.toolLog.some(({ tool, ok }) => tool === 'review_design' && !ok));
 });
 
 test('a terminal veto stays in the saved record after native tests passed', async () => {

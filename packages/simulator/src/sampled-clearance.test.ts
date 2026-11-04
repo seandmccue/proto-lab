@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { emptyAssembly, getPart } from '@protolab/parts';
 import { IDENTITY, TestSpec, type Assembly, type GeometryPiece, type Instance, type PartDefinition, type Vec3 } from '@protolab/schema';
-import { initSimulator, runTest } from './index.ts';
+import { auditAssemblyClearance, initSimulator, runTest } from './index.ts';
 import { inspectSampledClearance } from './sampled-clearance.ts';
 
 function box(position: Vec3, size: Vec3): GeometryPiece {
@@ -47,6 +47,10 @@ const spec = TestSpec.parse({
   criteria: { torqueWithinRating: false },
 });
 assert.equal(spec.kind, 'motion');
+const baseTest = TestSpec.parse({
+  kind: 'motion', id: 'base-stability', duration_s: .5,
+  measure: { base: 'wheel' }, criteria: { maxBaseDrift_m: .001 },
+});
 
 test('sampled clearance catches a fixed roof crossing a wheel even when its bearing disables solver contacts', async () => {
   const { assembly, fixedGroups } = fixture();
@@ -124,4 +128,62 @@ test('an absent expanded pose or an invalid profile leaves clearance unverified'
   assert.equal(invalid.complete, false);
   assert.equal(invalid.samplesChecked, 0);
   assert.match(invalid.failureReason!, /"roof" piece 1: its profile does not form a valid solid/);
+});
+
+test('assembly clearance catches an omitted obstruction without changing the native result', async () => {
+  const { assembly } = fixture();
+  const native = await runTest(assembly, { env, test: baseTest });
+  const archived = structuredClone(native);
+  assert.equal(native.passed, true);
+
+  const report = await auditAssemblyClearance(assembly, native.trace);
+  assert.equal(report.complete, true);
+  assert.equal(report.pairsChecked, 3);
+  assert.equal(report.samplesChecked, native.trace.frames.length);
+  assert.deepEqual(report.issues.map(({ firstId, secondId, time_s }) => [firstId, secondId, time_s]), [['wheel', 'roof', 0]]);
+  assert.deepEqual(native, archived);
+});
+
+test('assembly clearance reports loose payload contact as evidence without failing the solver', async () => {
+  const { assembly } = fixture();
+  const payload = assembly.instances.find(({ id }) => id === 'roof')!;
+  payload.free = true;
+  assembly.joints.pop();
+  const native = await runTest(assembly, { env, test: baseTest });
+  const original = structuredClone(native);
+  const report = await auditAssemblyClearance(assembly, native.trace);
+  assert.equal(report.complete, true);
+  assert.ok(report.issues.some(({ firstId, secondId, time_s }) => firstId === 'wheel' && secondId === payload.id && time_s === 0));
+  assert.equal(native.passed, true);
+  assert.deepEqual(native, original);
+});
+
+test('assembly clearance screens distant and repeated poses, then checks changed and missing poses', async () => {
+  const { assembly } = fixture();
+  const bodies = Object.fromEntries(assembly.instances.map(({ id, transform }) => [id, transform]));
+  const far = { ...bodies, roof: { ...IDENTITY, position: [0, .2, 1] as Vec3 } };
+  const frames = [far, far, bodies].map((poses, index) => ({ t: index / 30, bodies: poses, joints: {} }));
+  const report = await auditAssemblyClearance(assembly, { dt: 1 / 30, frames });
+  assert.equal(report.complete, true);
+  assert.equal(report.samplesChecked, frames.length);
+  assert.deepEqual(report.issues.map(({ firstId, secondId, time_s }) => [firstId, secondId, time_s]), [['wheel', 'roof', 2 / 30]]);
+
+  const missingPose = { ...bodies };
+  delete missingPose.roof;
+  frames.push({ t: .1, bodies: missingPose, joints: {} });
+  const incomplete = await auditAssemblyClearance(assembly, { dt: 1 / 30, frames });
+  assert.equal(incomplete.complete, false);
+  assert.equal(incomplete.samplesChecked, 3);
+  assert.match(incomplete.failureReason!, /valid sampled pose for "roof"/);
+});
+
+test('assembly clearance reports incomplete coverage when its pair-sample budget is exceeded', async () => {
+  const { assembly } = fixture();
+  assembly.joints = [];
+  assembly.instances = Array.from({ length: 128 }, (_, index) => ({ ...assembly.instances[0], id: `instance-${index}` }));
+  const frames = Array.from({ length: 500 }, (_, index) => ({ t: index / 30, bodies: {}, joints: {} }));
+  const report = await auditAssemblyClearance(assembly, { dt: 1 / 30, frames });
+  assert.equal(report.complete, false);
+  assert.equal(report.samplesChecked, 0);
+  assert.match(report.failureReason!, /sampled pair limit/);
 });
