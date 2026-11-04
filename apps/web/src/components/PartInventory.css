@@ -34,10 +34,7 @@
 }
 .part-inventory-results {
   min-height: 4.5rem;
-  max-height: 140rem;
-  overflow: auto;
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
+  /* No inner scroll box: the whole catalog flows in the page, so the page scroll reaches every part. */
   background: var(--paper);
 }
 .part-inventory-results:focus-visible { outline-offset: -3px; }
@@ -75,8 +72,4 @@
 @media (max-width: 650px) {
   .part-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .part-inventory-count { padding-bottom: 0; }
-}
-
-@media (orientation: landscape) and (max-height: 500px) {
-  .part-inventory-results { max-height: clamp(8rem, calc(100dvh - 9.5rem), 22rem); }
 }
