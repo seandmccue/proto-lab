@@ -321,7 +321,7 @@ export class ToolRuntime {
           const raw = rawArgs as { drives?: unknown[] };
           if (Array.isArray(raw?.drives)) raw.drives = raw.drives.map((d) => normaliseDrive(d));
           const a = DrivesArgs.parse(rawArgs);
-          this.assembly = setDrives(this.assembly, a.drives);
+          this.assembly = setDrives(this.assembly, a.drives, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m });
           const brief = (d: (typeof a.drives)[number]) => { const q = d.profile as Record<string, unknown>; const f = ['amplitude', 'offset', 'frequency_hz', 'swingDuty', 'value', 'from', 'to', 'after'].filter((k) => q[k] !== undefined).map((k) => `${k.replace('frequency_hz', 'f').replace('amplitude', 'a').replace('swingDuty', 'duty').replace('offset', 'o')}=${q[k]}`).join(','); return `${d.controlId}=${d.profile.kind}(${f})`; };
           log(true, `Drives: ${a.drives.slice(0, 4).map(brief).join('; ')}${a.drives.length > 4 ? ` … (+${a.drives.length - 4} more)` : ''}`);
           this.events.onAssembly(this.assembly, a.rationale ?? 'Updated motor drive settings', a.based_on);

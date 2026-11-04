@@ -337,6 +337,33 @@ test('set_drives infers a missing profile kind from the fields present', async (
   assert.equal(rt.assembly.controller.drives[0].profile.kind, 'constant');
 });
 
+test('drive updates respect the current plan mass limit and reject invalid changes atomically', async () => {
+  const rt = new ToolRuntime(baseSpec('Large flywheel machine'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  const plan = { purpose: 'Turn a large machine', features: ['frame', 'flywheel'], motions: ['rotation'], subassemblies: ['drivetrain'], successCriteria: ['turns'], unverified: [] };
+  await rt.call('write_plan', { ...plan, maxMass_kg: 8 });
+  const designed = await rt.call('design_part', {
+    name: 'Heavy foundation', category: 'frames', mass_kg: 5.1,
+    pieces: [{ shape: { kind: 'box', size: [.1, .1, .1] }, offset: { position: [0, 0, 0], rotation: [0, 0, 0, 1] }, color: '#444444', role: 'structure', collide: true }],
+  }) as { part: { id: string } };
+  const built = await rt.call('assemble', { rationale: 'Build within the larger plan limit', ops: [
+    { op: 'place', id: 'foundation', part: designed.part.id, position: [.3, .05, 0], anchored: true },
+    { op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true },
+    { op: 'mount', id: 'wheel', part: 'spoked-wheel-400', onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', motor: { controlId: 'spin', stiffness: .5, damping: .2 } },
+  ] }) as { error?: string };
+  assert.ok(!built.error, built.error);
+  const drives = [{ controlId: 'spin', mode: 'velocity' as const, rampIn_s: 1, profile: { kind: 'constant' as const, value: 1.5 } }];
+  assert.throws(() => setDrives(rt.assembly, drives), /exceeds 5 kg/);
+  const updated = await rt.call('set_drives', { drives }) as { error?: string };
+  assert.ok(!updated.error, updated.error);
+  assert.deepEqual(rt.assembly.controller.drives, drives);
+
+  await rt.call('write_plan', { ...plan, maxMass_kg: 5 });
+  const before = structuredClone(rt.assembly);
+  const rejected = await rt.call('set_drives', { drives: [{ ...drives[0], profile: { kind: 'constant', value: 2 } }] }) as { error?: string };
+  assert.match(rejected.error ?? '', /exceeds 5 kg/);
+  assert.deepEqual(rt.assembly, before);
+});
+
 test('assemble infers a missing "op" from the fields present', async () => {
   const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
   const r = await rt.call('assemble', { rationale: 'tower + rotor', ops: [

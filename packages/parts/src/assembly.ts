@@ -385,12 +385,12 @@ export function validate(a: Assembly, limits: Limits = DEFAULT_LIMITS): void {
   if (r * 2 > limits.maxSize_m * 2.5) throw new AssemblyError(`Assembly spans ~${(r * 2).toFixed(2)} m, larger than the ${limits.maxSize_m} m workspace`);
 }
 
-export function setDrives(a: Assembly, drives: Drive[]): Assembly {
+export function setDrives(a: Assembly, drives: Drive[], limits: Limits = DEFAULT_LIMITS): Assembly {
   const next = structuredClone(a);
   const byId = new Map(next.controller.drives.map((d) => [d.controlId, d]));
   for (const d of drives) byId.set(d.controlId, d);
   next.controller = Controller.parse({ drives: [...byId.values()] });
-  validate(next);
+  validate(next, limits);
   return next;
 }
 
