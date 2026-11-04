@@ -63,20 +63,19 @@ export class JobRunner {
   private readonly maxConcurrent = Math.max(1, Number(process.env.JOB_CONCURRENCY) || 3);
   private readonly maxQueued = Math.max(1, Number(process.env.JOB_MAX_QUEUED) || 12);
   private live = new Map<string, PublicEvent[]>();
-  private checkpoints = new Map<string, Promise<void>>();
+  /** One stable terminal gate per job; individual uploads must never replace or delete it. */
+  private checkpoints = new Map<string, { promise: Promise<void>; pending: boolean }>();
   private liveAssembly = new Map<string, { assembly: Assembly; iteration: number; rationale: string; at: string }>(); // latest in-progress assembly per job, for "watch it assemble"
   constructor(private db: DatabaseSync, private store: ObjectStore, private options: { persist?: () => Promise<void> } = {}) {}
 
-  events(jobId: string): PublicEvent[] | null { return this.live.get(jobId) ?? null; }
-  assemblySnapshot(jobId: string) { return this.liveAssembly.get(jobId) ?? null; }
-  waitForCheckpoint(jobId: string) { return this.checkpoints.get(jobId); }
-
-  private async checkpoint(jobId: string) {
-    if (!this.options.persist) return;
-    const pending = this.options.persist();
-    this.checkpoints.set(jobId, pending);
-    try { await pending; } finally { this.checkpoints.delete(jobId); }
+  events(jobId: string): PublicEvent[] | null {
+    const events = this.live.get(jobId);
+    if (!events) return null;
+    return this.checkpoints.has(jobId) ? events.filter((event) => event.type !== 'done') : events;
   }
+  assemblySnapshot(jobId: string) { return this.liveAssembly.get(jobId) ?? null; }
+  waitForCheckpoint(jobId: string) { return this.checkpoints.get(jobId)?.promise; }
+  isAwaitingCheckpoint(jobId: string) { return this.checkpoints.get(jobId)?.pending ?? false; }
 
   enqueue(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     this.queue.push(() => this.run(job, invention, opts));
@@ -95,6 +94,26 @@ export class JobRunner {
 
   private async run(job: JobRow, invention: InventionRow, opts: { parent: VersionRecord | null; changeRequest?: string }) {
     const events: PublicEvent[] = [];
+    let resolveDurable!: () => void;
+    let rejectDurable!: (error: unknown) => void;
+    const durable = new Promise<void>((resolve, reject) => { resolveDurable = resolve; rejectDurable = reject; });
+    // A storage error can arrive before an HTTP caller starts waiting.
+    void durable.catch(() => {});
+    const durability = { promise: durable, pending: true };
+    this.checkpoints.set(job.id, durability);
+    const captures: Promise<void>[] = [];
+    let storageError: Error | undefined;
+    const requestCheckpoint = () => {
+      let capture: Promise<void>;
+      try { capture = this.options.persist?.() ?? Promise.resolve(); }
+      catch (error) { capture = Promise.reject(error); }
+      // Observe every rejection immediately. A later success does not erase an earlier
+      // failure: without an explicit high-water receipt we conservatively fail the job.
+      const observed = capture.catch((error: unknown) => {
+        storageError ??= error instanceof Error ? error : new Error(String(error));
+      });
+      captures.push(observed);
+    };
     const startedAt = Date.now();
     const timing: BuildTiming = {
       queueMs: Math.max(0, startedAt - Date.parse(job.created_at)),
@@ -116,6 +135,7 @@ export class JobRunner {
     this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('running', now(), invention.id);
     let lastVersionId: string | null = null;
     let savedUntestedVersion = false;
+    let terminalEvent: Extract<PublicEvent, { type: 'done' }> | undefined;
     const onEvent = (e: AgentEvent) => {
       const t = now();
       switch (e.type) {
@@ -168,10 +188,11 @@ export class JobRunner {
           if (e.inputTokens !== undefined) timing.inputTokens = (timing.inputTokens ?? 0) + e.inputTokens;
           if (e.outputTokens !== undefined) timing.outputTokens = (timing.outputTokens ?? 0) + e.outputTokens;
           break;
-        case 'done': push({ t, type: 'done', status: e.status, summary: e.summary, modelId: e.modelId }); break;
+        case 'done': terminalEvent = { t, type: 'done', status: e.status, summary: e.summary, modelId: e.modelId }; break;
         case 'error': push({ t, type: 'error', message: e.message }); break;
       }
     };
+    let durableError: unknown;
     try {
       const startIteration = (this.db.prepare('SELECT COALESCE(MAX(iteration), 0) AS n FROM versions WHERE invention_id=?').get(invention.id) as { n: number }).n;
       // The agent (model calls + Rapier simulation) runs in a worker thread so HTTP polling stays responsive.
@@ -181,9 +202,11 @@ export class JobRunner {
         let returned = false;
         worker.on('message', (m: { kind: 'event'; event: AgentEvent } | { kind: 'result'; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }) => {
           if (m.kind === 'result') { returned = true; void pending.then(() => resolve(m), reject); return; }
-          pending = pending.then(async () => {
+          pending = pending.then(() => {
             onEvent(m.event);
-            if (m.event.type === 'version') await this.checkpoint(job.id);
+            // Local rows and manifests are already recorded in order. Let the global
+            // CloudCheckpoint queue coalesce full captures while later events drain.
+            if (m.event.type === 'version') requestCheckpoint();
           });
           void pending.catch((e) => { reject(e); void worker.terminate(); });
         });
@@ -193,18 +216,41 @@ export class JobRunner {
         });
       });
       reportTiming();
+      push(terminalEvent ?? { t: now(), type: 'done', status: out.status, summary: out.summary, modelId: out.modelId });
       // The description follows the latest build's summary until the owner publishes (publishing stores their own text).
       this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN visibility=\'public\' AND description<>\'\' THEN description ELSE ? END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
       update(out.status === 'error' ? 'error' : 'done', savedUntestedVersion ? 'Untested assembly saved' : out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
-      await this.checkpoint(job.id);
+      // Stage the terminal summary in the snapshot, but keep it behind the stable
+      // gate until every scheduled save and this final capture have succeeded.
+      requestCheckpoint();
+      await Promise.all(captures);
+      if (storageError) throw storageError;
     } catch (e) {
-      push({ t: now(), type: 'error', message: (e as Error).message });
-      reportTiming();
-      this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('error', now(), invention.id);
-      update('error', 'Error', lastVersionId, 'agent_error');
-      await this.checkpoint(job.id);
+      durableError = e;
+      try {
+        // A native success is not a successful save. Preserve all versions, but do
+        // not leave a completion event in the error snapshot or expose it live.
+        for (let index = events.length - 1; index >= 0; index--) if (events[index].type === 'done') events.splice(index, 1);
+        push({ t: now(), type: 'error', message: e instanceof Error ? e.message : String(e) });
+        reportTiming();
+        this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('error', now(), invention.id);
+        update('error', storageError ? 'Build storage failed' : 'Error', lastVersionId, storageError ? 'storage_error' : 'agent_error');
+        requestCheckpoint();
+        await Promise.all(captures);
+        durableError = storageError;
+      } catch (error) { durableError = error; }
     } finally {
-      setTimeout(() => { this.live.delete(job.id); this.liveAssembly.delete(job.id); }, 5 * 60_000).unref();
+      durability.pending = false;
+      if (durableError !== undefined) rejectDurable(durableError);
+      else {
+        if (this.checkpoints.get(job.id) === durability) this.checkpoints.delete(job.id);
+        resolveDurable();
+      }
+      setTimeout(() => {
+        this.live.delete(job.id); this.liveAssembly.delete(job.id);
+        // A rejected terminal gate stays fail-closed for this process. Expiring
+        // live events must not turn an unconfirmed terminal row into success.
+      }, 5 * 60_000).unref();
     }
   }
 }
