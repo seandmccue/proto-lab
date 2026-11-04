@@ -68,7 +68,9 @@ function GalleryPreview({ item, hover, testId, preferSavedImage }: { item: Inven
   const savedImage = preferSavedImage && item.visibility === 'public' && previewUrl !== failedImage ? previewUrl : null;
   const [checkedVersion, setCheckedVersion] = useState(!currentVersionId);
   const hasAssembly = Boolean(version?.assembly.instances.length);
-  const animate = !preferSavedImage && hover && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const animate = hover && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const test = version?.tests.find((test) => test.testId === testId) ?? version?.tests.at(-1);
+  const canReplay = traced && hasAssembly && (test?.trace?.frames.length ?? 0) > 1 && (test?.trace?.frames.at(-1)?.t ?? 0) > 0;
   useEffect(() => {
     if (!checkedVersion || hasAssembly || item.visibility !== 'private' || !item.isOwner || previewUrl !== `/api/inventions/${id}/preview`) return;
     const controller = new AbortController();
@@ -106,11 +108,12 @@ function GalleryPreview({ item, hover, testId, preferSavedImage }: { item: Inven
     return () => { cancelled = true; };
   }, [animate, traced, id, currentVersionId]);
 
-  if (savedImage) {
+  // Showcase images are instant posters, not a reason to disable the saved simulation.
+  // Keep them while loading, off screen, or when motion is reduced / the trace is unavailable.
+  if (savedImage && !(animate && canReplay)) {
     return <img src={savedImage} alt="" className="h-full w-full object-contain" decoding="async" onError={() => setFailedImage(savedImage)} />;
   }
   if (version?.assembly.instances.length) {
-    const test = version.tests.find((test) => test.testId === testId) ?? version.tests.at(-1);
     return <IsoPreview assembly={version.assembly} trace={traced ? test?.trace : null} playing={animate && traced} className="h-full w-full" />;
   }
   const image = item.visibility === 'public' ? previewUrl : item.isOwner && privateImage?.url === previewUrl ? privateImage.src : null;
