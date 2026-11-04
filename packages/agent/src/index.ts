@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { Assembly, Decision, Spec, TestResult, TestSpec, ToolLogEntry, VersionRecord } from '@protolab/schema';
-import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
+import { assistantMessage, chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
 import { runPlanner } from './planner.ts';
@@ -241,8 +241,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     } finally {
       emit({ type: 'model_timing', ms: Math.round(performance.now() - modelStarted), inputTokens: res?.usage?.prompt_tokens, outputTokens: res?.usage?.completion_tokens });
     }
-    const content = res.content && res.content.trim() ? res.content : res.toolCalls.length ? null : '(no output)';
-    messages.push(res.toolCalls.length ? { role: 'assistant', content, tool_calls: res.toolCalls } : { role: 'assistant', content: content ?? '(no output)' });
+    messages.push(assistantMessage(res));
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 300)}` });
     if (!res.toolCalls.length) {
       if (res.finishReason === 'length') {
