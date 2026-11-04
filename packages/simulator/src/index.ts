@@ -116,7 +116,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
         if (!cd) continue;
         cd.setTranslation(...t.position).setRotation({ x: rot[0], y: rot[1], z: rot[2], w: rot[3] });
         cd.setMass(Math.max(1e-5, part.mass_kg * (shapeVolume(s) / totalVol)));
-        cd.setFriction(piece.role === 'contact' || piece.role === 'payload' ? env.groundFriction : 0.5).setRestitution(piece.role === 'payload' ? 0.2 : 0);
+        cd.setFriction(piece.friction ?? (piece.role === 'contact' || piece.role === 'payload' ? env.groundFriction : 0.5)).setRestitution(piece.role === 'payload' ? 0.2 : 0);
         const isFree = inst.free, isClear = clearSet.has(inst.id);
         const mem = (isFree ? FREE : piece.role === 'contact' ? CONTACT : STRUCT) | (isClear ? CLEAR : 0);
         const filt = isFree ? 0xffff : GROUND | FREE | (isClear ? CLEAR : 0);   // free bodies collide with everything

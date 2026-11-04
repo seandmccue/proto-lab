@@ -347,7 +347,7 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
       const relief = 40 * Math.PI / 180;
       const geometry = [
         piece({ kind: 'cylinder', radius: plateRadius, height: thickness * 0.7, axis: 'z' }, [0, 0, 0], '#354e64'),
-        piece({ kind: 'cylinder', radius: pinRadius, height: thickness * 1.25, axis: 'z' }, [crankRadius, 0, thickness * 0.9], COLORS.orange, 'contact'),
+        piece({ kind: 'cylinder', radius: pinRadius, height: thickness * 1.25, axis: 'z' }, [crankRadius, 0, thickness * 0.9], COLORS.orange, 'contact', QUAT_ID, { friction: 0.35 }),
       ];
       // The dwell sector wraps more than 180 degrees. Split it into convex halves so the
       // contact hulls preserve the relief around the pin through the indexing phase.
@@ -357,7 +357,7 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
           const angle = start + index / 24 * (end - start);
           profile.push([lockRadius * Math.cos(angle), lockRadius * Math.sin(angle)]);
         }
-        geometry.push(piece({ kind: 'extrude', profile, depth: thickness, axis: 'z' }, [0, 0, thickness], COLORS.brass, 'contact'));
+        geometry.push(piece({ kind: 'extrude', profile, depth: thickness, axis: 'z' }, [0, 0, thickness], COLORS.brass, 'contact', QUAT_ID, { friction: 0.35 }));
       }
       geometry.push(piece({ kind: 'cylinder', radius: pinRadius * 1.2, height: thickness, axis: 'z' }, [0, 0, thickness * 0.7], '#354e64'));
       return finish({

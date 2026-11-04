@@ -46,6 +46,7 @@ export const GeometryPiece = z.object({
   material: z.string().optional(),
   role: PieceRole.default('structure'),
   collide: z.boolean().default(true),
+  friction: z.number().min(0).max(2).optional(),
 });
 export type GeometryPiece = z.infer<typeof GeometryPiece>;
 
