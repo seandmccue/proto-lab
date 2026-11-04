@@ -444,8 +444,10 @@ test('define_test rejects dance criteria tighter than a legged machine measures'
   const rt = new ToolRuntime(baseSpec('Pet robot'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
   await rt.call('assemble', { rationale: 'body + one leg', ops: [
     { op: 'place', id: 'body', part: 'chassis-quad-160', position: [0, 0.1, 0] },
-    { op: 'mount', id: 'hip_servo', part: 'servo-ds3218', onto: 'body', connector: 'hip_L0', via: 'bottom', joint: 'fixed' },
-    { op: 'mount', id: 'upper', part: 'leg-bar-60', onto: 'hip_servo', connector: 'horn', via: 'pivot', joint: 'revolute', motor: { controlId: 'hip_L0', stiffness: 8, damping: 0.2 } },
+    ...['hip_L0', 'hip_L1', 'hip_R0', 'hip_R1'].flatMap((h) => [
+      { op: 'mount', id: `servo_${h}`, part: 'servo-ds3218', onto: 'body', connector: h, via: 'bottom', joint: 'fixed' },
+      { op: 'mount', id: `leg_${h}`, part: 'leg-bar-60', onto: `servo_${h}`, connector: 'horn', via: 'pivot', joint: 'revolute', motor: { controlId: h, stiffness: 8, damping: 0.2 } },
+    ]),
   ] }) as { error?: string };
   const tight = await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 4, measure: { joints: ['hip_L0'], base: 'body' }, criteria: { minJointAmplitude_rad: 0.08, maxBaseTilt_deg: 5, maxBaseDrift_m: 0.05, torqueWithinRating: true } } }) as { error?: string };
   assert.match(tight.error ?? '', /maxBaseTilt_deg 5/);
@@ -465,4 +467,68 @@ test('a drive sweep runs the full indexed motion test and reports step counts wi
     [[0, 0, 0], [1.6, 1, 2]]);
   assert.equal(rt.tests.length, 0);
   assert.equal(rt.testCount, 0);
+});
+
+test('a batched reply stops at the first failed tool call; later calls are reported as skipped', async () => {
+  const { createServer } = await import('node:http');
+  const bodies: Array<{ messages: Array<{ role: string; content: string; tool_call_id?: string }> }> = [];
+  const server = createServer((req, res) => {
+    let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
+      const body = JSON.parse(raw); bodies.push(body);
+      const reply = bodies.length === 1
+        ? [{ id: 'a1', type: 'function', function: { name: 'assemble', arguments: JSON.stringify({ rationale: 'bad part id', ops: [{ op: 'place', id: 'body', part: 'no-such-part', position: [0, 0.1, 0] }] }) } },
+           { id: 'd1', type: 'function', function: { name: 'set_drives', arguments: JSON.stringify({ drives: [{ controlId: 'spin', mode: 'velocity', profile: { kind: 'constant', value: 1 } }] }) } }]
+        : [{ id: 'f1', type: 'function', function: { name: 'finalize_design', arguments: JSON.stringify({ summary: 'stopping', status: 'failed' }) } }];
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: null, tool_calls: reply }, finish_reason: 'tool_calls' }] }));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, r));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const model = { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 256, timeoutMs: 5000 };
+    await runAgent({ prompt: 'test', inventionId: 'inv_t', model, specialist: null, maxIterations: 1, newVersionId: () => 'ver_t' }, () => {});
+    const second = bodies[1]; assert.ok(second, 'the model was asked again after the batch');
+    const toolMsgs = second.messages.filter((m) => m.role === 'tool');
+    const assembleMsg = toolMsgs.find((m) => m.tool_call_id === 'a1'); const drivesMsg = toolMsgs.find((m) => m.tool_call_id === 'd1');
+    assert.match(assembleMsg?.content ?? '', /error/, 'the bad assemble reports its error');
+    assert.match(drivesMsg?.content ?? '', /"skipped":true/, 'the call after the failure is skipped, not run');
+    assert.match(drivesMsg?.content ?? '', /assemble failed earlier in this reply/);
+  } finally { server.close(); }
+});
+
+test('define_test rejects minRevolutions on a swinging joint, and the dance floor ignores a single leg-bar pendulum', async () => {
+  const rt = new ToolRuntime(baseSpec('Garden gadget'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'pole with a pendulum arm', ops: [
+    { op: 'place', id: 'pole', part: 'tower-500', position: [0, 0.25, 0], anchored: true },
+    { op: 'mount', id: 'arm', part: 'leg-bar-100', onto: 'pole', connector: 'axle', via: 'pivot', joint: 'revolute', motor: { controlId: 'swing', stiffness: 2, damping: 0.1 } },
+  ] });
+  await rt.call('set_drives', { drives: [{ controlId: 'swing', mode: 'position', profile: { kind: 'sine', amplitude: 0.5, frequency_hz: 1 } }] });
+  const bad = await rt.call('define_test', { test: { kind: 'motion', id: 't1', duration_s: 4, measure: { joints: ['swing'], base: 'pole' }, criteria: { minRevolutions: 2, torqueWithinRating: true } } }) as { error?: string };
+  assert.match(bad.error ?? '', /minRevolutions cannot be met by swing/);
+  const ok = await rt.call('define_test', { test: { kind: 'motion', id: 't2', duration_s: 4, measure: { joints: ['swing'], base: 'pole' }, criteria: { minJointAmplitude_rad: 0.3, maxBaseTilt_deg: 5, torqueWithinRating: true } } }) as { error?: string };
+  assert.ok(!ok.error, `one leg-bar pendulum is not a legged machine: ${ok.error}`);
+});
+
+test('define_test accepts its test object sent as a JSON string', async () => {
+  const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'tower + rotor', ops: [
+    { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0.25, 0], anchored: true },
+    { op: 'mount', id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'shaft', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ] });
+  assert.equal(rt.assembly.instances.length, 2, 'tower and rotor assembled');
+  const r = await rt.call('define_test', { test: JSON.stringify({ kind: 'motion', id: 'spin_test', duration_s: 6, measure: { joints: ['spin'], base: 'tower' }, criteria: { minRevolutions: 1, torqueWithinRating: true } }) }) as { error?: string };
+  assert.ok(!r.error, r.error);
+});
+
+test('assemble treats an op that names only an instance, or says delete, as remove', async () => {
+  const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  await rt.call('assemble', { rationale: 'tower + rotor', ops: [
+    { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0.25, 0], anchored: true },
+    { op: 'mount', id: 'rotor', part: 'windmill-4x600', onto: 'tower', connector: 'axle', via: 'shaft', joint: 'revolute', offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+  ] });
+  const r1 = await rt.call('assemble', { rationale: 'take the rotor off', ops: [{ id: 'rotor' }] }) as { error?: string };
+  assert.ok(!r1.error, r1.error); assert.ok(!rt.assembly.instances.some((i) => i.id === 'rotor'), 'rotor removed');
+  const r2 = await rt.call('assemble', { rationale: 'and the tower', ops: [{ op: 'delete', id: 'tower' }] }) as { error?: string };
+  assert.ok(!r2.error, r2.error); assert.equal(rt.assembly.instances.length, 0);
 });

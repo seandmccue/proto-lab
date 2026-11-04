@@ -345,3 +345,13 @@ test('a forward mount producer reports its original operation index on failure',
   assert.throws(() => applyOps(emptyAssembly(), ops, getPart, undefined, catalog),
     (error) => error instanceof AssemblyError && error.opIndex === 2 && /Unknown part "missing-hub"/.test(error.message));
 });
+
+test('an unplaced quadruped "body" is auto-placed as the mid-size quad chassis when the family ties on connectors', () => {
+  const r = applyOps(emptyAssembly(), [
+    { op: 'mount', id: 'hip_L0', part: 'servo-ds3218', onto: 'body', connector: 'hip_L0', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'hip_R1', part: 'servo-ds3218', onto: 'body', connector: 'hip_R1', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+  ], getPart, undefined, catalog);
+  const body = r.assembly.instances.find((x) => x.id === 'body');
+  assert.equal(body?.partId, 'chassis-quad-160', `auto-placed ${body?.partId}`);
+  assert.ok(r.summary[0].startsWith('auto-placed body as chassis-quad-160'), r.summary[0]);
+});

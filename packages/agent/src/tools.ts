@@ -92,9 +92,10 @@ function normaliseOp(o: unknown): unknown {
   const alias = (from: string, to: string) => { if (x[to] === undefined && x[from] !== undefined) { x[to] = x[from]; } if (from !== to) delete x[from]; };
   if (typeof x.type === 'string' && x.op === undefined) { x.op = x.type; delete x.type; }
   // No op at all: infer it from the fields present.
-  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; }
+  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; else if (typeof x.id === 'string' && Object.keys(x).every((k) => k === 'id' || k === 'rationale' || k === 'reason')) x.op = 'remove'; } // an op that names only an instance can only mean remove
   if (typeof x.action === 'string' && x.op === undefined) { x.op = x.action; delete x.action; }
   if (x.op === 'add' || x.op === 'create' || x.op === 'spawn') x.op = 'place';
+  if (x.op === 'delete' || x.op === 'drop' || x.op === 'detach' || x.op === 'unmount') x.op = 'remove';
   if (x.op === 'attach' || x.op === 'join') x.op = x.onto || x.parent ? 'mount' : 'connect';
   alias('partId', 'part'); alias('part_id', 'part'); alias('instance', 'id'); alias('instanceId', 'id'); alias('name', 'id'); alias('instance_id', 'id');
   alias('at', 'position'); alias('pos', 'position'); alias('translation', 'position'); alias('rotation', 'rotation_deg'); alias('rotation_euler_deg', 'rotation_deg'); alias('euler_deg', 'rotation_deg');
@@ -252,8 +253,20 @@ export class ToolRuntime {
   }
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
-    // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
-    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices', 'inspect_instance_ids']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
+    // Tool arguments sometimes arrive as JSON strings inside the outer request.
+    if (rawArgs && typeof rawArgs === 'object') {
+      const args = rawArgs as Record<string, unknown>;
+      for (const key of [
+        'ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria',
+        'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices', 'inspect_instance_ids',
+        'test', 'motor', 'criteria', 'measure',
+      ]) {
+        const value = args[key];
+        if (typeof value === 'string' && /^\s*[\[{]/.test(value)) {
+          try { args[key] = JSON.parse(value); } catch { /* leave for the validator */ }
+        }
+      }
+    }
     this.calls++;
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
@@ -365,7 +378,14 @@ export class ToolRuntime {
           if (raw?.test && typeof raw.test.direction === 'string') raw.test.direction = raw.test.direction.replace(/^[+-]/, '').toLowerCase();
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.maxTilt_deg === 'number' && raw.test.maxTilt_deg < 8) throw new Error(`maxTilt_deg ${raw.test.maxTilt_deg}° is tighter than this simulator measures for the recipes (3–5° bare, 6–8° with a shell or claws on top); a limit that tight burns the whole test budget chasing noise. Use 10–15° unless the user asked for a stability figure.`);
-          if (raw?.test && raw.test.kind === 'motion' && this.assembly.parts.some((p) => p.category === 'legs')) { // a legged machine dancing in place measures 8–12° of tilt and 5–12 cm of drift on the recipe
+          if (raw?.test && raw.test.kind === 'motion') { // a swing never completes a revolution: minRevolutions on a sine/gait-driven joint is a test that can only fail
+            const m = raw.test.measure as { joints?: unknown } | undefined; const c0 = raw.test.criteria as Record<string, unknown> | undefined;
+            if (c0 && typeof c0.minRevolutions === 'number' && Array.isArray(m?.joints)) {
+              const swinging = (m!.joints as unknown[]).filter((j) => this.assembly.controller.drives.some((d) => d.controlId === j && (d.profile.kind === 'sine' || d.profile.kind === 'gait')));
+              if (swinging.length) throw new Error(`minRevolutions cannot be met by ${swinging.join(', ')}: a sine or gait drive swings back and forth and never completes a revolution. Measure swinging joints with minJointAmplitude_rad (or define a separate test for the spinning joints only).`);
+            }
+          }
+          if (raw?.test && raw.test.kind === 'motion' && this.assembly.parts.some((p) => p.category === 'legs') && this.assembly.instances.filter((i) => this.assembly.parts.find((p) => p.id === i.partId)?.category === 'legs').length >= 4) { // a legged machine (four or more leg segments; a single leg-bar pendulum is not one) dancing in place measures 8–12° of tilt and 5–12 cm of drift on the recipe
             const c = raw.test.criteria as Record<string, unknown> | undefined;
             if (c && typeof c.maxBaseTilt_deg === 'number' && c.maxBaseTilt_deg < 10) throw new Error(`maxBaseTilt_deg ${c.maxBaseTilt_deg}° is tighter than a legged machine measures while dancing in place (8–12° on the recipe, more with big feet); use 12–15° unless the user asked for a stability figure.`);
             if (c && typeof c.maxBaseDrift_m === 'number' && c.maxBaseDrift_m < 0.12) throw new Error(`maxBaseDrift_m ${c.maxBaseDrift_m} m is tighter than a legged machine measures while dancing in place (5–12 cm on the recipe); use 0.15 m, or test a walk if travel is the point.`);

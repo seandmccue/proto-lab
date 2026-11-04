@@ -306,6 +306,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       const name = call.function.name;
       if (failedSetup && (setupTools.has(name) || dependentTools.has(name))) {
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({
+          skipped: true,
           error: `Skipped ${name} because ${failedSetup} failed earlier in this reply. Fix that call before retrying the skipped steps.`,
         }) });
         continue;

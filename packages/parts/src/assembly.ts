@@ -199,7 +199,14 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
         best = bases[0] ?? [...plates].sort((x, y) => y.dimensions_m[0] * y.dimensions_m[2] - x.dimensions_m[0] * x.dimensions_m[2])[0];
       }
       else if (cands.length > 1 && cands.every((p) => p.id.startsWith(`${id.toLowerCase().replace(/[_\d]+$/, '')}-`)) && /tower|stand|pedestal|mast|pole|post/i.test(id)) best = [...cands].sort((x, y) => y.dimensions_m[1] - x.dimensions_m[1])[0]; // "tower.axle": every candidate is a tower; the tallest keeps whatever hangs on it clear of the ground
-      else if (cands.length > 1 && cands.length <= 6) { const sorted = [...cands].sort((x, y) => x.connectors.length - y.connectors.length || x.mass_kg - y.mass_kg); if (sorted[0].connectors.length < sorted[1].connectors.length) best = sorted[0]; }
+      else if (cands.length > 1 && cands.length <= 6) {
+        const sorted = [...cands].sort((x, y) => x.connectors.length - y.connectors.length || x.mass_kg - y.mass_kg);
+        if (sorted[0].connectors.length < sorted[1].connectors.length) best = sorted[0];
+        else { // a tie on connector count within one family (chassis-quad-120/160/220 all carry hip_L0..R1): take the mid-size, which is what the measured recipes use
+          const n = sorted[0].connectors.length; const tied = sorted.filter((p) => p.connectors.length === n); const stem = (p: PartDefinition) => p.id.replace(/-?\d+(x\d+)*$/, '');
+          if (tied.every((p) => stem(p) === stem(tied[0]))) best = tied[Math.floor((tied.length - 1) / 2)];
+        }
+      }
       if (!best) continue;
       const anchored = /base|stand|ground|floor|plate|pedestal|tower/i.test(id) || best.category === 'plates';
       const y = anchored ? best.dimensions_m[1] / 2 : Math.max(0.1, best.dimensions_m[1]);
