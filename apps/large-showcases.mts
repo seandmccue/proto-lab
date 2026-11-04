@@ -11,6 +11,32 @@ export interface LargeShowcase {
 // Add an entry after reviewing the exact saved Muse assembly and recorded tests.
 export const largeShowcases: readonly LargeShowcase[] = [
   {
+    inventionId: 'inv_359fbaf0800a4c94',
+    versionId: 'ver_0cb1ed656e1d43e7',
+    testIds: ['lumen_full216#1'],
+    baseline: { versionId: 'ver_10bbf56c86a44b5d', testId: 'lumen_wave#1' },
+    componentCount: 78,
+    detail: 'A 1.27 m flower with 24 powered petals. Two crowns send waves in opposite directions.',
+    showStrokeGuidesInitially: false,
+  },
+  {
+    inventionId: 'inv_a277ac7fde43455c',
+    versionId: 'ver_9763f0e96fdf4549',
+    testIds: ['phoenix-flap#1', 'phoenix-clearance#1', 'phoenix-extra-clearance#1', 'phoenix-tailfan-sec#1'],
+    baseline: { versionId: 'ver_f0c51194a2f74db9', testId: 'phoenix-flap#1' },
+    componentCount: 73,
+    detail: 'A 1.26 m wingspan, 57 feathers and six powered joints. Watch the wings, copper head and fan tail move together.',
+    showStrokeGuidesInitially: false,
+  },
+  {
+    inventionId: 'inv_ece6826dc3414592',
+    versionId: 'ver_127b6ecafb2d4d4b',
+    testIds: ['wing_deploy#1', 'signed_walk#1', 'motion_all#1'],
+    componentCount: 72,
+    detail: 'A 1.13 m rover crosses a 45 mm ramp on eight driven wheels while its two blue solar wings unfold.',
+    showStrokeGuidesInitially: false,
+  },
+  {
     inventionId: 'inv_5b8d9bc9fa68496b',
     versionId: 'ver_d6b56c3fa6a34853',
     testIds: ['octo_final#1', 'octo_clearance#1'],
