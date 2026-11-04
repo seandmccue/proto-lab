@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Spec, TestSpec, VersionRecord } from '@protolab/schema';
+import { receiverChecks, type Spec, type TestSpec, type VersionRecord } from '@protolab/schema';
 import { STAGES, stageOf, useElapsed } from './ActivityPanel.tsx';
 import PartsBin, { pickedParts } from './PartsBin.tsx';
 import { fmt, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
@@ -166,8 +166,11 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
         items.push({ label: `${label} swing`, value: `${degrees(low)} to ${degrees(high)}`, target: `Reach ±${degrees(minEachWay_rad)}` });
       }
     }
-    const endIn = definition.measure.endIn;
-    if (endIn) add('Time inside receiver at end', metrics.endInHold_s, (seconds) => `${seconds.toFixed(2)} s`, endIn.minHold_s, true);
+    const receivers = receiverChecks(definition.measure.endIn);
+    for (const { check, holdKey } of receivers) {
+      const label = receivers.length === 1 ? 'Time inside receiver at end' : `${check.instance} in ${check.receiver}`.replace(/[_-]+/g, ' ');
+      add(label, metrics[holdKey], (seconds) => `${seconds.toFixed(2)} s`, check.minHold_s, true);
+    }
     const indexed = definition.measure.indexedMotion;
     if (indexed) add('Consecutive steps with dwell', metrics.indexedConsecutiveSteps, String, indexed.minSteps, true);
     const sync = definition.measure.synchronizedTravel;

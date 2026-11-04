@@ -1,10 +1,8 @@
 import { invert, transformPoint } from '@protolab/parts';
-import type { TestSpec, Trace } from '@protolab/schema';
-
-type EndIn = NonNullable<Extract<TestSpec, { kind: 'motion' }>['measure']['endIn']>;
+import type { ReceiverCheck, Trace } from '@protolab/schema';
 
 /** Measure the uninterrupted final interval that the tracked point is in the receiver's local box. */
-export function measureEndIn(trace: Trace, { instance, receiver, centerOffset_m = [0, 0, 0], halfExtents_m }: EndIn) {
+export function measureEndIn(trace: Trace, { instance, receiver, centerOffset_m = [0, 0, 0], halfExtents_m }: ReceiverCheck) {
   if (!Number.isFinite(trace.dt) || trace.dt <= 0 || trace.frames.length < 2) return null;
   let previousTime = -Infinity;
   let insideSince: number | undefined;

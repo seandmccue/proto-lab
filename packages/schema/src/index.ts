@@ -203,6 +203,24 @@ export type Spec = z.infer<typeof Spec>;
 
 // ---------- Tests ----------
 export const ClearancePair = z.tuple([z.string(), z.string()]);
+export const ReceiverCheck = z.object({
+  instance: z.string().min(1),
+  receiver: z.string().min(1),
+  centerOffset_m: Vec3.optional(),
+  halfExtents_m: z.tuple([z.number().positive(), z.number().positive(), z.number().positive()]),
+  minHold_s: z.number().positive().max(5),
+});
+export type ReceiverCheck = z.infer<typeof ReceiverCheck>;
+
+export function receiverChecks(endIn: ReceiverCheck | ReceiverCheck[] | undefined) {
+  const checks = Array.isArray(endIn) ? endIn : endIn ? [endIn] : [];
+  return checks.map((check, index) => {
+    // Preserve the published metric names for existing single-receiver tests.
+    const suffix = Array.isArray(endIn) ? `.${index + 1}` : '';
+    return { check, holdKey: `endInHold_s${suffix}`, marginKey: `endInFinalMargin_m${suffix}` };
+  });
+}
+
 export const TestSpec = z.discriminatedUnion('kind', [
   // Drive the mechanism and measure joints, a base body, clearances and ground contact.
   z.object({
@@ -228,13 +246,7 @@ export const TestSpec = z.discriminatedUnion('kind', [
         minTravel_m: z.number().positive(),
         maxSpread_m: z.number().positive(),
       }).optional(),
-      endIn: z.object({
-        instance: z.string().min(1),
-        receiver: z.string().min(1),
-        centerOffset_m: Vec3.optional(),
-        halfExtents_m: z.tuple([z.number().positive(), z.number().positive(), z.number().positive()]),
-        minHold_s: z.number().positive().max(5),
-      }).optional(),
+      endIn: z.union([ReceiverCheck, z.array(ReceiverCheck).min(2).max(8)]).optional(),
       indexedMotion: z.object({
         input: z.string().min(1),
         body: z.string().min(1),

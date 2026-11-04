@@ -518,7 +518,8 @@ export default function Workspace() {
     ? recordedTestSpec(test.testId, [version, prevVersion?.id === version.parentVersionId ? prevVersion : null]) ?? (testSpecKey ? earlierTestSpecs[testSpecKey] : undefined)
     : undefined;
   const strokeTargets = testDefinition?.kind === 'motion' && test?.trace.frames.length ? testDefinition.measure.linearTravel : undefined;
-  const receiverPath = testDefinition?.kind === 'motion' ? testDefinition.measure.endIn?.instance : undefined;
+  const receiverTarget = testDefinition?.kind === 'motion' ? testDefinition.measure.endIn : undefined;
+  const receiverPath = Array.isArray(receiverTarget) ? undefined : receiverTarget?.instance;
   const motionPath = receiverPath ?? (version ? recordedPenPath(version.assembly, test) : undefined);
   const sourceParentId = detail?.source?.versionId;
   useEffect(() => {

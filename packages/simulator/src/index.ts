@@ -1,3 +1,4 @@
+import { receiverChecks } from '@protolab/schema';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { measureFollowerTiming } from './follower-timing.ts';
 import { measurePlanarOrbit } from './planar-orbit.ts';
@@ -203,9 +204,9 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       for (const id of instances) if (!instById.has(id)) failureReasons.push(`Synchronized travel instance "${id}" not found`);
     }
     const endIn = measure.endIn;
-    if (endIn) {
-      if (endIn.instance === endIn.receiver) failureReasons.push('End-in target and receiver must be different instances');
-      for (const id of [endIn.instance, endIn.receiver]) if (!instById.has(id)) failureReasons.push(`End-in instance "${id}" not found`);
+    for (const { check: target } of receiverChecks(endIn)) {
+      if (target.instance === target.receiver) failureReasons.push('End-in target and receiver must be different instances');
+      for (const id of [target.instance, target.receiver]) if (!instById.has(id)) failureReasons.push(`End-in instance "${id}" not found`);
     }
     const indexed = measure.indexedMotion;
     if (indexed) {
@@ -442,14 +443,13 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
           failureReasons.push(`${body} orbit radius reached ${maxRadius_m.toFixed(3)} m, maximum ${orbit.maxRadius_m} m`);
         }
       }
-      const endIn = test.measure.endIn;
-      if (endIn) {
+      for (const { check: endIn, holdKey, marginKey } of receiverChecks(test.measure.endIn)) {
         const result = measureEndIn({ frames, dt: 1 / TRACE_HZ }, endIn);
         if (!result) {
-          failureReasons.push('Final receiver occupancy could not be measured from the trace');
+          failureReasons.push(`Final receiver occupancy for ${endIn.instance} in ${endIn.receiver} could not be measured from the trace`);
         } else {
-          metrics.endInHold_s = +result.hold_s.toFixed(4);
-          metrics.endInFinalMargin_m = +result.finalMargin_m.toFixed(5);
+          metrics[holdKey] = +result.hold_s.toFixed(4);
+          metrics[marginKey] = +result.finalMargin_m.toFixed(5);
           if (result.hold_s + 1e-8 < endIn.minHold_s) {
             failureReasons.push(`${endIn.instance} ended inside ${endIn.receiver} for ${result.hold_s.toFixed(2)} s, target ${endIn.minHold_s} s`);
           }
