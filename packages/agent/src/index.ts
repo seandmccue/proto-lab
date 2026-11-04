@@ -237,7 +237,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     { role: 'system', content: systemPrompt(savedParent) },
     { role: 'user', content: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt },
   ];
-  const maxRounds = 24 + maxIterations * 6;
+  const maxRounds = 34 + maxIterations * 6;
   // The same deadline bounds model requests and retry delays across all rounds.
   const timeBudgetMs = Math.max(60, Number(process.env.AGENT_TIME_BUDGET_S) || 1200) * 1000;
   const deadline = AbortSignal.timeout(timeBudgetMs);
