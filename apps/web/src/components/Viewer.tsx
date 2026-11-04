@@ -29,6 +29,7 @@ export interface ViewerProps {
   onTime?: (t: number, duration: number) => void;
   seekTo?: number | null;
   autoRotate?: boolean;
+  autoRotateSpeed?: number;  // OrbitControls units; 2 ≈ one turn per 30 s at 60 fps
   mini?: boolean;
   stage?: 'dark' | 'light' | 'stage';  // 'stage' = the themed stage plate (dark on the dark theme, graphite on the light theme)
   zoom?: number;
@@ -368,7 +369,7 @@ function Scene(props: ViewerProps) {
           {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-accent">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
         </group>
       )}
-      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={false} />
+      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={props.autoRotateSpeed ?? 1.2} enablePan={!mini} enableZoom={false} />
     </>
   );
 }

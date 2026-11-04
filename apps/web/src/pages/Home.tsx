@@ -272,7 +272,7 @@ export default function Home() {
             <div className="lab-art-stage">
               {stageVersion ? (
                 <div className="lab-art-machine" aria-hidden="true">
-                  <Viewer key={stageVersion.id} assembly={stageVersion.assembly} test={stageTest} playing={heroPlaying} explode={0} blueprint={heroBlueprint} selectedId={null} mini stage="stage" />
+                  <Viewer key={stageVersion.id} assembly={stageVersion.assembly} test={stageTest} playing={heroPlaying} explode={0} blueprint={heroBlueprint} selectedId={null} mini stage="stage" autoRotate={heroPlaying} autoRotateSpeed={0.7} />
                 </div>
               ) : slideItem ? (
                 <span className="lab-art-placeholder">Loading {slideItem.title}…</span>
