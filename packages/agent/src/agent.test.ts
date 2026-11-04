@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { buildGenevaIndexer, genevaIndexerTest } from '@protolab/simulator/geneva-indexer';
 import { createServer } from 'node:http';
 import { applyOps, emptyAssembly, generatePart, getPart, setDrives } from '@protolab/parts';
 import { VersionRecord, type ToolLogEntry } from '@protolab/schema';
@@ -231,4 +232,18 @@ test('define_test rejects dance criteria tighter than a legged machine measures'
   assert.match(tight.error ?? '', /maxBaseTilt_deg 5/);
   const ok = await rt.call('define_test', { test: { kind: 'motion', id: 'dance', duration_s: 4, measure: { joints: ['hip_L0'], base: 'body' }, criteria: { minJointAmplitude_rad: 0.08, maxBaseTilt_deg: 12, maxBaseDrift_m: 0.15, torqueWithinRating: true } } }) as { error?: string };
   assert.ok(!ok.error, ok.error);
+});
+
+test('a drive sweep runs the full indexed motion test and reports step counts without saving a result', async () => {
+  const rt = new ToolRuntime(baseSpec('Four-stop carousel'), {
+    onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {},
+  }, undefined, buildGenevaIndexer());
+  await rt.call('define_test', { test: genevaIndexerTest });
+  const result = await rt.call('sweep_drive', {
+    test_id: genevaIndexerTest.id, controlId: 'spin', field: 'value', values: [0, 1.6], duration_s: 4,
+  }) as { results: { value: number; passed: number; indexedConsecutiveSteps: number }[] };
+  assert.deepEqual(result.results.map(({ value, passed, indexedConsecutiveSteps }) => [value, passed, indexedConsecutiveSteps]),
+    [[0, 0, 0], [1.6, 1, 2]]);
+  assert.equal(rt.tests.length, 0);
+  assert.equal(rt.testCount, 0);
 });

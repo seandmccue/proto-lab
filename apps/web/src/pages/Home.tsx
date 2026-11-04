@@ -71,8 +71,8 @@ export default function Home() {
   const lotusStroke = lotus?.latestTest?.metrics.synchronizedMinTravel_m ?? NaN;
   const lotusSpread = lotus?.latestTest?.metrics.synchronizedMaxSpread_m ?? NaN;
   const showLotus = lotus && Number.isFinite(lotusStroke) && Number.isFinite(lotusSpread);
-  const genevaRepair = featured.find((item) => item.id === genevaRepairId && item.latestTest?.passed
-    && (item.latestTest.metrics.indexedConsecutiveSteps ?? 0) >= 2);
+  const genevaRepair = featured.find((item) => item.id === genevaRepairId && item.status === 'passed'
+    && item.tests.some((test) => test.passed && test.metrics.indexedConsecutiveSteps >= 2));
   const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id && item.id !== (showLotus ? lotus.id : undefined));
   const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
