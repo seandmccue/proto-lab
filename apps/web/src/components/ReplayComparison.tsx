@@ -148,6 +148,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
 
   const tilt = findTilt(versions[0].assembly, beforeTest, definition, time);
   const adjustment = versions[1].decisions.slice().reverse().find((decision) => decision.source === 'model' && (decision.previousTestId || decision.basedOn));
+  const receiverTarget = afterDefinition?.kind === 'motion' ? afterDefinition.measure.endIn : undefined;
   const panes = [
     { replay: before, version: versions[0], test: beforeTest, highlights: tilt?.highlights },
     { replay: after, version: versions[1], test: afterTest, highlights: changes },
@@ -170,11 +171,14 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
         <p className="workbench-comparison-metric">{test.metrics.distance_m !== undefined ? `${fmt.cm(test.metrics.distance_m)} travelled` : keyMetric(test)}{test.metrics.maxTilt_deg !== undefined && ` · ${fmt.deg(test.metrics.maxTilt_deg)} peak tilt`}</p>
         <div className="workbench-comparison-canvas">
-          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} pathInstanceId={recordedPenPath(version.assembly, test)} />
+          <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} pathInstanceId={receiverTarget?.instance ?? recordedPenPath(version.assembly, test)} />
         </div>
         <div className={`workbench-comparison-note${index === 0 || !test.passed ? ' is-failure' : ''}`}>
           {index === 0 || !test.passed ? <><strong>{tilt && index === 0 ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt && index === 0 ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}
         </div>
+        {receiverTarget && test.metrics.endInHold_s !== undefined && <p className="workbench-comparison-metric">
+          Payload held in receiver for {test.metrics.endInHold_s.toFixed(2)} s · {receiverTarget.minHold_s.toFixed(2)} s target
+        </p>}
         <TriplexTimingEvidence version={version} time={time} test={test} />
         <OrbitReplayEvidence inventionId={version.inventionId} iteration={version.iteration} time={time} test={test}
           definition={index === 0 ? definition : afterDefinition} />

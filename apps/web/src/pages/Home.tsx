@@ -21,6 +21,7 @@ const drawingRemixId = 'inv_76b7fae5bdf941c9';
 const gimbalRepairId = 'inv_d3f76fcc393b49d6';
 const lotusId = 'inv_ba7b3c7716564397';
 const genevaRepairId = 'inv_b99f505fab294915';
+const marbleRepairId = 'inv_437c3b45e27d4138';
 const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal', 'inv_geneva_indexer', 'inv_marble_elevator'];
 
 function penPathSize(test: TestSummary | null | undefined) {
@@ -73,6 +74,8 @@ export default function Home() {
   const showLotus = lotus && Number.isFinite(lotusStroke) && Number.isFinite(lotusSpread);
   const genevaRepair = featured.find((item) => item.id === genevaRepairId && item.status === 'passed'
     && item.tests.some((test) => test.passed && test.metrics.indexedConsecutiveSteps >= 2));
+  const marbleRepair = featured.find((item) => item.id === marbleRepairId && item.status === 'passed'
+    && item.tests.some((test) => test.passed && test.metrics.endInHold_s >= 0.75));
   const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id && item.id !== (showLotus ? lotus.id : undefined));
   const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
@@ -216,7 +219,7 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {(references.length > 0 || spotlightId || orrery || gimbalRepair || showLotus || genevaRepair) && (
+        {(references.length > 0 || spotlightId || orrery || gimbalRepair || showLotus || genevaRepair || marbleRepair) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">
               <div>
@@ -224,9 +227,10 @@ export default function Home() {
                 <h2 id="motion-gallery-title">See mechanisms in motion</h2>
                 <p>Replay reference builds to see how motors and passive joints move together. Open a test to inspect the measurements.</p>
               </div>
-              {(orrery || genevaRepair) && <div className="flex flex-wrap gap-2">
+              {(orrery || genevaRepair || marbleRepair) && <div className="flex flex-wrap gap-2">
                 {orrery && <Link to={`/i/${orrery.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the Moon’s orbit <span aria-hidden="true">↗</span></Link>}
                 {genevaRepair && <Link to={`/i/${genevaRepair.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the jewel carousel <span aria-hidden="true">↗</span></Link>}
+                {marbleRepair && <Link to={`/i/${marbleRepair.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the marble elevator <span aria-hidden="true">↗</span></Link>}
               </div>}
             </div>
             {spotlightId && (

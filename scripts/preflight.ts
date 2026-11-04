@@ -310,6 +310,21 @@ if (judge) checks.push(
     }
     return 'the loose marble rose 120 mm and remained in the catch bin for the final four seconds';
   }],
+  ['Muse marble elevator repair', async () => {
+    const id = 'inv_437c3b45e27d4138';
+    const { invention, versions } = await publicBuild(id);
+    const first = versions.find(({ iteration }) => iteration === 1);
+    if (!first || !invention.featured) throw new Error('Expected a featured elevator with a saved first revision');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, invention.currentVersionId)]);
+    if (!after.modelId.startsWith('muse-') || after.assembly.controller.drives.length !== 2
+      || !recorded(before, (test) => !test.passed && test.metrics.groundContactViolation === 1)
+      || !recorded(after, (test) => test.passed && test.metrics['marble.travel_y_m'] >= 0.10
+        && test.metrics['marble.travel_x_m'] >= 0.12 && test.metrics.endInHold_s >= 0.75
+        && test.metrics.endInFinalMargin_m > 0 && test.metrics.groundContactViolation === 0)) {
+      throw new Error('Expected a dropped-marble baseline and a Muse revision that held the marble in its receiver');
+    }
+    return 'first revision dropped the marble; final revision delivered and held it for four seconds';
+  }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
     if (!invention.featured) throw new Error('Expected the clock to be featured');
