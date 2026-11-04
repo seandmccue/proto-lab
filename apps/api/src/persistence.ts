@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { constants, cpSync, createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { backup, DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 
 const tar = promisify(execFile);
@@ -76,8 +76,13 @@ export class CloudCheckpoint {
     const temp = await mkdtemp(join(tmpdir(), 'protolab-checkpoint-'));
     try {
       const archive = join(temp, archiveName);
-      await backup(db, join(temp, databaseName));
-      await tar('tar', ['-czf', archive, '-C', temp, databaseName, '-C', this.dataDir, 'store']);
+      // Jobs and routes write the database and object store on this thread. Capture both
+      // before yielding so a saved row and its manifest always come from the same revision.
+      db.prepare('VACUUM INTO ?').run(join(temp, databaseName));
+      cpSync(join(this.dataDir, 'store'), join(temp, 'store'), {
+        recursive: true, mode: constants.COPYFILE_FICLONE, verbatimSymlinks: true,
+      });
+      await tar('tar', ['-czf', archive, '-C', temp, databaseName, 'store']);
       const { size } = await stat(archive);
       if (size > maxArchiveBytes) throw new Error('Checkpoint exceeds the Cloudflare upload budget.');
       const response = await fetch(this.url, {
