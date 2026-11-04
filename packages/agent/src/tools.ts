@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
 import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, ParamError, shapeVolume, piecesBoundingRadius, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
-import { runTest } from '@protolab/simulator';
+import { runTest, auditCompoundGeometry, auditPartGeometry, type CompoundGeometryIssue } from '@protolab/simulator';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
+
+function disconnectedGeometryMessage(issue: CompoundGeometryIssue): string {
+  const groups = issue.pieceGroups.map((indices) => `[${indices.join(', ')}]`).join(' | ');
+  const gap = issue.nearestGap_m === null ? '' : `; nearest gap ${(issue.nearestGap_m * 1000).toFixed(1)} mm`;
+  return `Floating pieces in ${issue.instanceId} (${issue.partName}): disconnected piece groups ${groups}${gap}. Join them with visible geometry or fixed supports; piece numbers are one-based.`;
+}
 
 // ---------- argument schemas ----------
 const SearchArgs = z.object({ query: z.string().default(''), category: PartCategory.optional(), limit: z.number().int().min(1).max(40).optional() });
@@ -170,6 +176,7 @@ export class ToolRuntime {
   testSpecs = new Map<string, TestSpec>();
   private testEvidence = new Map<string, { spec: TestSpec; result: TestResult }>();
   private lastTestedAssembly: Assembly | null = null;
+  private geometryChecks = new WeakMap<Assembly, Promise<CompoundGeometryIssue[]>>();
   testCount = 0; sweeps = 0; calls = 0;
   finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
   private events: ToolEvents;
@@ -205,6 +212,22 @@ export class ToolRuntime {
     });
     if (this.lastTestedAssembly !== this.assembly) pending.push('The latest assembly or drive settings have not been tested');
     return pending;
+  }
+
+  private async runCheckedTest(test: TestSpec, controller?: Assembly['controller']): Promise<TestResult> {
+    let audit = this.geometryChecks.get(this.assembly);
+    if (!audit) {
+      audit = auditCompoundGeometry(this.assembly);
+      this.geometryChecks.set(this.assembly, audit);
+    }
+    const issues = await audit;
+    const result = await runTest(this.assembly, { env: this.spec.environment, test, controller });
+    result.metrics.disconnectedGeometryParts = issues.length;
+    if (issues.length) {
+      result.passed = false;
+      result.failureReasons.push(...issues.map(disconnectedGeometryMessage));
+    }
+    return result;
   }
 
   summarisePart(p: PartDefinition) {
@@ -297,9 +320,11 @@ export class ToolRuntime {
           const mass = a.mass_kg ?? Math.max(0.001, volume * (DENSITY[a.material] ?? 1240) * (pieces.some((g) => g.role === 'shell' || g.role === 'wing') ? 0.3 : 1));
           const ext = pieces.reduce((m, g) => { const h = g.offset.position; return [Math.max(m[0], Math.abs(h[0]) + r * 0.5), Math.max(m[1], Math.abs(h[1]) + r * 0.5), Math.max(m[2], Math.abs(h[2]) + r * 0.5)] as [number, number, number]; }, [0, 0, 0] as [number, number, number]);
           const p = PartDefinition.parse({ id, kind: 'designed', name: a.name, category: a.category, description: a.description || `Designed part: ${a.name}`, params: {}, mass_kg: mass, dimensions_m: ext, material: a.material, geometry: pieces, connectors: a.connectors, limits: {}, cost_usd: 5, source: { kind: 'designed', license: 'CC0-1.0', creator: 'ProtoLab agent (model-designed, geometry-engine validated)' } });
+          const geometryIssue = await auditPartGeometry(p);
+          const geometryWarnings = geometryIssue ? [disconnectedGeometryMessage(geometryIssue)] : [];
           this.customParts.set(id, p);
-          log(true, `Designed ${p.name} (${id}): ${pieces.length} pieces, ${a.connectors.length} connectors, ${(mass * 1000).toFixed(0)} g`, [picked(p, true)]);
-          return { part: this.summarisePart(p) };
+          log(true, `Designed ${p.name} (${id}): ${pieces.length} pieces, ${a.connectors.length} connectors, ${(mass * 1000).toFixed(0)} g${geometryIssue ? ' — disconnected geometry needs supports before testing' : ''}`, [picked(p, true)]);
+          return { part: this.summarisePart(p), ...(geometryWarnings.length ? { geometryWarnings } : {}) };
         }
         case 'assemble': {
           { const r = rawArgs as Record<string, unknown>; for (const k of ['operations', 'steps', 'assembly_ops', 'actions']) if (r.ops === undefined && Array.isArray(r[k])) { r.ops = r[k]; delete r[k]; } for (const k of ['reason', 'why', 'description', 'note']) if (r.rationale === undefined && typeof r[k] === 'string') { r.rationale = r[k]; delete r[k]; } if (r.rationale === undefined && Array.isArray(r.ops)) r.rationale = 'Assembly step'; }
@@ -371,7 +396,7 @@ export class ToolRuntime {
           const n = this.tests.filter((x) => x.testId.slice(0, x.testId.lastIndexOf('#')) === a.test_id).length + 1;
           const testId = `${a.test_id}#${n}`;
           this.events.onTestStart?.(testId, spec.kind);
-          const result = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: testId } });
+          const result = await this.runCheckedTest({ ...spec, id: testId });
           this.tests.push(result);
           this.testEvidence.set(a.test_id, { spec, result });
           this.lastTestedAssembly = this.assembly;
@@ -398,9 +423,10 @@ export class ToolRuntime {
           for (const v of a.values) {
             const prof = { ...drive.profile } as Record<string, unknown>; prof[a.field] = v;
             const ctl = { drives: this.assembly.controller.drives.map((d) => (d.controlId === a.controlId ? { ...d, profile: Drive.shape.profile.parse(prof) } : d)) };
-            const r = await runTest(this.assembly, { env: this.spec.environment, test: { ...spec, id: 'sweep', duration_s }, controller: ctl });
+            const r = await this.runCheckedTest({ ...spec, id: 'sweep', duration_s }, ctl);
             results.push({ [a.field]: v, passed: r.passed ? 1 : 0,
               ...(indexed && r.metrics.indexedConsecutiveSteps !== undefined ? { indexedConsecutiveSteps: r.metrics.indexedConsecutiveSteps } : {}),
+              disconnectedGeometryParts: r.metrics.disconnectedGeometryParts,
               ...Object.fromEntries(Object.entries(r.metrics).filter(([k]) => /distance|revolutions|landing|separation|maxTilt|fell|peak|amplitude|clearance/.test(k)).slice(0, 8)) });
           }
           log(true, `${results.length} runs varying ${a.controlId}.${a.field}`);

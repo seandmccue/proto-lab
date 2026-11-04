@@ -4,8 +4,11 @@ import { measureFollowerTiming } from './follower-timing.ts';
 import { measurePlanarOrbit } from './planar-orbit.ts';
 import { measureIndexedMotion } from './indexed-motion.ts';
 import { measureEndIn } from './end-in.ts';
-import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
-import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
+import { auditFixedGeometry, auditStandalonePart, colliderAt, isPhysicalPiece } from './compound-geometry.ts';
+import type { Assembly, Instance, Joint, PartDefinition, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
+import { compose, invert, quatConj, quatMul, rotate, tiltDeg, transformPoint, sub, len, shapeVolume, norm, dot } from '@protolab/parts';
+
+export type { CompoundGeometryIssue } from './compound-geometry.ts';
 
 export const ENGINE = 'rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace';
 const DT = 1 / 240;
@@ -57,7 +60,19 @@ function rigidGroups(a: Assembly): RigidGroup[] {
   for (const i of a.instances) { const r = find(i.id); if (!groups.has(r)) groups.set(r, []); groups.get(r)!.push(i); }
   return [...groups.values()].map((members) => ({ rootId: members[0].id, members, anchored: members.some((m) => m.anchored) }));
 }
-function axisRotation(axis: 'x' | 'y' | 'z'): Quat { if (axis === 'y') return [0, 0, 0, 1]; if (axis === 'x') return quatFromAxisAngle([0, 0, 1], Math.PI / 2); return quatFromAxisAngle([1, 0, 0], Math.PI / 2); }
+
+/** Flag custom parts whose collision geometry has disconnected regions at rest. */
+export async function auditCompoundGeometry(assembly: Assembly) {
+  await initSimulator();
+  return auditFixedGeometry(rigidGroups(assembly).map((group) => group.members), assembly.parts);
+}
+
+/** Inspect a part before other pieces can bridge it in an assembly. */
+export async function auditPartGeometry(part: PartDefinition) {
+  await initSimulator();
+  return auditStandalonePart(part);
+}
+
 function axisAngle(q: Quat, axis: Vec3): number {
   const [x, y, z, w] = q; const proj = x * axis[0] + y * axis[1] + z * axis[2];
   const n = Math.hypot(proj, w) || 1; const ang = 2 * Math.atan2(proj / n, w / n); return Math.atan2(Math.sin(ang), Math.cos(ang));
@@ -106,18 +121,10 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const totalVol = part.geometry.reduce((s, gp) => s + shapeVolume(gp.shape), 0) || 1;
       let any = false;
       for (const piece of part.geometry) {
-        if (!piece.collide || piece.role === 'decor' || piece.role === 'fastener') continue;
-        const t = compose(rel, piece.offset); let rot = t.rotation; let cd: RAPIER.ColliderDesc | null = null; const s = piece.shape;
-        switch (s.kind) {
-          case 'box': cd = RAPIER.ColliderDesc.cuboid(s.size[0] / 2, s.size[1] / 2, s.size[2] / 2); break;
-          case 'sphere': cd = RAPIER.ColliderDesc.ball(s.radius); break;
-          case 'cylinder': cd = RAPIER.ColliderDesc.cylinder(s.height / 2, s.radius); rot = quatMul(t.rotation, axisRotation(s.axis)); break;
-          case 'capsule': cd = RAPIER.ColliderDesc.capsule(s.height / 2, s.radius); rot = quatMul(t.rotation, axisRotation(s.axis)); break;
-          default: { const pts = hullPoints(s); if (pts.length >= 4) cd = RAPIER.ColliderDesc.convexHull(new Float32Array(pts.flat())); }
-        }
+        if (!isPhysicalPiece(piece)) continue;
+        const cd = colliderAt(piece.shape, compose(rel, piece.offset));
         if (!cd) continue;
-        cd.setTranslation(...t.position).setRotation({ x: rot[0], y: rot[1], z: rot[2], w: rot[3] });
-        cd.setMass(Math.max(1e-5, part.mass_kg * (shapeVolume(s) / totalVol)));
+        cd.setMass(Math.max(1e-5, part.mass_kg * (shapeVolume(piece.shape) / totalVol)));
         cd.setFriction(piece.friction ?? (piece.role === 'contact' || piece.role === 'payload' ? env.groundFriction : 0.5)).setRestitution(piece.role === 'payload' ? 0.2 : 0);
         const isFree = inst.free, isClear = clearSet.has(inst.id);
         const mem = (isFree ? FREE : piece.role === 'contact' ? CONTACT : STRUCT) | (isClear ? CLEAR : 0);
