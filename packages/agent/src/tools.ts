@@ -18,9 +18,13 @@ const DesignPartArgs = z.object({
   name: z.string().min(2).max(60), category: PartCategory, description: z.string().max(300).default(''), material: z.string().max(40).default('PLA'), mass_kg: z.number().positive().max(20).optional(),
   pieces: z.array(GeometryPiece).min(1).max(16), connectors: z.array(Connector).max(16).default([]), rationale: z.string().optional(),
 });
-const AssembleArgs = z.object({ ops: z.array(AssemblyOp).min(1).max(120), rationale: z.string(), based_on: z.string().optional() });
+const InspectInstanceIds = z.array(z.string().min(1)).max(4).optional();
+const AssembleArgs = z.object({
+  ops: z.array(AssemblyOp).min(1).max(120), rationale: z.string(), based_on: z.string().optional(),
+  inspect_instance_ids: InspectInstanceIds,
+});
 const DrivesArgs = z.object({ drives: z.array(Drive).min(1).max(40), rationale: z.string().optional(), based_on: z.string().optional() });
-const InspectArgs = z.object({ instance_ids: z.array(z.string().min(1)).max(4).optional() });
+const InspectArgs = z.object({ instance_ids: InspectInstanceIds });
 const DefineTestArgs = z.object({ test: TestSpec });
 const RunTestArgs = z.object({ test_id: z.string() });
 const SweepArgs = z.object({ test_id: z.string(), controlId: z.string(), field: z.enum(['amplitude', 'frequency_hz', 'value', 'offset']), values: z.array(z.number()).min(2).max(8), duration_s: z.number().min(1).max(6).optional() });
@@ -44,7 +48,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   { name: 'create_part', description: 'Create a parametric part from a generator when no preset fits (any generator kind with custom params, e.g. wing{span,chord,style}, body_frame{length,width,height,legPairs}, big_wheel{radius,spokes}, servo_motor{size,torque,speed}, beam, plate, curved_panel, gear, crank, eccentric_cam{coreRadius,lobeRadius,eccentricity,thickness}, cam_follower{shoeLength,shoeWidth,shoeThickness,stemSize,stemLength}, follower_guide{stemSize,reach}, link, gripper_finger, propeller…). Returns the new part id and its connectors.', parameters: { type: 'object', properties: { kind: { type: 'string' }, params: { type: 'object', additionalProperties: { type: 'number' } }, name: { type: 'string' }, color: { type: 'string', description: 'hex colour like #e63946' }, rationale: { type: 'string' } }, required: ['kind', 'params'] } },
   { name: 'design_part', description: 'Design a fully custom part from primitives when no generator fits. Example: {"name":"Butterfly thorax","category":"frames","material":"PLA","pieces":[{"shape":{"kind":"capsule","radius":0.012,"height":0.06,"axis":"x"},"offset":{"position":[0,0,0],"rotation":[0,0,0,1]},"color":"#333333","role":"structure"},{"shape":{"kind":"extrude","profile":[[0,0],[0.03,0.01],[0.03,-0.01]],"depth":0.002,"axis":"y"},"offset":{"position":[0.03,0,0],"rotation":[0,0,0,1]},"color":"#e63946","role":"shell"}],"connectors":[{"id":"wing_l","position":[0,0.01,0.012],"axis":[-1,0,0],"kind":"revolute"},{"id":"wing_r","position":[0,0.01,-0.012],"axis":[1,0,0],"kind":"revolute"},{"id":"base","position":[0,-0.012,0],"axis":[0,-1,0],"kind":"fixed"}]} (flap hinges run along the body axis: left −X, right +X, so wings mounted via "hinge" flap up/down). Shapes: box{size}, cylinder{radius,height,axis}, sphere{radius}, capsule{radius,height,axis}, ellipsoid{radii}, extrude{profile (2D polygon, CCW), depth, axis}, revolve{profile [(r,h)...], axis}. Metres, part-local frame, +Y up. Connector axes point OUT of the part. Mass defaults from volume × material density (shells/wings ×0.3). An optional piece friction coefficient overrides the simulator default for that collider.', parameters: { type: 'object', properties: { name: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, description: { type: 'string' }, material: { type: 'string', enum: ['PLA', 'aluminium', 'steel', 'carbon', 'rubber', 'acrylic', 'nylon', 'balsa', 'foam'] }, mass_kg: { type: 'number' }, pieces: { type: 'array', items: { type: 'object' } }, connectors: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string' } }, required: ['name', 'category', 'pieces'] } },
-  { name: 'assemble', description: 'Apply structured assembly operations to the current design (atomic: all or nothing; on error the failing op index and reason are returned and nothing changes). Ops: {op:"place", id, part, position:[x,y,z], rotation_deg?:[x,y,z], anchored?, free?} · {op:"mount", id, part, onto:<instance>, connector:<parent connector>, via?:<child connector>, joint:"fixed"|"revolute"|"prismatic"|"free", spin_deg?, offset_m?, limits?:[min,max], contact?:true, motor?:{controlId, stiffness, damping}} (places the child so the two connectors coincide and face each other; joint axis = parent connector axis; contact:true enables collisions and keeps the joint, useful for a pin that drives a slotted wheel; joint:"free" sets a payload or projectile down with no joint) · {op:"connect", a, a_connector, b, b_connector, joint:"revolute"|"prismatic"|"fixed"|"spring", motor?, spring?} (connectors must already touch, ≤ 20 mm) · {op:"bridge", id, part, a, a_connector, via_a, b, b_connector, via_b} (fits a new rigid link between two already placed parts and adds two passive revolute joints; via_a/via_b are the new link’s pivots; endpoint spacing must match within 0.5 mm) · {op:"pattern", instances:[ids], kind:"mirror"|"polar"|"linear", plane?:"xy"|"yz"|"xz", axis?, center?, count?, step?} (copies instances, joints, drives) · {op:"remove", id} · {op:"move", id, position?, rotation_deg?, translate?} (moving an instance carries everything mounted on it). Ground is y = 0; +Y is up. Use anchored:true for bases fixed to the ground, free:true on place enables contact with other bodies. For a guided cam follower, place it with free:true, then connect its slide to the guide with a passive prismatic joint. Keep unrelated parts clear of the follower.', parameters: { type: 'object', properties: { ops: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string', description: 'What this builds or changes and why, in one or two sentences for the user' }, based_on: { type: 'string', description: 'Test id and measurement this change responds to, if any' } }, required: ['ops', 'rationale'] } },
+  { name: 'assemble', description: 'Apply structured assembly operations to the current design (atomic: all or nothing; on error the failing op index and reason are returned and nothing changes). Ops: {op:"place", id, part, position:[x,y,z], rotation_deg?:[x,y,z], anchored?, free?} · {op:"mount", id, part, onto:<instance>, connector:<parent connector>, via?:<child connector>, joint:"fixed"|"revolute"|"prismatic"|"free", spin_deg?, offset_m?, limits?:[min,max], contact?:true, motor?:{controlId, stiffness, damping}} (places the child so the two connectors coincide and face each other; joint axis = parent connector axis; contact:true enables collisions and keeps the joint, useful for a pin that drives a slotted wheel; joint:"free" sets a payload or projectile down with no joint) · {op:"connect", a, a_connector, b, b_connector, joint:"revolute"|"prismatic"|"fixed"|"spring", motor?, spring?} (connectors must already touch, ≤ 20 mm) · {op:"bridge", id, part, a, a_connector, via_a, b, b_connector, via_b} (fits a new rigid link between two already placed parts and adds two passive revolute joints; via_a/via_b are the new link’s pivots; endpoint spacing must match within 0.5 mm) · {op:"pattern", instances:[ids], kind:"mirror"|"polar"|"linear", plane?:"xy"|"yz"|"xz", axis?, center?, count?, step?} (copies instances, joints, drives) · {op:"remove", id} · {op:"move", id, position?, rotation_deg?, translate?} (moving an instance carries everything mounted on it). Ground is y = 0; +Y is up. Use anchored:true for bases fixed to the ground, free:true on place enables contact with other bodies. For a guided cam follower, place it with free:true, then connect its slide to the guide with a passive prismatic joint. Keep unrelated parts clear of the follower. Add inspect_instance_ids for up to four instances to return their connector positions and axes after the edit in the same call.', parameters: { type: 'object', properties: { ops: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string', description: 'What this builds or changes and why, in one or two sentences for the user' }, based_on: { type: 'string', description: 'Test id and measurement this change responds to, if any' }, inspect_instance_ids: { type: 'array', items: { type: 'string' }, maxItems: 4 } }, required: ['ops', 'rationale'] } },
   { name: 'set_drives', description: 'Set motor drives for motorised joints (by controlId). Each: {controlId, mode:"position"|"velocity", rampIn_s?, profile}. Profiles: {kind:"constant", value} · {kind:"sine", amplitude, offset?, frequency_hz, phase?} · {kind:"ramp", from, to, start_s?, duration_s} · {kind:"step", before, after, at_s} · {kind:"gait", role:"swing"|"lift", amplitude, offset?, frequency_hz, phase?, swingDuty?} for legged locomotion. Position values are radians (revolute) or metres (prismatic); velocity values rad/s or m/s. Replaces drives with the same controlId.', parameters: { type: 'object', properties: { drives: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string' }, based_on: { type: 'string' } }, required: ['drives'] } },
   { name: 'inspect_assembly', description: 'Current assembly: world positions in metres, localY_world (part-local +Y in world coordinates), part masses, joint axes and their anchor points in the assembled pose, motors, drives, and lowest point. For passive leveling, check the tray’s local +Y and center the suspended mass below both pivot axes. For closed linkages, request instance_ids to see those parts’ world connector positions and axes before connecting the final joints.', parameters: { type: 'object', properties: { instance_ids: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Optional instance IDs whose connector poses to include' } } } },
   { name: 'define_test', description: 'Define a measurable test (step 7). Motion: {kind:"motion", id, duration_s, measure:{joints:[controlIds], base?:<instance>, clearancePairs:[[a,b]], noGroundContact:[ids], uprightInstances?:[ids], jointSwing?:[{joint:<motorized revolute controlId>,minEachWay_rad}], linearTravel?:[{instance:<instance id>,axis:"x"|"y"|"z",minTravel_m}], synchronizedTravel?:{instances:[<instance ids>],axis:"x"|"y"|"z",minTravel_m,maxSpread_m}, endIn?:{instance:<payload id>,receiver:<catcher id>,centerOffset_m?:[x,y,z],halfExtents_m:[x,y,z],minHold_s} or [2–8 such receiver checks], indexedMotion?:{input:<powered revolute controlId>,body:<output marker instance>,center:<axle instance>,plane:"xy"|"xz"|"yz",minSteps,step_deg,stepTolerance_deg,minDwell_s,maxDwellDrift_deg}, followerTiming?:{shaft:<motorized revolute controlId>,followers:[<instance id>,<instance id>,<optional third instance id>],axis:"x"|"y"|"z",minCycles:<integer>,minStroke_m,minLowDwell_s?,minPhaseGap_deg,maxPhaseGap_deg?}, orbits?:[{body:<instance id>,center:<instance id>,plane:"xy"|"xz"|"yz",reference?:<instance id>|{from:<instance id>,to:<instance id>},minTurns,direction?:"positive"|"negative",minRadius_m?,maxRadius_m?}], payload?:{instance:<load id>,holder?:<hook id>}}, criteria:{minJointAmplitude_rad?, minJointRate_rad_s?, minRevolutions?, maxBaseTilt_deg?, maxBaseDrift_m?, maxInstanceTilt_deg?, minPayloadLift_m?, maxPayloadSeparation_m?, maxPayloadReturnError_m?, torqueWithinRating}}. Joint swing checks that a revolute joint reaches both sides of its rest position. Linear travel measures peak-to-peak displacement along a world axis and can measure passive pistons or sliders. Synchronized travel requires every listed part to move at least minTravel_m and limits the largest same-time difference in displacement from each part’s start to maxSpread_m. End-in checks that the tracked instance center finishes inside a box defined in the receiver’s local coordinates and stays there for minHold_s. With an array every receiver check must pass in the same run. Inset the box from the walls if the whole payload must fit. Indexed motion checks repeated same-direction steps, one per input revolution, with measured output dwell while the input keeps moving. Put the output marker away from the axle. Follower timing skips the first shaft turn, then checks each complete turn for each stroke, optional contiguous low dwell within 1 mm of the low point, and the angular spacing of adjacent peaks. For three outputs, set both phase bounds to verify the spacing across the full circle. Allow enough time for the requested complete turns plus the first turn and motor ramp. Orbit targets measure net turns from sampled body positions relative to a moving center. Use a reference direction between two bodies when a nested orbit should be measured in the rotating frame. Radius targets check the full sampled path. Instance tilt is relative to world up throughout the run. Lift is peak rise from the starting payload height; retention uses maximum load-to-holder distance; return error is final distance from starting height. Motion also reports <joint>.cycles_hz. Other tests: {kind:"walk", id, duration_s, base, minDistance_m, maxTilt_deg, direction, signed?:false} (either direction counts unless signed:true) · {kind:"launch", id, duration_s, projectile:<free instance>, targetDistance_m, tolerance_m, direction} · {kind:"grip", id, duration_s, payload:<free instance>, holder:<instance>, supportUntil_s, maxSeparation_m}.', parameters: { type: 'object', properties: { test: { type: 'object' } }, required: ['test'] } },
@@ -121,6 +125,23 @@ function normalisePiece(pc: unknown): unknown {
 }
 const DENSITY: Record<string, number> = { PLA: 1240, aluminium: 2700, steel: 7850, carbon: 1600, rubber: 1100, acrylic: 1180, nylon: 1150, balsa: 160, foam: 30 };
 
+function connectorPosesFor(assembly: Assembly, instanceIds: string[] = []) {
+  return [...new Set(instanceIds)].map((id) => {
+    const instance = assembly.instances.find((candidate) => candidate.id === id);
+    if (!instance) throw new Error(`Unknown instance id "${id}"`);
+    const part = assembly.parts.find(({ id }) => id === instance.partId);
+    return {
+      instance: id,
+      connectors: part?.connectors.map((connector) => ({
+        id: connector.id,
+        kind: connector.kind,
+        position_m: transformPoint(instance.transform, connector.position).map((value) => +value.toFixed(5)),
+        axis_world: transformDir(instance.transform, connector.axis).map((value) => +value.toFixed(4)),
+      })) ?? [],
+    };
+  });
+}
+
 export class ToolRuntime {
   spec: Spec;
   customParts = new Map<string, PartDefinition>();
@@ -190,7 +211,7 @@ export class ToolRuntime {
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
     // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
-    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
+    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices', 'inspect_instance_ids']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
     this.calls++;
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
@@ -268,13 +289,14 @@ export class ToolRuntime {
           const a = AssembleArgs.parse(rawArgs);
           const before = new Map(this.assembly.instances.map((instance) => [instance.id, instance.partId]));
           const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog().map((part) => this.savedParts.get(part.id) ?? part), ...this.customParts.values()]);
+          const connectorPoses = connectorPosesFor(r.assembly, a.inspect_instance_ids);
           this.assembly = r.assembly;
           const s = summarize(this.assembly);
           const added = new Set(this.assembly.instances.filter((instance) => before.get(instance.id) !== instance.partId).map((instance) => instance.partId));
           const mounted = this.assembly.parts.filter((p) => added.has(p.id));
           log(true, `${a.ops.length} ops: ${r.summary.slice(0, 4).join('; ')}${r.summary.length > 4 ? ` … (+${r.summary.length - 4})` : ''} → ${this.assembly.instances.length} components, ${s.totalMass_kg} kg`, mounted.length ? mounted.map((p) => picked(p, this.customParts.has(p.id))) : undefined);
           this.events.onAssembly(this.assembly, a.rationale, a.based_on);
-          return { applied: r.summary, assembly: s };
+          return connectorPoses.length ? { connectorPoses, applied: r.summary, assembly: s } : { applied: r.summary, assembly: s };
         }
         case 'set_drives': {
           const raw = rawArgs as { drives?: unknown[] };
@@ -289,23 +311,9 @@ export class ToolRuntime {
         case 'inspect_assembly': {
           const { instance_ids } = InspectArgs.parse(rawArgs ?? {});
           const summary = summarize(this.assembly, true);
-          const ids = [...new Set(instance_ids)];
-          const connectorPoses = ids.map((id) => {
-            const instance = this.assembly.instances.find((candidate) => candidate.id === id);
-            if (!instance) throw new Error(`Unknown instance id "${id}"`);
-            const part = this.assembly.parts.find(({ id }) => id === instance.partId);
-            return {
-              instance: id,
-              connectors: part?.connectors.map((connector) => ({
-                id: connector.id,
-                kind: connector.kind,
-                position_m: transformPoint(instance.transform, connector.position).map((value) => +value.toFixed(5)),
-                axis_world: transformDir(instance.transform, connector.axis).map((value) => +value.toFixed(4)),
-              })) ?? [],
-            };
-          });
-          log(true, ids.length ? `Inspected connectors on ${ids.join(', ')}` : 'Inspected');
-          return ids.length ? { connectorPoses, ...summary } : summary;
+          const connectorPoses = connectorPosesFor(this.assembly, instance_ids);
+          log(true, connectorPoses.length ? `Inspected connectors on ${connectorPoses.map(({ instance }) => instance).join(', ')}` : 'Inspected');
+          return connectorPoses.length ? { connectorPoses, ...summary } : summary;
         }
         case 'define_test': {
           const raw = rawArgs as { test?: Record<string, unknown> };

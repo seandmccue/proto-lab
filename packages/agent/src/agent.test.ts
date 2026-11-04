@@ -39,6 +39,32 @@ test('inspect_assembly reports selected connectors in the assembled world pose',
   assert.match(missing.error, /Unknown instance id "missing"/);
 });
 
+test('assemble returns selected world connector poses after the edit in one atomic call', async () => {
+  let assemblyEvents = 0;
+  const rt = new ToolRuntime(baseSpec('Chute alignment'), {
+    onLog: () => {}, onPlan: () => {}, onAssembly: () => { assemblyEvents++; }, onTest: () => {},
+  });
+  const placed = await rt.call('assemble', {
+    ops: [{ op: 'place', id: 'chute', part: 'gravity-chute-160x54', position: [0.1, 0.2, 0.3], rotation_deg: [0, 0, 90] }],
+    rationale: 'Align the outlet to the next chute',
+    inspect_instance_ids: ['chute', 'chute'],
+  }) as { connectorPoses: { instance: string; connectors: { id: string; position_m: number[]; axis_world: number[] }[] }[] };
+  assert.deepEqual(placed.connectorPoses.map(({ instance }) => instance), ['chute']);
+  const exit = placed.connectorPoses[0].connectors.find(({ id }) => id === 'exit');
+  assert.deepEqual(exit?.position_m, [0.098, 0.28, 0.3]);
+  assert.deepEqual(exit?.axis_world, [0, 1, 0]);
+
+  const before = rt.assembly;
+  const rejected = await rt.call('assemble', {
+    ops: [{ op: 'move', id: 'chute', translate: [0, 0.05, 0] }],
+    rationale: 'Raise the chute',
+    inspect_instance_ids: ['missing'],
+  }) as { error: string };
+  assert.equal(rejected.error, 'Unknown instance id "missing"');
+  assert.equal(rt.assembly, before);
+  assert.equal(assemblyEvents, 1);
+});
+
 test('get_part reports exact saved and custom collider geometry and names missing IDs', async () => {
   const savedBeam = generatePart('beam', { length: 0.071 }, 'beam-50');
   const custom = generatePart('beam', { length: 0.083 }, 'custom-beam-7');
