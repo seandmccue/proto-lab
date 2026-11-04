@@ -5,9 +5,7 @@
 /* ProtoLab design tokens — dark engineering instrument theme.
    Legacy names (--paper, --surface, --violet, --lavender, --citron …) are kept as aliases so
    every stylesheet picks up the theme without renaming. New code should use the semantic names. */
-/* The dark set is also the look of the 'stage' surfaces (header bar, hero preview, thumbnail plates) inside the light theme. */
-:root,
-:root[data-theme="light"] :is(.stage-dark, .site-header, .lab-art, .invention-card__preview) {
+:root {
   color-scheme: dark;
   /* channel triples feed Tailwind's opacity modifiers (bg-accent/15); keep the hex twins in sync */
   --bg-rgb: 9 11 15;           --bg: #090b0f;            /* page canvas */
@@ -53,7 +51,6 @@
 }
 /* Light theme: the same instrument-panel language on cool white, like a CAD workspace in daylight. */
 :root[data-theme="light"] {
-  --stage-dots: rgba(255, 255, 255, .13);
   color-scheme: light;
   --bg-rgb: 243 245 248;       --bg: #f3f5f8;
   --bg-elev: #ffffff;
@@ -83,6 +80,39 @@
   --glow: 0 0 0 1px var(--accent-line), 0 0 24px -6px rgba(26, 109, 255, .35);
   --shadow-panel: 0 1px 2px rgba(15, 20, 25, .04), 0 12px 32px -22px rgba(15, 20, 25, .25);
   --shadow-pop: 0 .5rem 1.5rem rgba(15, 20, 25, .18);
+}
+/* Stage surfaces inside the light theme (header bar, hero preview card, thumbnail plates): a mid graphite blue,
+   darker than the page so machines sit on a stage, but well short of the night-mode black. */
+:root[data-theme="light"] :is(.stage-dark, .site-header, .lab-art, .invention-card__preview) {
+  color-scheme: dark;
+  --bg-rgb: 30 38 50;          --bg: #1e2632;
+  --bg-elev: #232c3a;
+  --panel-rgb: 36 45 58;       --panel: #242d3a;
+  --panel-2-rgb: 44 54 69;     --panel-2: #2c3645;
+  --panel-3-rgb: 52 63 80;     --panel-3: #343f50;
+  --line-rgb: 60 72 90;        --line: #3c485a;
+  --line-strong-rgb: 78 92 112; --line-strong: #4e5c70;
+  --ink-rgb: 238 242 247;      --ink: #eef2f7;
+  --ink-2-rgb: 203 211 222;    --ink-2: #cbd3de;
+  --muted-rgb: 158 170 186;    --muted: #9eaaba;
+  --dim-rgb: 114 127 146;      --dim: #727f92;
+  --accent-rgb: 92 151 255;    --accent: #5c97ff;
+  --accent-hi: #86b1ff;
+  --accent-soft: rgba(92, 151, 255, .16);
+  --accent-line: rgba(92, 151, 255, .5);
+  --pass-rgb: 74 222 170;      --pass: #4adeaa;
+  --pass-soft: rgba(74, 222, 170, .14);
+  --warn-rgb: 247 181 72;      --warn: #f7b548;
+  --warn-soft: rgba(247, 181, 72, .14);
+  --fail-rgb: 251 128 146;     --fail: #fb8092;
+  --fail-soft: rgba(251, 128, 146, .14);
+  --viewport-rgb: 34 43 56;    --viewport: #222b38;
+  --on-panel-strong: #fff;
+  --header-bg: rgba(30, 38, 50, .9);
+  --overlay: rgba(30, 38, 50, .82);
+  --stage-dots: rgba(255, 255, 255, .14);
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 12px 32px -20px rgba(0, 0, 0, .7);
+  --shadow-pop: 0 .5rem 1.5rem rgba(0, 0, 0, .45);
 }
 html, body, #root { height: 100%; }
 html { background: var(--bg); }

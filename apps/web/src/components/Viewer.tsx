@@ -30,7 +30,7 @@ export interface ViewerProps {
   seekTo?: number | null;
   autoRotate?: boolean;
   mini?: boolean;
-  stage?: 'dark' | 'light';  // force a stage look regardless of the site theme (dark plates on the light theme)
+  stage?: 'dark' | 'light' | 'stage';  // 'stage' = the themed stage plate (dark on the dark theme, graphite on the light theme)
   zoom?: number;
   strokeTargets?: NonNullable<Extract<TestSpec, { kind: 'motion' }>['measure']['linearTravel']>;
   pathInstanceId?: string;
@@ -286,10 +286,13 @@ function Scene(props: ViewerProps) {
   });
 
   const siteTheme = useTheme();
-  const light = (props.stage ?? siteTheme) === 'light';
-  const stage = light
+  const look = props.stage === 'stage' ? (siteTheme === 'light' ? 'graphite' : 'dark') : (props.stage ?? siteTheme);
+  const light = look === 'light';
+  const stage = look === 'light'
     ? { bg: '#e9edf3', sky: '#ffffff', ground: '#c9d2dd', cell: '#d3dae3', section: '#bcc6d3' }
-    : { bg: '#0d1016', sky: '#dfe7f3', ground: '#0b0d12', cell: '#1b222c', section: '#2c3745' };
+    : look === 'graphite'
+      ? { bg: '#222b38', sky: '#e8eef7', ground: '#141a24', cell: '#2f3a4a', section: '#3f4c60' }
+      : { bg: '#0d1016', sky: '#dfe7f3', ground: '#0b0d12', cell: '#1b222c', section: '#2c3745' };
   const chassis = assembly.parts.find((p) => p.kind === 'body_frame');
   const body = assembly.instances.find((i) => i.id === 'body');
   const upper = assembly.parts.find((p) => p.kind === 'leg_segment');
