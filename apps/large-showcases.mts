@@ -11,6 +11,15 @@ export interface LargeShowcase {
 // Add an entry after reviewing the exact saved Muse assembly and recorded tests.
 export const largeShowcases: readonly LargeShowcase[] = [
   {
+    inventionId: 'inv_a2b991c4bb614ee1',
+    versionId: 'ver_cb8c608abe024f4c',
+    testIds: ['skyline_show#3', 'skyline_extra_clear#3'],
+    baseline: { versionId: 'ver_c4f812abf8f14568', testId: 'skyline_show#1' },
+    componentCount: 60,
+    detail: 'A 1.2 m Ferris wheel with eight colorful open cabins on passive pivots. Watch Muse repair the clearances, then complete 2.5 turns while the cabins stay upright.',
+    showStrokeGuidesInitially: false,
+  },
+  {
     inventionId: 'inv_616e8b95ede04b8d',
     versionId: 'ver_52c54f258ec24abf',
     testIds: ['atlas_12s#1'],
