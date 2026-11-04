@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, Html, Line } from '@react-three/drei';
 import { Component, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
-import type { Assembly, Axis, Instance, Shape, TestResult, TestSpec, Transform } from '@protolab/schema';
+import { linearTravelMetricKey, type Assembly, type Axis, type Instance, type Shape, type TestResult, type TestSpec, type Transform } from '@protolab/schema';
 import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
 import IsoPreview from './IsoPreview.tsx';
 import { diagnosticColors, type DiagnosticTone } from './diagnosticColors.ts';
@@ -144,6 +144,7 @@ function sampleFrame(frames: Frame[], t: number): { a: Frame; b: Frame; k: numbe
 function Scene(props: ViewerProps) {
   const { assembly, visibleInstanceIds, enteringInstanceIds, test, playing, speed = 1, explode, blueprint, selectedId, changedIds, diagnosticHighlights, onSelect, follow = true, cameraLock, cameraBounds, playbackTime, timeRef, onTime, seekTo, autoRotate, mini } = props;
   const groups = useRef<Record<string, THREE.Group>>({});
+  const strokeGroups = useRef<Record<string, THREE.Group>>({});
   const strokeMarkers = useRef<Record<string, THREE.Mesh>>({});
   const pathMarker = useRef<THREE.Mesh>(null);
   const enteredAt = useRef(new Map<string, number>());
@@ -169,24 +170,31 @@ function Scene(props: ViewerProps) {
   const strokes = useMemo(() => {
     if (!test || !props.strokeTargets?.length || explode) return [];
     const offset = THREE.MathUtils.clamp(radius * 0.075, 0.012, 0.034);
-    return props.strokeTargets.flatMap(({ instance, axis }, index) => {
+    return props.strokeTargets.flatMap((check, index) => {
+      const { instance, axis, relativeTo } = check;
       const coordinate = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
-      let first: Transform['position'] | undefined;
+      let first: THREE.Vector3 | undefined;
       let min = Infinity, max = -Infinity;
       for (const frame of test.trace.frames) {
-        const point = frame.bodies[instance]?.position;
-        if (!point) continue;
+        const pose = frame.bodies[instance];
+        if (!pose) continue;
+        const point = vec(pose.position);
+        if (relativeTo) {
+          const reference = frame.bodies[relativeTo];
+          if (!reference) continue;
+          point.sub(vec(reference.position)).applyQuaternion(quat(reference.rotation).invert());
+        }
         first ??= point;
-        min = Math.min(min, point[coordinate]);
-        max = Math.max(max, point[coordinate]);
+        min = Math.min(min, point.getComponent(coordinate));
+        max = Math.max(max, point.getComponent(coordinate));
       }
       if (!first) return [];
-      const from = vec(first).setComponent(coordinate, min);
+      const from = first.setComponent(coordinate, min);
       from.setComponent(coordinate === 0 ? 2 : 0, from.getComponent(coordinate === 0 ? 2 : 0) + offset);
       const to = from.clone().setComponent(coordinate, max);
       const label = to.clone();
       label.y += offset * 0.45;
-      return [{ key: `${instance}:${axis}:${index}`, instance, coordinate, from, to, label, number: index + 1, color: strokeColors[index % strokeColors.length] }];
+      return [{ key: `${linearTravelMetricKey(check)}:${index}`, instance, relativeTo, coordinate, from, to, label, number: index + 1, color: strokeColors[index % strokeColors.length] }];
     });
   }, [test, props.strokeTargets, radius, explode]);
   const path = useMemo(() => {
@@ -273,7 +281,17 @@ function Scene(props: ViewerProps) {
       const marker = strokeMarkers.current[stroke.key];
       const tracked = groups.current[stroke.instance];
       if (!marker || !tracked) continue;
-      marker.position.copy(stroke.from).setComponent(stroke.coordinate, tracked.position.getComponent(stroke.coordinate));
+      let coordinate = tracked.position.getComponent(stroke.coordinate);
+      if (stroke.relativeTo) {
+        const reference = groups.current[stroke.relativeTo];
+        const guide = strokeGroups.current[stroke.key];
+        if (!reference || !guide) continue;
+        guide.position.copy(reference.position);
+        guide.quaternion.copy(reference.quaternion);
+        coordinate = marker.position.copy(tracked.position).sub(reference.position)
+          .applyQuaternion(reference.quaternion.clone().invert()).getComponent(stroke.coordinate);
+      }
+      marker.position.copy(stroke.from).setComponent(stroke.coordinate, coordinate);
     }
     const tracedPart = props.pathInstanceId && groups.current[props.pathInstanceId];
     if (pathMarker.current && tracedPart) pathMarker.current.position.copy(tracedPart.position);
@@ -310,7 +328,7 @@ function Scene(props: ViewerProps) {
         })}
       </group>
       {strokes.map((stroke) => (
-        <group key={stroke.key}>
+        <group key={stroke.key} ref={(node) => { if (node) strokeGroups.current[stroke.key] = node; else delete strokeGroups.current[stroke.key]; }}>
           <Line points={[stroke.from, stroke.to]} color={stroke.color} lineWidth={3} depthTest={false} raycast={ignoreRaycast} />
           {[stroke.from, stroke.to].map((point, i) => (
             <mesh key={i} position={point} renderOrder={8} raycast={ignoreRaycast}>
@@ -378,12 +396,14 @@ export default function Viewer(props: ViewerProps) {
     return () => timers.forEach(clearTimeout);
   }, []);
   if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-slate-100"} />;
-  const measuredStrokes = props.explode ? [] : props.strokeTargets?.flatMap(({ instance, axis, minTravel_m }, index) => {
-    const travel = props.test?.metrics[`${instance}.travel_${axis}_m`];
+  const measuredStrokes = props.explode ? [] : props.strokeTargets?.flatMap((check, index) => {
+    const { instance, axis, relativeTo, minTravel_m } = check;
+    const travel = props.test?.metrics[linearTravelMetricKey(check)];
     if (travel === undefined) return [];
     const part = instance.replace(/_/g, ' ');
     const label = part.charAt(0).toUpperCase() + part.slice(1);
-    const axisLabel = props.strokeTargets?.some((other) => other.instance === instance && other.axis !== axis) ? ` · ${axis.toUpperCase()}` : '';
+    const axisLabel = relativeTo ? ` · ${relativeTo.replace(/[_-]+/g, ' ')} local ${axis.toUpperCase()}`
+      : props.strokeTargets?.some((other) => other.instance === instance && other.axis !== axis) ? ` · ${axis.toUpperCase()}` : '';
     return [{ number: index + 1, part: label + axisLabel, travel, target: minTravel_m, color: strokeColors[index % strokeColors.length] }];
   }) ?? [];
   const previewProps = { assembly: props.assembly, trace: props.test?.trace, playing: props.playing, speed: props.speed, seekTo: props.playbackTime ?? props.seekTo, onTime: props.onTime, diagnosticHighlights: props.diagnosticHighlights };

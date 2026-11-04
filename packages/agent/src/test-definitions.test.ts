@@ -51,7 +51,7 @@ async function mockBuild(rounds: Call[][], input: Partial<AgentInput> = {}) {
       prompt: 'Verify both balls finish in their cups.', inventionId: 'sorter',
       newVersionId: () => `sorter-v${++nextVersion}`,
       model: { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 512, timeoutMs: 3000 },
-      specialist: null, ...input,
+      specialist: null, reviewModel: null, ...input,
     }, (event) => events.push(event));
     return { result, prompts, events };
   } finally {

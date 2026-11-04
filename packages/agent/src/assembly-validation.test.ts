@@ -76,8 +76,8 @@ async function runScriptedBuild(prompt: string, replies: ModelCall[][]) {
     const result = await runAgent({
       prompt, inventionId: 'inv_integrity',
       model: { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 256, timeoutMs: 5000 },
-      specialist: null, maxIterations: 1, newVersionId: () => `ver_integrity_${++sequence}`,
-    }, event => events.push(event));
+      specialist: null, reviewModel: null, maxIterations: 1, newVersionId: () => `ver_integrity_${++sequence}`,
+    }, event => events.push(structuredClone(event)));
     return { result, requests, events };
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -176,9 +176,12 @@ test('Muse repairs a blocked revision in the same build and keeps its earlier pa
   assert(feedback?.content, 'Muse must receive the reason for the blocked test');
   assertUnsupportedTrim(JSON.parse(feedback.content).assemblyChecks);
   assert.equal(events.filter(event => event.type === 'test_start').length, 2);
-  assert.equal(events.filter(event => event.type === 'version').length, 2);
   assert.equal(result.versions.length, 2);
   const [original, version] = result.versions;
+  const saved = events.flatMap(event => event.type === 'version' ? [event.version] : []);
+  assert.deepEqual(saved.map(({ id }) => id), [original.id, version.id, version.id]);
+  assert.deepEqual(saved[2].tests, saved[1].tests);
+  assert.equal(saved[2].toolLog.at(-1)?.tool, 'finalize_design');
   assert.equal(original.status, 'passed');
   assert.equal(original.iteration, 1);
   assert.deepEqual(original.assembly.instances.map(part => part.id), ['tower', 'motor', 'rotor']);

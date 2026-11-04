@@ -157,7 +157,7 @@ test('a live follow-up edits the saved assembly, reuses authored parts and recor
       prompt: parent.prompt, inventionId: 'new-invention', parent, changeRequest: 'Raise the support by 10 mm',
       startIteration: 4, newVersionId: () => `new-v${++n}`,
       model: { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 },
-      specialist: null,
+      specialist: null, reviewModel: null,
     }, (event) => events.push(event));
     assert.match(system, /exact copy of saved assembly v4/);
     assert.deepEqual(events.filter((event) => event.type === 'tool' && !event.entry.ok), []);
@@ -240,7 +240,7 @@ test('a failed setup call skips dependent calls in its reply and a corrected bat
       prompt: 'Raise a spinning wheel', inventionId: 'batch-guard',
       newVersionId: () => `batch-version-${++count}`,
       model: { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 64, timeoutMs: 5000 },
-      specialist: null,
+      specialist: null, reviewModel: null,
     }, (event) => events.push(event));
 
     assert.equal(hits, 3);
@@ -502,7 +502,7 @@ test('a batched reply stops at the first failed tool call; later calls are repor
   const port = (server.address() as { port: number }).port;
   try {
     const model = { baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 256, timeoutMs: 5000 };
-    await runAgent({ prompt: 'test', inventionId: 'inv_t', model, specialist: null, maxIterations: 1, newVersionId: () => 'ver_t' }, () => {});
+    await runAgent({ prompt: 'test', inventionId: 'inv_t', model, specialist: null, reviewModel: null, maxIterations: 1, newVersionId: () => 'ver_t' }, () => {});
     const second = bodies[1]; assert.ok(second, 'the model was asked again after the batch');
     const toolMsgs = second.messages.filter((m) => m.role === 'tool');
     const assembleMsg = toolMsgs.find((m) => m.tool_call_id === 'a1'); const drivesMsg = toolMsgs.find((m) => m.tool_call_id === 'd1');

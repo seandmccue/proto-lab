@@ -6,7 +6,7 @@ import GalleryCard from '../components/GalleryCard.tsx';
 import PartInventory from '../components/PartInventory.tsx';
 import Viewer from '../components/Viewer.tsx';
 import { api, fmt, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
-import type { TestSpec, VersionRecord } from '@protolab/schema';
+import { linearTravelMetricKey, type TestSpec, type VersionRecord } from '@protolab/schema';
 import { largeShowcases } from '../../../large-showcases.mts';
 
 const steps = [
@@ -26,8 +26,8 @@ const marbleRepairId = 'inv_437c3b45e27d4138';
 const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal', 'inv_geneva_indexer', 'inv_marble_elevator'];
 
 function penPathSize(test: TestSummary | null | undefined) {
-  const width = test?.metrics['pen_tip.travel_x_m'];
-  const height = test?.metrics['pen_tip.travel_y_m'];
+  const width = test?.metrics[linearTravelMetricKey({ instance: 'pen_tip', axis: 'x' })];
+  const height = test?.metrics[linearTravelMetricKey({ instance: 'pen_tip', axis: 'y' })];
   return width !== undefined && height !== undefined && Number.isFinite(width) && Number.isFinite(height)
     ? `${(width * 1000).toFixed(1)} × ${(height * 1000).toFixed(1)} mm`
     : null;

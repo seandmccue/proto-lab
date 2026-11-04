@@ -239,6 +239,7 @@ export const TestSpec = z.discriminatedUnion('kind', [
         instance: z.string().min(1),
         axis: Axis,
         minTravel_m: z.number().positive(),
+        relativeTo: z.string().min(1).optional(),           // axis in this instance's moving frame, otherwise world axis
       })).max(80).optional(),
       synchronizedTravel: z.object({
         instances: z.array(z.string().min(1)).min(2).max(16),
@@ -309,6 +310,12 @@ export const TestSpec = z.discriminatedUnion('kind', [
   }),
 ]);
 export type TestSpec = z.infer<typeof TestSpec>;
+
+export function linearTravelMetricKey({ instance, axis, relativeTo }: { instance: string; axis: Axis; relativeTo?: string }): string {
+  const subject = relativeTo === undefined ? instance : `${instance}.relativeTo.${relativeTo}`;
+  return `${subject}.travel_${axis}_m`;
+}
+
 export const TestKind = z.enum(['motion', 'walk', 'launch', 'grip', 'dance']);
 
 export const TraceFrame = z.object({ t: z.number(), bodies: z.record(Transform), joints: z.record(z.number()).default({}) });

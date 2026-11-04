@@ -6,7 +6,7 @@ import IndexedMotionEvidence from './IndexedMotionEvidence.tsx';
 import ReceiverReplayEvidence, { replayReceiverTargets } from './ReceiverReplayEvidence.tsx';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { tiltDeg } from '@protolab/parts';
-import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
+import { linearTravelMetricKey, type Assembly, type TestResult, type TestSpec, type VersionRecord } from '@protolab/schema';
 import { api, fmt, type JobEvent } from '../api.ts';
 import { keyMetric, recordedTestSpec } from './BuildProgress.tsx';
 import type { DiagnosticTone } from './diagnosticColors.ts';
@@ -26,23 +26,28 @@ function travelComparison(
   definitions: [TestSpec | undefined, TestSpec | undefined],
 ) {
   const tests = [before, after] as const;
-  const minima = definitions.map((definition) => new Map(
+  const targets = definitions.map((definition) => new Map(
     definition?.kind === 'motion'
-      ? definition.measure.linearTravel?.map(({ instance, axis, minTravel_m }) => [`${instance}.travel_${axis}_m`, minTravel_m])
+      ? definition.measure.linearTravel?.map((check) => [linearTravelMetricKey(check), check])
       : undefined,
   ));
+  const nameOf = (id: string) => (versions[1].assembly.instances.find((part) => part.id === id)
+    ?? versions[0].assembly.instances.find((part) => part.id === id))?.label || id.replace(/[_-]+/g, ' ');
   const keys = new Set([...Object.keys(before.metrics), ...Object.keys(after.metrics)]);
   return [...keys].flatMap((key) => {
     const match = /^(.+)\.travel_([xyz])_m$/.exec(key);
     if (!match) return [];
-    const [, instance, axis] = match;
-    const part = versions[1].assembly.instances.find(({ id }) => id === instance)
-      ?? versions[0].assembly.instances.find(({ id }) => id === instance);
-    const name = part?.label || instance.replace(/[_-]+/g, ' ');
+    const check = targets[1].get(key) ?? targets[0].get(key);
+    const fallbackSubject = match[1];
+    const knownWorldSubject = versions.some(({ assembly }) => assembly.instances.some(({ id }) => id === fallbackSubject));
+    const [fallbackInstance, fallbackReference] = knownWorldSubject ? [fallbackSubject] : fallbackSubject.split('.relativeTo.', 2);
+    const { instance, axis, relativeTo } = check ?? { instance: fallbackInstance, axis: match[2], relativeTo: fallbackReference };
+    const name = nameOf(instance);
+    const direction = relativeTo ? `relative to ${nameOf(relativeTo)} (local ${axis.toUpperCase()})` : `${axis.toUpperCase()} axis`;
     return [{
       key,
-      label: `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${axis.toUpperCase()} axis`,
-      readings: tests.map((test, index) => ({ value: test.metrics[key], minimum: minima[index].get(key) })),
+      label: `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${direction}`,
+      readings: tests.map((test, index) => ({ value: test.metrics[key], minimum: targets[index].get(key)?.minTravel_m })),
     }];
   });
 }
