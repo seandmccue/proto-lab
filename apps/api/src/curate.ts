@@ -10,8 +10,13 @@ export function curateLargeShowcases(db: DatabaseSync, store: ObjectStore, entri
       AND v.status='passed' AND v.model_id LIKE 'muse-%'
       AND NOT EXISTS (SELECT 1 FROM jobs WHERE invention_id=i.id AND status IN ('queued', 'running'))`);
   const feature = db.prepare('UPDATE inventions SET featured=1 WHERE id=? AND current_version_id=? AND featured=0');
+  const unfeature = db.prepare('UPDATE inventions SET featured=0 WHERE id=? AND featured=1');
   let changed = 0;
   for (const entry of entries) {
+    if (entry.featured === false) {
+      changed += Number(unfeature.run(entry.inventionId).changes);
+      continue;
+    }
     const row = select.get(entry.inventionId, entry.versionId) as { manifest_key: string; model_id: string } | undefined;
     if (!row) continue;
     let manifest: unknown;

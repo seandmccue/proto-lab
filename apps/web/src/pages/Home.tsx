@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Header, { useModelInfo } from '../components/Header.tsx';
 import { keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
@@ -9,6 +9,7 @@ import Viewer from '../components/Viewer.tsx';
 import { api, fmt, isRetired, RETIRED_EXAMPLE_IDS, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
 import { linearTravelMetricKey, type TestSpec, type VersionRecord } from '@protolab/schema';
 import { largeShowcases } from '../../../large-showcases.mts';
+import { prepareBuild } from '../buildRequests.ts';
 
 const crabId = 'inv_633b4887ad7f4cdc';
 const drawingReferenceId = 'inv_drawing_automaton';
@@ -19,6 +20,7 @@ const lotusId = 'inv_ba7b3c7716564397';
 const genevaRepairId = 'inv_b99f505fab294915';
 const marbleRepairId = 'inv_437c3b45e27d4138';
 const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal', 'inv_geneva_indexer', 'inv_marble_elevator'];
+const unfeaturedShowcaseIds = new Set(largeShowcases.filter((entry) => entry.featured === false).map((entry) => entry.inventionId));
 
 function penPathSize(test: TestSummary | null | undefined) {
   const width = test?.metrics[linearTravelMetricKey({ instance: 'pen_tip', axis: 'x' })];
@@ -32,12 +34,20 @@ export default function Home() {
   const nav = useNavigate();
   const model = useModelInfo();
   const [prompt, setPrompt] = useState('');
+  const promptInput = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const input = promptInput.current;
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+  }, [prompt]);
   const [examples, setExamples] = useState<Example[]>([]);
   const [featured, setFeatured] = useState<InventionPublic[]>([]);
   const [recent, setRecent] = useState<InventionPublic[]>([]);
   const [remixes, setRemixes] = useState<InventionPublic[]>([]);
   const [mine, setMine] = useState<InventionPublic[]>([]);
   const [busy, setBusy] = useState(false);
+  const starting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [crab, setCrab] = useState<InventionDetail | null>(null);
   const [heroVersion, setHeroVersion] = useState<VersionRecord | null>(null);
@@ -106,10 +116,10 @@ export default function Home() {
           cursor = page.nextCursor;
         }
       } finally {
-        if (!cancelled) setFeatured([...items.values()].filter((item) => !isRetired(item)));
+        if (!cancelled) setFeatured([...items.values()].filter((item) => !isRetired(item) && !unfeaturedShowcaseIds.has(item.id)));
       }
     }
-    api.examples().then((r) => setExamples(r.examples.filter((ex) => !RETIRED_EXAMPLE_IDS.has(ex.id)))).catch(() => {});
+    api.examples().then((r) => setExamples(r.examples.filter((ex) => !RETIRED_EXAMPLE_IDS.has(ex.id)).slice(0, 8))).catch(() => {});
     void loadFeatured().catch(() => {});
     api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured && !isRetired(i)))).catch(() => {});
     api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
@@ -207,12 +217,15 @@ export default function Home() {
   const stageVersion = slideItem ? slideVersion : activeVersion;
   const stageTest = slideItem ? slideTest : activeTest;
 
-  const start = async (body: { prompt?: string; exampleId?: string }) => {
+  const start = (body: { prompt?: string; exampleId?: string }) => {
+    if (starting.current) return;
+    starting.current = true;
     setBusy(true); setError(null);
-    try { const r = await api.create(body); nav(`/i/${r.inventionId}?job=${r.jobId}`); }
-    catch (e) { setError((e as Error).message); setBusy(false); }
+    try { nav(`/build/${prepareBuild(body)}`); }
+    catch (e) { setError((e as Error).message); setBusy(false); starting.current = false; }
   };
   const submit = (e: FormEvent) => { e.preventDefault(); if (prompt.trim().length >= 3) void start({ prompt: prompt.trim() }); };
+  const selectedExample = examples.find((example) => example.prompt === prompt);
 
   return (
     <div className="home-page min-h-full">
@@ -228,23 +241,24 @@ export default function Home() {
             <form onSubmit={submit} className="lab-form">
               <label htmlFor="invention-prompt" className="lab-label">Describe your prototype</label>
               <div className="lab-input">
-                <input id="invention-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Build a mechanical crab that scuttles sideways…" maxLength={600} aria-describedby="invention-scope" />
+                <textarea ref={promptInput} id="invention-prompt" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Build a colorful windmill with four spinning blades…" maxLength={600} aria-describedby="invention-scope" />
                 <button type="submit" className="btn-primary" disabled={busy || prompt.trim().length < 3}>
                   {busy ? 'Starting…' : 'Build live'} <span aria-hidden="true">↗</span>
                 </button>
               </div>
-              <p id="invention-scope">Tell Muse what to build and how it should move.</p>
+              <p id="invention-scope">{selectedExample?.blurb ?? 'Tell Muse what to build and how it should move. Watch its parts, assembly, and tests live.'}</p>
             </form>
             {error && <p className="mt-2 text-sm text-fail" role="alert">{error}</p>}
             {examples.length > 0 && <div className="lab-examples">
-              <span className="lab-label">Try a brief</span>
+              <span className="lab-label">Try a moving prototype</span>
               <div className="lab-chips">
                 {examples.map((ex) => (
-                  <button key={ex.id} onClick={() => { setPrompt(ex.prompt); document.getElementById('invention-prompt')?.focus(); }} disabled={busy} className="chip" title={ex.prompt}>
+                  <button key={ex.id} type="button" onClick={() => { setPrompt(ex.prompt); setError(null); document.getElementById('invention-prompt')?.focus(); }} disabled={busy} aria-pressed={selectedExample?.id === ex.id} className="chip" title={ex.prompt}>
                     {ex.title}
                   </button>
                 ))}
               </div>
+              <p className="lab-example-hint">Pick an idea, edit the brief, then select Build live.</p>
             </div>}
             <div className="lab-hero-links">
               <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
