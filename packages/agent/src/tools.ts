@@ -1,7 +1,8 @@
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
-import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, ParamError, shapeVolume, piecesBoundingRadius, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
-import { runTest, auditCompoundGeometry, auditPartGeometry, type CompoundGeometryIssue } from '@protolab/simulator';
+import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, Euler, ParamError, shapeVolume, piecesBoundingRadius, piecesVerticalExtent, quatFromEuler, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
+import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegrity, auditSampledRotorClearance, motorizedPropellerControls, type AssemblyIntegrityIssue, type CompoundGeometryIssue } from '@protolab/simulator';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
 
@@ -71,6 +72,7 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: 'assemble', description: 'Apply structured assembly operations to the current design (atomic: all or nothing; on error the failing op index and reason are returned and nothing changes). Ops: {op:"place", id, part, position:[x,y,z], rotation_deg?:[x,y,z], anchored?, free?} · {op:"mount", id, part, onto:<instance>, connector:<parent connector>, via?:<child connector>, joint:"fixed"|"revolute"|"prismatic"|"free", spin_deg?, offset_m?, limits?:[min,max], contact?:true, motor?:{controlId, stiffness, damping}} (places the child so the two connectors coincide and face each other; joint axis = parent connector axis; contact:true enables collisions and keeps the joint, useful for a pin that drives a slotted wheel; joint:"free" sets a payload or projectile down with no joint) · {op:"connect", a, a_connector, b, b_connector, joint:"revolute"|"prismatic"|"fixed"|"spring", motor?, spring?} (connectors must already touch, ≤ 20 mm) · {op:"bridge", id, part, a, a_connector, via_a, b, b_connector, via_b} (fits a new rigid link between two already placed parts and adds two passive revolute joints; via_a/via_b are the new link’s pivots; endpoint spacing must match within 0.5 mm) · {op:"pattern", instances:[ids], kind:"mirror"|"polar"|"linear", plane?:"xy"|"yz"|"xz", axis?:"x"|"y"|"z", center?, count?, step?} (copies instances, joints, drives) · {op:"remove", id} · {op:"move", id, position?, rotation_deg?, translate?} (moving an instance carries everything mounted on it). Ground is y = 0; +Y is up. Use anchored:true for bases fixed to the ground, free:true on place enables contact with other bodies. For a guided cam follower, place it with free:true, then connect its slide to the guide with a passive prismatic joint. Keep unrelated parts clear of the follower. Add inspect_instance_ids for up to four instances to return their connector positions and axes after the edit in the same call.', parameters: { type: 'object', properties: { ops: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string', description: 'What this builds or changes and why, in one or two sentences for the user' }, based_on: { type: 'string', description: 'Test id and measurement this change responds to, if any' }, inspect_instance_ids: { type: 'array', items: { type: 'string' }, maxItems: 4 } }, required: ['ops', 'rationale'] } },
   { name: 'set_drives', description: 'Set motor drives for motorised joints (by controlId). Each: {controlId, mode:"position"|"velocity", rampIn_s?, profile}. Profiles: {kind:"constant", value} · {kind:"sine", amplitude, offset?, frequency_hz, phase?} · {kind:"ramp", from, to, start_s?, duration_s} · {kind:"step", before, after, at_s} · {kind:"gait", role:"swing"|"lift", amplitude, offset?, frequency_hz, phase?, swingDuty?} for legged locomotion. Position values are radians (revolute) or metres (prismatic); velocity values rad/s or m/s. Replaces drives with the same controlId.', parameters: { type: 'object', properties: { drives: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string' }, based_on: { type: 'string' } }, required: ['drives'] } },
   { name: 'inspect_assembly', description: 'Current assembly: world positions in metres, localY_world (part-local +Y in world coordinates), part masses, joint axes and their anchor points in the assembled pose, motors, drives, and lowest point. For passive leveling, check the tray’s local +Y and center the suspended mass below both pivot axes. For closed linkages, request instance_ids to see those parts’ world connector positions and axes before connecting the final joints.', parameters: { type: 'object', properties: { instance_ids: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Optional instance IDs whose connector poses to include' } } } },
+  { name: 'validate_assembly', description: 'Check the current assembly before simulation: grounded supports, real fixed connections, and detached parts. Returns issue instance IDs, measured gaps, repair suggestions and world connector poses. Repairs must keep requested parts and test targets; mount supported parts or add visible material bridges, never hide a problem with free/anchored/decor flags. Does not spend simulation budget or modify the design.', parameters: { type: 'object', properties: {} } },
   { name: 'define_test', description: 'Define a measurable test (step 7). Motion: {kind:"motion", id, duration_s, measure:{joints:[controlIds], base?:<instance>, clearancePairs:[[a,b]], noGroundContact:[ids], uprightInstances?:[ids], jointSwing?:[{joint:<motorized revolute controlId>,minEachWay_rad}], linearTravel?:[{instance:<instance id>,axis:"x"|"y"|"z",minTravel_m}], synchronizedTravel?:{instances:[<instance ids>],axis:"x"|"y"|"z",minTravel_m,maxSpread_m}, endIn?:{instance:<payload id>,receiver:<catcher id>,centerOffset_m?:[x,y,z],halfExtents_m:[x,y,z],minHold_s} or [2–8 such receiver checks], indexedMotion?:{input:<powered revolute controlId>,body:<output marker instance>,center:<axle instance>,plane:"xy"|"xz"|"yz",minSteps,step_deg,stepTolerance_deg,minDwell_s,maxDwellDrift_deg}, followerTiming?:{shaft:<motorized revolute controlId>,followers:[<2–6 different instance ids>],axis:"x"|"y"|"z",minCycles:<integer>,minStroke_m,minLowDwell_s?,minPhaseGap_deg,maxPhaseGap_deg?}, orbits?:[{body:<instance id>,center:<instance id>,plane:"xy"|"xz"|"yz",reference?:<instance id>|{from:<instance id>,to:<instance id>},minTurns,direction?:"positive"|"negative",minRadius_m?,maxRadius_m?}], payload?:{instance:<load id>,holder?:<hook id>}}, criteria:{minJointAmplitude_rad?, minJointRate_rad_s?, minRevolutions?, maxBaseTilt_deg?, maxBaseDrift_m?, maxInstanceTilt_deg?, minPayloadLift_m?, maxPayloadSeparation_m?, maxPayloadReturnError_m?, torqueWithinRating}}. Joint swing checks that a revolute joint reaches both sides of its rest position. Linear travel measures peak-to-peak displacement along a world axis and can measure passive pistons or sliders. Synchronized travel requires every listed part to move at least minTravel_m and limits the largest same-time difference in displacement from each part’s start to maxSpread_m. End-in checks that the tracked instance center finishes inside a box defined in the receiver’s local coordinates and stays there for minHold_s. With an array every receiver check must pass in the same run. Inset the box from the walls if the whole payload must fit. Indexed motion checks repeated same-direction steps, one per input revolution, with measured output dwell while the input keeps moving. Put the output marker away from the axle. Follower timing skips the first shaft turn, then checks each complete turn for each stroke, optional contiguous low dwell within 1 mm of the low point, and the angular spacing of adjacent peaks. For three or more outputs, set both phase bounds to verify every neighboring peak gap across the full circle. Allow enough time for the requested complete turns plus the first turn and motor ramp. Orbit targets measure net turns from sampled body positions relative to a moving center. Use a reference direction between two bodies when a nested orbit should be measured in the rotating frame. Radius targets check the full sampled path. Instance tilt is relative to world up throughout the run. Lift is peak rise from the starting payload height; retention uses maximum load-to-holder distance; return error is final distance from starting height. Motion also reports <joint>.cycles_hz. Other tests: {kind:"walk", id, duration_s, base, minDistance_m, maxTilt_deg, direction, signed?:false} (either direction counts unless signed:true) · {kind:"launch", id, duration_s, projectile:<free instance>, targetDistance_m, tolerance_m, direction} · {kind:"grip", id, duration_s, payload:<free instance>, holder:<instance>, supportUntil_s, maxSeparation_m}.', parameters: { type: 'object', properties: { test: { type: 'object' } }, required: ['test'] } },
   { name: 'run_test', description: 'Run a defined test on the current assembly in the rigid-body simulator. Returns measured metrics, failure reasons and notes. Failed receiver checks also include sampled payload positions (time in seconds, world XYZ in metres) to help locate a missed transfer. Creates a version.', parameters: { type: 'object', properties: { test_id: { type: 'string' } }, required: ['test_id'] } },
   { name: 'sweep_drive', description: 'Exploration (no version, no test budget): vary one drive field over a list of values and compare measured results. Indexed motion always uses the full recorded test duration and reports the qualifying step count. Apply a winning setting and use run_test to save evidence.', parameters: { type: 'object', properties: { test_id: { type: 'string' }, controlId: { type: 'string' }, field: { type: 'string', enum: ['amplitude', 'frequency_hz', 'value', 'offset'] }, values: { type: 'array', items: { type: 'number' } }, duration_s: { type: 'number' } }, required: ['test_id', 'controlId', 'field', 'values'] } },
@@ -92,9 +94,10 @@ function normaliseOp(o: unknown): unknown {
   const alias = (from: string, to: string) => { if (x[to] === undefined && x[from] !== undefined) { x[to] = x[from]; } if (from !== to) delete x[from]; };
   if (typeof x.type === 'string' && x.op === undefined) { x.op = x.type; delete x.type; }
   // No op at all: infer it from the fields present.
-  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; }
+  if (x.op === undefined) { if (x.onto !== undefined || x.parent !== undefined || x.on !== undefined) x.op = 'mount'; else if (x.a !== undefined && x.b !== undefined) x.op = 'connect'; else if (x.instances !== undefined || x.kind === 'mirror' || x.kind === 'polar') x.op = 'pattern'; else if (x.translate !== undefined && x.part === undefined) x.op = 'move'; else if (x.part !== undefined) x.op = 'place'; else if (typeof x.id === 'string' && Object.keys(x).every((k) => k === 'id' || k === 'rationale' || k === 'reason')) x.op = 'remove'; } // an op that names only an instance can only mean remove
   if (typeof x.action === 'string' && x.op === undefined) { x.op = x.action; delete x.action; }
   if (x.op === 'add' || x.op === 'create' || x.op === 'spawn') x.op = 'place';
+  if (x.op === 'delete' || x.op === 'drop' || x.op === 'detach' || x.op === 'unmount') x.op = 'remove';
   if (x.op === 'attach' || x.op === 'join') x.op = x.onto || x.parent ? 'mount' : 'connect';
   alias('partId', 'part'); alias('part_id', 'part'); alias('instance', 'id'); alias('instanceId', 'id'); alias('name', 'id'); alias('instance_id', 'id');
   alias('at', 'position'); alias('pos', 'position'); alias('translation', 'position'); alias('rotation', 'rotation_deg'); alias('rotation_euler_deg', 'rotation_deg'); alias('euler_deg', 'rotation_deg');
@@ -174,16 +177,20 @@ export class ToolRuntime {
   private savedParts = new Map<string, PartDefinition>();
   tests: TestResult[] = [];
   testSpecs = new Map<string, TestSpec>();
-  private testEvidence = new Map<string, { spec: TestSpec; result: TestResult }>();
+  private testEvidence = new Map<string, { spec: TestSpec; result: TestResult; geometry: string }>();
+  private referenceTestSpecs = new Map<string, TestSpec>();
   private lastTestedAssembly: Assembly | null = null;
   private geometryChecks = new WeakMap<Assembly, Promise<CompoundGeometryIssue[]>>();
+  private assemblyChecks = new WeakMap<Assembly, Promise<AssemblyIntegrityIssue[]>>();
+  validationFailures = 0;
   testCount = 0; sweeps = 0; calls = 0;
   finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
   private events: ToolEvents;
   budget: { maxTests: number; maxToolCalls: number };
-  constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 9, maxToolCalls: 60 }, savedAssembly?: Assembly) {
+  constructor(spec: Spec, events: ToolEvents, budget = { maxTests: 9, maxToolCalls: 60 }, savedAssembly?: Assembly, inheritedDefinitions: TestSpec[] = []) {
     this.spec = spec;
     this.events = events;
+    for (const test of inheritedDefinitions) this.referenceTestSpecs.set(test.id, structuredClone(test));
     this.budget = budget;
     this.assembly = savedAssembly ? structuredClone(savedAssembly) : emptyAssembly();
     for (const part of this.assembly.parts) {
@@ -205,13 +212,66 @@ export class ToolRuntime {
 
   pendingChecks(): string[] {
     if (!this.tests.length) return ['No simulation test has run'];
+    const geometry = this.geometrySignature();
     const pending = [...this.testSpecs].flatMap(([id, spec]) => {
       const evidence = this.testEvidence.get(id);
       if (!evidence || evidence.spec !== spec) return [`${id}: current criteria have not been tested`];
+      if (evidence.geometry !== geometry) return [`${id}: assembly geometry changed; rerun the original test`];
       return evidence.result.passed ? [] : [`${id}: latest test failed`];
     });
+    for (const control of motorizedPropellerControls(this.assembly)) {
+      const hasTarget = [...this.testSpecs.values()].some((test) => test.kind === 'motion' && (
+        (test.measure.joints.includes(control) && [test.criteria.minRevolutions, test.criteria.minJointRate_rad_s,
+          test.criteria.minJointAmplitude_rad].some((minimum) => minimum !== undefined && minimum > 0))
+        || test.measure.jointSwing?.some((swing) => swing.joint === control && swing.minEachWay_rad > 0)
+      ));
+      if (!hasTarget) pending.push(`${control}: no quantified rotor motion target. Define an additional test with the original brief's minimum revolutions, rate or swing and run it. Torque, stability and clearance alone do not verify the requested rotation; keep the existing test unchanged`);
+    }
     if (this.lastTestedAssembly !== this.assembly) pending.push('The latest assembly or drive settings have not been tested');
     return pending;
+  }
+
+  private geometrySignature() {
+    const { instances, parts, joints } = this.assembly;
+    return JSON.stringify({ instances, parts, joints });
+  }
+
+  private async inspectIntegrity() {
+    let audit = this.assemblyChecks.get(this.assembly);
+    if (!audit) {
+      audit = auditAssemblyIntegrity(this.assembly);
+      this.assemblyChecks.set(this.assembly, audit);
+    }
+    const issues = await audit;
+    const ids = [...new Set(issues.flatMap((issue) => [...issue.instanceIds, ...(issue.nearestInstanceId ? [issue.nearestInstanceId] : [])]))].slice(0, 6);
+    if (!issues.length) this.validationFailures = 0;
+    return { passed: issues.length === 0, issues, ...(ids.length ? { connectorPoses: connectorPosesFor(this.assembly, ids) } : {}) };
+  }
+
+  /** Observe elevated members of grounded mechanisms; floor supports and loose payloads are intentional contacts. */
+  private automaticGroundChecks(test: TestSpec): string[] {
+    if (test.kind !== 'motion') return [];
+    const floor = new Map<string, number>();
+    for (const instance of this.assembly.instances) {
+      const part = this.assembly.parts.find(({ id }) => id === instance.partId);
+      const pieces = part?.geometry.filter((piece) => piece.collide && piece.role !== 'decor' && piece.role !== 'fastener') ?? [];
+      if (pieces.length) floor.set(instance.id, piecesVerticalExtent(pieces, instance.transform)[0]);
+    }
+    const supported = new Set(this.assembly.instances.filter((instance) =>
+      instance.anchored || (!instance.free && (floor.get(instance.id) ?? Infinity) <= 0.01)).map(({ id }) => id));
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const joint of this.assembly.joints) {
+        const a = joint.a.instanceId, b = joint.b.instanceId;
+        if (supported.has(a) === supported.has(b)) continue;
+        supported.add(a); supported.add(b); changed = true;
+      }
+    }
+    return this.assembly.instances.filter((instance) => {
+      if (!supported.has(instance.id)) return false;
+      return (floor.get(instance.id) ?? -Infinity) > 0.01;
+    }).map(({ id }) => id);
   }
 
   private async runCheckedTest(test: TestSpec, controller?: Assembly['controller']): Promise<TestResult> {
@@ -221,12 +281,25 @@ export class ToolRuntime {
       this.geometryChecks.set(this.assembly, audit);
     }
     const issues = await audit;
-    const result = await runTest(this.assembly, { env: this.spec.environment, test, controller });
+    const result = await runTest(this.assembly, { env: this.spec.environment, test, controller, additionalNoGroundContact: this.automaticGroundChecks(test) });
+    result.metrics.assemblyIntegrityIssues = 0;
     result.metrics.disconnectedGeometryParts = issues.length;
     if (issues.length) {
       result.passed = false;
       result.failureReasons.push(...issues.map(disconnectedGeometryMessage));
     }
+    const clearance = await auditSampledRotorClearance(this.assembly, result.trace);
+    result.metrics.sampledRotorClearancePairs = clearance.pairsChecked;
+    result.metrics.sampledRotorClearanceFrames = clearance.samplesChecked;
+    result.metrics.sampledRotorClearanceViolations = clearance.issues.length;
+    result.metrics.sampledRotorClearanceComplete = Number(clearance.complete);
+    if (!clearance.complete || clearance.issues.length) {
+      result.passed = false;
+      if (!clearance.complete) result.failureReasons.push(`Automatic rotor clearance could not be verified: ${clearance.failureReason ?? 'incomplete geometry check'}`);
+      result.failureReasons.push(...clearance.issues.map(({ rotorId, obstacleId, time_s, penetration_m }) =>
+        `Rotor clearance: ${rotorId} intersects ${obstacleId} by ${(penetration_m * 1000).toFixed(2)} mm at ${time_s.toFixed(3)} s. Inspect their geometry and move or reshape the casing, vane or support to clear the blade sweep; preserve the requested components and original test targets.`));
+    }
+    if (clearance.pairsChecked) result.notes.push(`Automatic rotor clearance checked ${clearance.pairsChecked} rotor/obstacle pairs at ${clearance.samplesChecked} recorded poses (30 Hz). This does not verify clearance between frames or airflow.`);
     return result;
   }
 
@@ -252,14 +325,35 @@ export class ToolRuntime {
   }
 
   async call(name: string, rawArgs: unknown): Promise<unknown> {
-    // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
-    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices', 'inspect_instance_ids']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
+    // Tool arguments sometimes arrive as JSON strings inside the outer request.
+    if (rawArgs && typeof rawArgs === 'object') {
+      const args = rawArgs as Record<string, unknown>;
+      for (const key of [
+        'ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria',
+        'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices', 'inspect_instance_ids',
+        'test', 'motor', 'criteria', 'measure',
+      ]) {
+        const value = args[key];
+        if (typeof value === 'string' && /^\s*[\[{]/.test(value)) {
+          try { args[key] = JSON.parse(value); } catch { /* leave for the validator */ }
+        }
+      }
+    }
     this.calls++;
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
     const log = (ok: boolean, summary: string, parts?: ReturnType<typeof picked>[]) => this.events.onLog({ t, tool: name, args: rawArgs, ok, summary, parts });
     try {
       if (this.calls > this.budget.maxToolCalls && name !== 'finalize_design') throw new Error(`Tool-call budget (${this.budget.maxToolCalls}) exhausted; call finalize_design.`);
+      if (name === 'run_test' || name === 'sweep_drive' || (name === 'finalize_design' && (rawArgs as { status?: string })?.status === 'passed')) {
+        const assemblyChecks = await this.inspectIntegrity();
+        if (!assemblyChecks.passed) {
+          this.validationFailures++;
+          const error = `Assembly check failed before simulation: ${assemblyChecks.issues.map((issue) => `${issue.kind}: ${issue.instanceIds.join(', ')}`).slice(0, 8).join('; ')}. Repair these parts with real supported connections, then rerun the same test. No simulation budget was spent.`;
+          log(false, error);
+          return { error, assemblyChecks };
+        }
+      }
       switch (name) {
         case 'write_plan': {
           { const r = rawArgs as Record<string, unknown>;
@@ -329,7 +423,24 @@ export class ToolRuntime {
         case 'assemble': {
           { const r = rawArgs as Record<string, unknown>; for (const k of ['operations', 'steps', 'assembly_ops', 'actions']) if (r.ops === undefined && Array.isArray(r[k])) { r.ops = r[k]; delete r[k]; } for (const k of ['reason', 'why', 'description', 'note']) if (r.rationale === undefined && typeof r[k] === 'string') { r.rationale = r[k]; delete r[k]; } if (r.rationale === undefined && Array.isArray(r.ops)) r.rationale = 'Assembly step'; }
           const raw = rawArgs as { ops?: unknown[] };
-          if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
+          if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((input) => {
+            const normalized = normaliseOp(input);
+            if (!normalized || typeof normalized !== 'object') return normalized;
+            const op = normalized as Record<string, unknown>;
+            if (op.op !== 'place' || op.position !== undefined || typeof op.part !== 'string') return op;
+            const part = this.resolve(op.part);
+            const rotation = Euler.safeParse(op.rotation_deg === undefined ? [0, 0, 0] : op.rotation_deg);
+            if (!part || !rotation.success) return op;
+            const [x, y, z] = rotation.data;
+            const radians = Math.PI / 180;
+            const [lowestY] = piecesVerticalExtent(part.geometry, {
+              position: [0, 0, 0],
+              rotation: quatFromEuler([x * radians, y * radians, z * radians]),
+            });
+            op.position = [0, -lowestY || 0, 0];
+            if (op.anchored === undefined && /tower|base|stand|pedestal|plate|mast|pole/i.test(`${op.id} ${op.part}`)) op.anchored = true;
+            return op;
+          });
           const a = AssembleArgs.parse(rawArgs);
           const before = new Map(this.assembly.instances.map((instance) => [instance.id, instance.partId]));
           const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog().map((part) => this.savedParts.get(part.id) ?? part), ...this.customParts.values()]);
@@ -357,31 +468,51 @@ export class ToolRuntime {
           const summary = summarize(this.assembly, true);
           const connectorPoses = connectorPosesFor(this.assembly, instance_ids);
           log(true, connectorPoses.length ? `Inspected connectors on ${connectorPoses.map(({ instance }) => instance).join(', ')}` : 'Inspected');
-          return connectorPoses.length ? { connectorPoses, ...summary } : summary;
+          const assemblyChecks = await this.inspectIntegrity();
+          return { ...summary, ...(connectorPoses.length ? { connectorPoses } : {}), assemblyChecks };
+        }
+        case 'validate_assembly': {
+          const checks = await this.inspectIntegrity();
+          if (!checks.passed) this.validationFailures++;
+          log(true, checks.passed ? 'Assembly support and connections verified' : `Assembly needs repair: ${checks.issues.map((issue) => `${issue.kind}: ${issue.instanceIds.join(', ')}`).slice(0, 8).join('; ')}`);
+          return checks;
         }
         case 'define_test': {
           const raw = rawArgs as { test?: Record<string, unknown> };
           if (raw?.test && Array.isArray(raw.test.direction)) { const v = raw.test.direction as number[]; raw.test.direction = Math.abs(v[0] ?? 0) >= Math.max(Math.abs(v[1] ?? 0), Math.abs(v[2] ?? 0)) ? 'x' : Math.abs(v[1] ?? 0) >= Math.abs(v[2] ?? 0) ? 'y' : 'z'; }
           if (raw?.test && typeof raw.test.direction === 'string') raw.test.direction = raw.test.direction.replace(/^[+-]/, '').toLowerCase();
+          if (raw?.test && raw.test.kind !== 'motion' && raw.test.criteria && typeof raw.test.criteria === 'object') { // walk/launch/grip take their thresholds at the top level; the model sometimes nests them under criteria like a motion test
+            const c = raw.test.criteria as Record<string, unknown>;
+            for (const k of ['minDistance_m', 'maxTilt_deg', 'targetDistance_m', 'tolerance_m', 'supportUntil_s', 'maxSeparation_m', 'signed']) if (raw.test[k] === undefined && c[k] !== undefined) raw.test[k] = c[k];
+            delete raw.test.criteria;
+          }
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.maxTilt_deg === 'number' && raw.test.maxTilt_deg < 8) throw new Error(`maxTilt_deg ${raw.test.maxTilt_deg}° is tighter than this simulator measures for the recipes (3–5° bare, 6–8° with a shell or claws on top); a limit that tight burns the whole test budget chasing noise. Use 10–15° unless the user asked for a stability figure.`);
-          if (raw?.test && raw.test.kind === 'motion' && this.assembly.parts.some((p) => p.category === 'legs')) { // a legged machine dancing in place measures 8–12° of tilt and 5–12 cm of drift on the recipe
+          if (raw?.test && raw.test.kind === 'motion' && this.assembly.parts.some((p) => p.category === 'legs') && this.assembly.instances.filter((i) => this.assembly.parts.find((p) => p.id === i.partId)?.category === 'legs').length >= 4) { // a legged machine (four or more leg segments; a single leg-bar pendulum is not one) dancing in place measures 8–12° of tilt and 5–12 cm of drift on the recipe
             const c = raw.test.criteria as Record<string, unknown> | undefined;
             if (c && typeof c.maxBaseTilt_deg === 'number' && c.maxBaseTilt_deg < 10) throw new Error(`maxBaseTilt_deg ${c.maxBaseTilt_deg}° is tighter than a legged machine measures while dancing in place (8–12° on the recipe, more with big feet); use 12–15° unless the user asked for a stability figure.`);
             if (c && typeof c.maxBaseDrift_m === 'number' && c.maxBaseDrift_m < 0.12) throw new Error(`maxBaseDrift_m ${c.maxBaseDrift_m} m is tighter than a legged machine measures while dancing in place (5–12 cm on the recipe); use 0.15 m, or test a walk if travel is the point.`);
           }
           const a = DefineTestArgs.parse(rawArgs);
+          const test = a.test;
+          if (test.kind === 'motion' && test.criteria.minRevolutions !== undefined) {
+            const requiredTravel = test.criteria.minRevolutions * 2 * Math.PI;
+            const insufficient = this.assembly.controller.drives.filter(({ controlId, mode, profile }) => {
+              if (mode !== 'position' || !test.measure.joints.includes(controlId)
+                || (profile.kind !== 'sine' && profile.kind !== 'gait')) return false;
+              const amplitude = Math.abs(profile.amplitude);
+              const lift = profile.kind === 'gait' && profile.role === 'lift';
+              const low = profile.offset + (lift ? Math.min(0, profile.amplitude) : -amplitude);
+              const high = profile.offset + (lift ? Math.max(0, profile.amplitude) : amplitude);
+              // The trace also counts travel from the zero-angle assembled pose.
+              return requiredTravel > Math.max(0, high) - Math.min(0, low);
+            });
+            if (insufficient.length) throw new Error(`minRevolutions cannot be met by ${insufficient.map(({ controlId }) => controlId).join(', ')}: the commanded position range is smaller than the requested travel. Measure swinging joints with minJointAmplitude_rad or test the spinning joints separately.`);
+          }
           const previous = this.testSpecs.get(a.test.id);
-          if (previous && this.testEvidence.get(a.test.id)?.result.trace.frames.length) {
-            const criteria = (test: TestSpec) => {
-              switch (test.kind) {
-                case 'motion': return [test.kind, test.duration_s, test.criteria, test.measure.followerTiming, test.measure.orbits, test.measure.jointSwing, test.measure.synchronizedTravel, test.measure.indexedMotion, test.measure.endIn];
-                case 'walk': return [test.kind, test.duration_s, test.minDistance_m, test.maxTilt_deg, test.direction, test.signed];
-                case 'launch': return [test.kind, test.duration_s, test.targetDistance_m, test.tolerance_m, test.direction];
-                case 'grip': return [test.kind, test.duration_s, test.supportUntil_s, test.maxSeparation_m];
-              }
-            };
-            if (JSON.stringify(criteria(a.test)) !== JSON.stringify(criteria(previous))) throw new Error(`Keep the measured criteria for "${a.test.id}" fixed when comparing revisions: a test that already has a measurement is not redefined. If the first definition was wrong (for example a revolutions criterion on a swinging joint), define a new test with a different id and say in its rationale what was wrong; the old result stays on record.`);
+          const measuredDefinition = this.testEvidence.get(a.test.id)?.result.trace.frames.length ? previous : this.referenceTestSpecs.get(a.test.id);
+          if (measuredDefinition) {
+            if (!isDeepStrictEqual(a.test, measuredDefinition)) throw new Error(`Keep the measured criteria and measured instances for "${a.test.id}" fixed when comparing revisions. Duration, targets, clearance pairs and ground checks are part of the saved definition. Rerun it unchanged; use a separate test ID for additional behavior. The original check must still pass.`);
           }
           if (!previous || JSON.stringify(previous) !== JSON.stringify(a.test)) this.testSpecs.set(a.test.id, a.test);
           log(true, `Test ${a.test.id} (${a.test.kind}) defined`);
@@ -398,7 +529,7 @@ export class ToolRuntime {
           this.events.onTestStart?.(testId, spec.kind);
           const result = await this.runCheckedTest({ ...spec, id: testId });
           this.tests.push(result);
-          this.testEvidence.set(a.test_id, { spec, result });
+          this.testEvidence.set(a.test_id, { spec, result, geometry: this.geometrySignature() });
           this.lastTestedAssembly = this.assembly;
           const showcaseMetrics = ['maxInstanceTilt_deg', 'payloadLift_m', 'payloadSeparation_m', 'payloadReturnError_m'];
           const summary = [...showcaseMetrics, ...Object.keys(result.metrics).filter((k) => /distance|revolutions|landing|separation|maxTilt|amplitude/.test(k))]
@@ -419,12 +550,13 @@ export class ToolRuntime {
           if (!drive) throw new Error(`No drive for controlId "${a.controlId}"`);
           const indexed = spec.kind === 'motion' && spec.measure.indexedMotion;
           const duration_s = indexed ? spec.duration_s : a.duration_s ?? Math.min(4, spec.duration_s);
-          const results: Array<Record<string, number>> = [];
+          const results: Array<Record<string, number | string[]>> = [];
           for (const v of a.values) {
             const prof = { ...drive.profile } as Record<string, unknown>; prof[a.field] = v;
             const ctl = { drives: this.assembly.controller.drives.map((d) => (d.controlId === a.controlId ? { ...d, profile: Drive.shape.profile.parse(prof) } : d)) };
             const r = await this.runCheckedTest({ ...spec, id: 'sweep', duration_s }, ctl);
             results.push({ [a.field]: v, passed: r.passed ? 1 : 0,
+              ...(r.failureReasons.length ? { failureReasons: r.failureReasons } : {}),
               ...(indexed && r.metrics.indexedConsecutiveSteps !== undefined ? { indexedConsecutiveSteps: r.metrics.indexedConsecutiveSteps } : {}),
               disconnectedGeometryParts: r.metrics.disconnectedGeometryParts,
               ...Object.fromEntries(Object.entries(r.metrics).filter(([k]) => /distance|revolutions|landing|separation|maxTilt|fell|peak|amplitude|clearance/.test(k)).slice(0, 8)) });

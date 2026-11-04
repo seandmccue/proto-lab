@@ -84,8 +84,11 @@ export function useElapsed(events: JobEvent[], running: boolean): string {
 }
 
 export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
-  const end = useRef<HTMLLIElement>(null);
-  useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
+  const activityList = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const list = activityList.current;
+    if (running && list) list.scrollTop = list.scrollHeight;
+  }, [events.length, running]);
   const visible = events.filter((e) => e.type !== 'version' && e.type !== 'timing' && e.type !== 'test_start' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
   const stage = stageOf(events); const elapsed = useElapsed(events, running);
   const lastStatus = [...events].reverse().find((e) => e.type === 'status');
@@ -100,7 +103,7 @@ export default function ActivityPanel({ events, running, versions, currentVersio
       {events.length > 0 && (
         <div className="px-3 pb-2">
           <ol className="flex items-center gap-1 text-[10px]">
-            {STAGES.map((name, i) => <li key={name} className={`flex items-center gap-1 ${i < stage ? 'text-pass' : i === stage && running ? 'text-accent' : 'text-dim'}`}><span className={`h-1.5 w-1.5 rounded-full ${i < stage ? 'bg-emerald-500' : i === stage && running ? 'bg-accent animate-pulse' : 'bg-slate-300'}`} />{name}{i < STAGES.length - 1 && <span className="mx-0.5 h-px w-3 bg-slate-200" />}</li>)}
+            {STAGES.map((name, i) => <li key={name} className={`flex items-center gap-1 ${i < stage ? 'text-pass' : i === stage && running ? 'text-accent' : 'text-dim'}`}><span className={`h-1.5 w-1.5 rounded-full ${i < stage ? 'bg-pass' : i === stage && running ? 'bg-accent animate-pulse' : 'bg-line2'}`} />{name}{i < STAGES.length - 1 && <span className="mx-0.5 h-px w-3 bg-line" />}</li>)}
           </ol>
           {running && lastStatus && <p className="mt-1 truncate text-[11px] text-muted" title={String(lastStatus.message)}>{String(lastStatus.message)}</p>}
           {timing && timing.firstAssemblyMs !== null && <p className="mt-1 text-[11px] text-muted">
@@ -117,10 +120,9 @@ export default function ActivityPanel({ events, running, versions, currentVersio
           ))}
         </div>
       )}
-      <ol className="min-h-0 flex-1 overflow-auto px-3 pb-3 text-xs space-y-1.5">
+      <ol ref={activityList} className="min-h-0 max-h-[50dvh] flex-1 overflow-auto px-3 pb-3 text-xs space-y-1.5 lg:max-h-none">
         {visible.length === 0 && <li className="text-dim">{status === 'error' ? 'This build was interrupted; its activity log was not kept.' : 'Waiting for the agent…'}</li>}
         {visible.map((e, i) => <li key={i}><EventRow e={e} /></li>)}
-        <li ref={end} aria-hidden="true" />
       </ol>
     </div>
   );
@@ -148,7 +150,7 @@ function EventRow({ e }: { e: JobEvent }) {
     case 'spec': {
       const plan = (e.spec as { plan?: { purpose: string; features: string[]; motions: string[]; subassemblies: string[]; unverified: string[] } }).plan!;
       return (
-        <div className="rounded-md border border-accent/30 bg-indigo-50 px-2 py-1.5 text-ink">
+        <div className="rounded-md border border-accent/30 bg-accent/15 px-2 py-1.5 text-ink">
           <div className="font-medium">Engineering plan</div>
           <p className="text-ink">{plan.purpose}</p>
           <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">

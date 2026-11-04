@@ -12,8 +12,15 @@ import { ObjectStore } from '../src/store.ts';
 
 type Call = [name: string, args: object];
 const stop: Call = ['finalize_design', { summary: 'Review incomplete.', status: 'failed' }];
+const stand: Call = ['design_part', {
+  name: 'Grounded platform stand', category: 'beams',
+  pieces: [{ shape: 'box', size: [0.03, 0.118, 0.03], position: [0, 0.059, 0] }],
+  connectors: [{ id: 'top', position: [0, 0.118, 0], axis: [0, 1, 0], kind: 'fixed' }],
+}];
 const place: Call = ['assemble', { rationale: 'Place the platform', ops: [
-  { op: 'place', id: 'plate', part: 'plate-120x80', position: [0, 0.12, 0], anchored: true },
+  { op: 'place', id: 'plate', part: 'plate-120x80', position: [0, 0.12, 0] },
+  { op: 'place', id: 'stand', part: 'designed-1', position: [0, 0, 0], anchored: true },
+  { op: 'connect', a: 'stand', a_connector: 'top', b: 'plate', b_connector: 'bottom', joint: 'fixed' },
 ] }];
 const check: Call = ['define_test', { test: {
   kind: 'motion', id: 'platform_clearance', duration_s: 0.5, measure: { noGroundContact: ['plate'] },
@@ -38,7 +45,7 @@ test('API preserves untested work, resumes it, and keeps prior test evidence', a
     } else if (request.includes('Move to the existing pose')) {
       calls = [raise, stop];
     } else if (!priorTools) {
-      calls = [place];
+      calls = [stand, place];
     } else {
       res.writeHead(400);
       res.end('Mock model failed before testing');

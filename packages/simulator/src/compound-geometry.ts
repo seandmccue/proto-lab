@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { compose, hullPoints, QUAT_ID, quatFromAxisAngle, quatMul, rotate, scale, shapeHalfExtents, transformPoint } from '@protolab/parts';
-import { IDENTITY, type GeometryPiece, type Instance, type PartDefinition, type Shape, type Transform, type Vec3 } from '@protolab/schema';
+import { IDENTITY, type Assembly, type GeometryPiece, type Instance, type PartDefinition, type Shape, type Transform, type Vec3 } from '@protolab/schema';
 import { profileCells } from './profile-cells.ts';
 
 const contactTolerance_m = .001;
@@ -59,7 +59,7 @@ function projectedExtents(halfExtents: number[], axes: Vec3[]) {
   return basis.map((_, axis) => axes.reduce((sum, vector, index) => sum + Math.abs(vector[axis]) * halfExtents[index], 0));
 }
 
-function placedPiece(piece: GeometryPiece, number: number, instance: PlacedPart): PlacedPiece {
+function placedPiece(piece: GeometryPiece, number: number, instance: PlacedPart, localExtents = shapeHalfExtents(piece.shape)): PlacedPiece {
   const transform = compose(instance.transform, piece.offset);
   const [x, y, z, w] = transform.rotation;
   const length = Math.hypot(x, y, z, w);
@@ -70,7 +70,7 @@ function placedPiece(piece: GeometryPiece, number: number, instance: PlacedPart)
     shape: piece.shape,
     transform,
     center: transform.position,
-    halfExtents: projectedExtents(shapeHalfExtents(piece.shape), basis.map((axis) => rotate(transform.rotation, axis))),
+    halfExtents: projectedExtents(localExtents, basis.map((axis) => rotate(transform.rotation, axis))),
   };
 }
 
@@ -161,7 +161,7 @@ function placedCellTree(piece: PlacedPiece, cache: CellCache) {
   return piece.tree;
 }
 
-function pieceGap(a: PlacedPiece, b: PlacedPiece, maxGap_m: number, cache: CellCache, budget?: { remaining: number }) {
+function pieceGap(a: PlacedPiece, b: PlacedPiece, maxGap_m: number, cache: CellCache, budget?: { remaining: number }, stopBelow_m = contactTolerance_m) {
   const firstTree = placedCellTree(a, cache), secondTree = placedCellTree(b, cache);
   if (!firstTree || !secondTree) return;
   let nearest: number | undefined;
@@ -173,19 +173,19 @@ function pieceGap(a: PlacedPiece, b: PlacedPiece, maxGap_m: number, cache: CellC
   };
   const visit = (first: CellTree, second: CellTree, lowerBound: number): boolean => {
     if (budget && budget.remaining-- <= 0) return true;
-    if (lowerBound > (nearest ?? maxGap_m) ** 2) return false;
+    if (lowerBound > Math.max(0, nearest ?? maxGap_m) ** 2) return false;
     if ('cells' in first && 'cells' in second) {
       for (const firstCell of first.cells) for (const secondCell of second.cells) {
         if (budget && budget.remaining-- <= 0) return true;
-        const limit = nearest ?? maxGap_m;
+        const limit = Math.max(0, nearest ?? maxGap_m);
         if (boundingGapSquared(firstCell, secondCell) > limit ** 2) continue;
         const p = firstCell.collider, q = secondCell.collider;
         const contact = p.shape.contactShape(p.translation, p.rotation, q.shape, q.translation, q.rotation, limit * auditScale);
         if (!contact || !Number.isFinite(contact.distance)) continue;
         const gap = contact.distance / auditScale;
-        if (gap > limit) continue;
+        if (gap > limit || (nearest !== undefined && gap >= nearest)) continue;
         nearest = gap;
-        if (gap <= contactTolerance_m) return true;
+        if (gap < stopBelow_m) return true;
       }
       return false;
     }
@@ -203,6 +203,133 @@ function pieceGap(a: PlacedPiece, b: PlacedPiece, maxGap_m: number, cache: CellC
   };
   visit(firstTree, secondTree, boundingGapSquared(firstTree, secondTree));
   return budget && budget.remaining < 0 ? undefined : nearest;
+}
+
+/** Use one decomposition cache and bounded solid queries across the sampled poses. */
+export function sampledMaterialQueries(assembly: Assembly, instanceIds: ReadonlySet<string>) {
+  const parts = new Map(assembly.parts.map((part) => [part.id, part]));
+  const cache: CellCache = new Map();
+  const budget = { remaining: 2_000_000 };
+  const budgetExceeded = 'Rotor clearance exceeded its sampled geometry query limit. Simplify the rotor or nearby supports and rerun the test.';
+  const spendQuery = () => {
+    if (budget.remaining-- <= 0) throw new Error(budgetExceeded);
+  };
+  let profileWork = 0;
+  let maxCells = 0;
+  const instances = assembly.instances.filter(({ id }) => instanceIds.has(id)).map((instance) => {
+    const part = parts.get(instance.partId);
+    if (!part) throw new Error(`Rotor clearance is missing the part definition for "${instance.id}".`);
+    const geometry = part.geometry.flatMap((piece, index) => {
+      spendQuery();
+      if (!isPhysicalPiece(piece)) return [];
+      const shape = piece.shape;
+      if (!cache.has(shape) && (shape.kind === 'extrude' || shape.kind === 'revolve')) {
+        const vertices = shape.profile.length;
+        profileWork += vertices ** 3;
+        maxCells += (vertices - 2) * (shape.kind === 'revolve' ? shape.segments : 1);
+        if (profileWork > 25_000_000 || maxCells > 24_000) {
+          throw new Error(`Rotor clearance profile is too complex near "${instance.id}". Simplify the outline and rerun the test.`);
+        }
+        if (!localCells(shape, cache)) {
+          throw new Error(`Rotor clearance cannot verify "${instance.id}" piece ${index + 1}: its profile does not form a valid solid.`);
+        }
+      }
+      return [{ piece, number: index + 1, localExtents: shapeHalfExtents(shape) }];
+    });
+    return { instance, part, geometry };
+  });
+
+  return (poses: Readonly<Record<string, Transform>>) => {
+    const solids = new Map(instances.map(({ instance, part, geometry }) => {
+      const transform = poses[instance.id];
+      const rotationLength = transform ? Math.hypot(...transform.rotation) : 0;
+      if (!transform || !transform.position.every(Number.isFinite) || !Number.isFinite(rotationLength) || rotationLength < 1e-8) {
+        throw new Error(`Rotor clearance is missing a valid sampled pose for "${instance.id}".`);
+      }
+      const placed = { ...instance, part, transform };
+      return [instance.id, geometry.map(({ piece, number, localExtents }) => {
+        spendQuery();
+        return placedPiece(piece, number, placed, localExtents);
+      })] as const;
+    }));
+    return (first: string, second: string, minimumPenetration_m: number): number | undefined => {
+      spendQuery();
+      // A small prediction absorbs float rounding, while only a signed overlap counts.
+      const prediction_m = 1e-8;
+      for (const a of solids.get(first) ?? []) for (const b of solids.get(second) ?? []) {
+        spendQuery();
+        if (boundingGapSquared(a, b) > prediction_m ** 2) continue;
+        const gap = pieceGap(a, b, prediction_m, cache, budget, -minimumPenetration_m);
+        if (budget.remaining < 0) throw new Error(budgetExceeded);
+        if (gap !== undefined && gap < -minimumPenetration_m) return -gap;
+      }
+    };
+  };
+}
+
+/** Exact solid contacts for placed pieces. Reuse the profile cell cache across the assembly audit. */
+export function assemblySolidQueries(assembly: Assembly) {
+  const parts = new Map(assembly.parts.map((part) => [part.id, part]));
+  const cache: CellCache = new Map();
+  const solids = assembly.instances.flatMap((instance) => {
+    const part = parts.get(instance.partId);
+    if (!part) return [];
+    return part.geometry.flatMap((piece, index) => isPhysicalPiece(piece)
+      ? [{ instanceId: instance.id, piece: placedPiece(piece, index + 1, { ...instance, part }) }]
+      : []);
+  });
+  const floor = new RAPIER.HalfSpace({ x: 0, y: 1, z: 0 });
+  const origin = { x: 0, y: 0, z: 0 };
+  const rotation = { ...origin, w: 1 };
+  const bottom = (bounds: Bounds) => bounds.center[1] - bounds.halfExtents[1];
+  const contactLimit = contactTolerance_m + 1e-8; // Keep exact 1 mm fits stable across AABB rounding.
+
+  return {
+    instanceIds: solids.map(({ instanceId }) => instanceId),
+    touches(first: number, second: number) {
+      const a = solids[first].piece, b = solids[second].piece;
+      return boundingGapSquared(a, b) <= contactLimit ** 2
+        && (pieceGap(a, b, contactLimit, cache) ?? Infinity) <= contactLimit;
+    },
+    floorGap(index: number) {
+      const tree = placedCellTree(solids[index].piece, cache);
+      let closest = Infinity;
+      function visit(node: CellTree) {
+        if (bottom(node) >= closest) return;
+        if ('children' in node) {
+          const [left, right] = node.children;
+          const [nearer, farther] = bottom(left) <= bottom(right) ? [left, right] : [right, left];
+          visit(nearer);
+          visit(farther);
+          return;
+        }
+        for (const cell of node.cells) {
+          if (bottom(cell) >= closest) continue;
+          const solid = cell.collider;
+          const gap = floor.contactShape(origin, rotation, solid.shape, solid.translation, solid.rotation, 5 * auditScale)?.distance;
+          if (gap !== undefined && Number.isFinite(gap)) closest = Math.min(closest, gap / auditScale);
+        }
+      }
+      if (tree) visit(tree);
+      return Number.isFinite(closest) ? Math.max(0, closest) : null;
+    },
+    nearest(first: readonly number[], other: readonly number[]) {
+      let result: { instanceId: string; gap_m: number } | null = null;
+      const budget = { remaining: diagnosticPairBudget };
+      for (const left of first) for (const right of other) {
+        if (budget.remaining-- <= 0) return null;
+        const a = solids[left].piece, b = solids[right].piece;
+        const limit = result?.gap_m ?? 2;
+        if (boundingGapSquared(a, b) > limit ** 2) continue;
+        const gap = pieceGap(a, b, limit, cache, budget);
+        if (budget.remaining < 0) return null;
+        if (gap === undefined || gap >= limit) continue;
+        result = { instanceId: solids[right].instanceId, gap_m: Math.max(0, gap) };
+        if (result.gap_m === 0) return result;
+      }
+      return result;
+    },
+  };
 }
 
 function auditGroup(instances: PlacedPart[], subjects: PlacedPart[], cache: CellCache): CompoundGeometryIssue[] {

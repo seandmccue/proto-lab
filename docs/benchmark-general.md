@@ -552,3 +552,78 @@ Every engine change from today in one pass. `bench-results-general-v11`, concurr
 | muse | 87 s (0.51 m, v2) | crab | 223 s (first-try, 0.39 m) |
 
 Across eleven full passes: 102 of 110 runs passed.
+
+### Batching experiment and the quad-chassis tie (2026-11-03 16:20 UTC)
+
+**Batching instruction, dropped.** A prompt line asking Muse to send assemble, set_drives,
+define_test and run_test in one reply was run on six prompts (`bench-results-batched`): 6 of 6
+passed, median 99.5 s, but the round counts matched the runs without it (windmill 25 s vs 23 s,
+catapult 160 s vs 73 s). Muse already batches when it wants to. What stayed (PR #137): a batched
+reply now stops at its first failed call and reports the rest as skipped, with a fake-model test.
+
+**Quad-chassis tie, fixed (PR #138).** The rejected-args log showed the recurring
+`Unknown instance "body"` was a quadruped batch mounting onto hip_L0..hip_R1: chassis-quad-120/160/220
+tie at nine connectors, so auto-place declined. A tie within one family now resolves to the mid-size
+part (chassis-quad-160, the measured recipe). Walker set after the fix (`bench-results-quad-tie`):
+
+| Prompt | Runs | Result | Times |
+| --- | --- | --- | --- |
+| muse (walk, then dance) | 2 | 2/2, two iterations each | 67 s, 69 s (0.51 m) |
+| sprinter (40 cm) | 2 | 2/2, first try | 46 s, 41 s (0.51 m) |
+
+
+## Eleventh full pass on the integration branch (v12, 2026-11-03 20:58 UTC)
+
+`integration/main-into-codex` (PR #140): main through #142 merged into the tip of the deployed UI
+stack. `bench-results-integration-full`, concurrency 3:
+
+| Metric | Value |
+| --- | --- |
+| Passed | **10 of 10** (third consecutive clean pass) |
+| API/model errors | 0 |
+| Median completion time | **61.1 s** |
+| Specialist escalations | 0 |
+| First-try | 9 of 10 (walker: walk then dance; novel gadget: three iterations) |
+
+| Prompt | Time | Prompt | Time |
+| --- | --- | --- | --- |
+| windmill | 12 s | claw | 73 s |
+| butterfly | 24 s | drawbridge | 111 s |
+| ferris | 27 s | crab | 146 s (first try, 0.39 m) |
+| crane | 45 s | novel | 149 s |
+| muse | 61 s (0.51 m, v2) | catapult | 61 s |
+
+Across twelve full passes: 112 of 120 runs passed. Part of the speed-up is time of day on the Meta
+Model API; the round counts match the previous pass.
+
+
+## Twelfth full pass on the integration branch, all guards (v13, 2026-11-03 21:55 UTC)
+
+`integration/main-into-codex` with main through #146 (motion-test guards, JSON-string arguments,
+grounded-grip message). `bench-results-integration-v13`, concurrency 3:
+
+| Metric | Value |
+| --- | --- |
+| Passed | **10 of 10** (fourth consecutive clean pass) |
+| API/model errors | 0 |
+| Median completion time | **55.7 s** |
+| Specialist escalations | 0 |
+| First-try | 9 of 10 (walker: walk then dance) |
+
+| Prompt | Time | Prompt | Time |
+| --- | --- | --- | --- |
+| windmill | 16 s | catapult | 56 s |
+| ferris | 29 s | muse | 78 s (0.51 m, v2) |
+| crane | 29 s | novel | 78 s (first try; the minRevolutions guard fired once and was answered in the same round) |
+| butterfly | 45 s | claw | 104 s |
+| drawbridge | 54 s | crab | 136 s (first try) |
+
+Across thirteen full passes: 122 of 130 runs passed. The novel gadget, three iterations and 149 s in
+v12, is first-try here: the guard turned a failed test into a rejected definition.
+
+### Public container under concurrent judges (2026-11-03 22:40 UTC)
+
+Three builds started at the same second from three isolated browsers against the deployed site
+(two workers): windmill and Ferris wheel ran at once, the butterfly showed the queue hint at 31 s,
+started when a worker freed up and passed at 101 s; the Ferris wheel passed at 66 s. A second pair
+(windmill, Ferris wheel) passed in 26 s and 49 s. No hangs, no API errors.

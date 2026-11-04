@@ -52,6 +52,21 @@ opens the actual assembly and simulation trace.
   (write_plan) → search the library → design missing parts → assemble and set drives → define
   measurable tests → simulate → analyse failures and revise → finalize with the behaviours the
   physics cannot verify listed as "unverified". Every version records which model made each decision.
+- **Automatic assembly review:** `validate_assembly` checks grounded supports, detached parts and
+  rigid joints across empty space. The same review gates simulation, drive sweeps and a passing
+  finalization. Muse receives affected instance IDs, measured gaps and connector poses, and repairs
+  the assembly in the same job; structural rejections do not spend the simulation-test budget.
+  Motion tests also observe elevated members of grounded mechanisms for unexpected floor contact
+  without changing collision masks or authored targets. Loose payloads and intended floor supports
+  remain allowed. Motor-driven propeller groups also receive an automatic material-clearance review
+  against physical parts outside their fixed group at the saved 30 Hz replay poses, including
+  separate stands and omitted test pairs.
+  Intersections report both parts, penetration and time; incomplete audits fail closed. This is
+  sampled geometry verification, not continuous collision detection or airflow simulation.
+  Saved definitions cannot silently lose measured targets, and geometry edits require
+  retesting earlier checks. Passing finalization requires a quantified motion target for every
+  motor-driven propeller group; torque and clearance alone do not verify rotation.
+  Archived replays are preserved; new tests use the current checks.
 - **Watching a build** is part of the product: before the first assembly the workbench shows the
   stage stepper (plan → parts → assemble → test → revise), the current step with a reasoning timer,
   and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly
@@ -130,7 +145,7 @@ Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbr
 garden gadget. Latest full pass on the current engine: **10 of 10, median 96 s, 0 API errors, no
 specialist escalation, nine of ten first-try** (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker
 81 s at 0.51 m, crane 87 s, catapult 96 s, crab 115 s at 0.39 m, drawbridge 122 s, garden gadget 128 s,
-claw 183 s). A second full pass (v11) also went 10 of 10 at median 102 s. Across eleven passes that is 102 of 110 runs, every miss traced to a measurable cause and
+claw 183 s). A second full pass (v11) went 10 of 10 at median 102 s, and two more on the integration branch that carries the deployed UI (v12, v13) went 10 of 10 at medians of 61 s and 56 s with no specialist consults. Across thirteen passes that is 122 of 130 runs, every miss traced to a measurable cause and
 written into a recipe or an engine rule with a locking test (a direction-only
 walk test, two Wonder 503s now handled by a visible fallback, a missing hexapod recipe, a drawbridge that
 researched a linkage until its time budget ran out); details and per-run tables in

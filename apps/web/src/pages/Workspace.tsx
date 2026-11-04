@@ -884,7 +884,7 @@ export default function Workspace() {
                   const moved = changedIds.size - added.length - swapped.length;
                   if (!added.length && !removed.length && !swapped.length && !driveChanges.length && moved <= 0) return null;
                   return (
-                    <div className="rounded-md border border-warn/30 bg-orange-50 p-2 text-xs text-ink">
+                    <div className="rounded-md border border-warn/30 bg-warn/15 p-2 text-xs text-ink">
                       <div className="panel-title mb-1 text-warn">Changed since v{prevVersion.iteration}</div>
                       {swapped.length > 0 && <div><span className="text-muted">Part swaps:</span> {swapped.slice(0, 6).join('; ')}{swapped.length > 6 ? ` (+${swapped.length - 6})` : ''}</div>}
                       {added.length > 0 && <div><span className="text-muted">Added:</span> {added.slice(0, 8).map((i) => i.label).join(', ')}{added.length > 8 ? ` (+${added.length - 8})` : ''}</div>}
