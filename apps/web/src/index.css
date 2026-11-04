@@ -52,6 +52,7 @@
 /* Light theme: the same instrument-panel language on cool white, like a CAD workspace in daylight. */
 :root[data-theme="light"] {
   color-scheme: light;
+  --stage-dots: rgba(15, 20, 25, .16);          /* dot grid behind thumbnails on the light plates */
   --bg-rgb: 243 245 248;       --bg: #f3f5f8;
   --bg-elev: #ffffff;
   --panel-rgb: 255 255 255;    --panel: #ffffff;
@@ -81,9 +82,9 @@
   --shadow-panel: 0 1px 2px rgba(15, 20, 25, .04), 0 12px 32px -22px rgba(15, 20, 25, .25);
   --shadow-pop: 0 .5rem 1.5rem rgba(15, 20, 25, .18);
 }
-/* Stage surfaces inside the light theme (header bar, hero preview card, thumbnail plates): a mid graphite blue,
+/* Stage surfaces inside the light theme (header bar, hero preview card): a mid graphite blue,
    darker than the page so machines sit on a stage, but well short of the night-mode black. */
-:root[data-theme="light"] :is(.stage-dark, .site-header, .lab-art, .invention-card__preview) {
+:root[data-theme="light"] :is(.stage-dark, .site-header, .lab-art) {
   color-scheme: dark;
   --bg-rgb: 30 38 50;          --bg: #1e2632;
   --bg-elev: #232c3a;
