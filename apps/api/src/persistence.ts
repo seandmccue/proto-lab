@@ -7,11 +7,21 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
+import { createGzip } from 'node:zlib';
 
 const tar = promisify(execFile);
 const archiveName = 'checkpoint.tar.gz';
 const databaseName = 'protolab.sqlite';
 const maxArchiveBytes = 90 * 1024 * 1024;
+
+export async function compressCheckpoint(rawArchive: string, archive: string, maxBytes = maxArchiveBytes): Promise<number> {
+  for (const level of [3, 6]) {
+    await pipeline(createReadStream(rawArchive), createGzip({ level }), createWriteStream(archive, { mode: 0o600 }));
+    const { size } = await stat(archive);
+    if (size <= maxBytes) return size;
+  }
+  throw new Error('Checkpoint exceeds the Cloudflare upload budget.');
+}
 
 export class CloudCheckpoint {
   private pending = Promise.resolve();
@@ -82,9 +92,9 @@ export class CloudCheckpoint {
       cpSync(join(this.dataDir, 'store'), join(temp, 'store'), {
         recursive: true, mode: constants.COPYFILE_FICLONE, verbatimSymlinks: true,
       });
-      await tar('tar', ['-czf', archive, '-C', temp, databaseName, 'store']);
-      const { size } = await stat(archive);
-      if (size > maxArchiveBytes) throw new Error('Checkpoint exceeds the Cloudflare upload budget.');
+      const rawArchive = join(temp, 'checkpoint.tar');
+      await tar('tar', ['-cf', rawArchive, '-C', temp, databaseName, 'store']);
+      const size = await compressCheckpoint(rawArchive, archive);
       const response = await fetch(this.url, {
         method: 'PUT',
         headers: { authorization: `Bearer ${this.token}`, 'content-length': String(size), 'content-type': 'application/gzip' },

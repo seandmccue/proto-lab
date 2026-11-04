@@ -1,15 +1,49 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { openDb } from '../src/db.ts';
-import { CloudCheckpoint } from '../src/persistence.ts';
+import { CloudCheckpoint, compressCheckpoint } from '../src/persistence.ts';
 import { ObjectStore } from '../src/store.ts';
+
+test('checkpoint compression retries with level 6 when level 3 exceeds the budget', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'protolab-compression-test-'));
+  try {
+    const rawArchive = join(root, 'checkpoint.tar');
+    const archive = join(root, 'checkpoint.tar.gz');
+    const fixture = Array.from({ length: 128 }, (_, revision) => ({
+      revision,
+      instances: Array.from({ length: 5 }, (_, index) => ({
+        id: `component-${index + revision % 7}`,
+        position: [revision % 3, index, revision % 5],
+        anchored: index === 0,
+      })),
+      result: { passed: revision % 3 === 0, metrics: { travel: revision % 13 / 10 } },
+    }));
+    await writeFile(join(root, 'fixture.json'), fixture.map((row) => JSON.stringify(row)).join('\n'));
+    execFileSync('tar', ['-cf', rawArchive, '-C', root, 'fixture.json']);
+    const raw = await readFile(rawArchive);
+    const fast = gzipSync(raw, { level: 3 });
+    const compact = gzipSync(raw, { level: 6 });
+    assert.ok(compact.length < fast.length, 'fixture must exercise the fallback');
+
+    assert.equal(await compressCheckpoint(rawArchive, archive, fast.length), fast.length);
+    assert.deepEqual(await readFile(archive), fast);
+    assert.equal(await compressCheckpoint(rawArchive, archive, compact.length), compact.length);
+    const compressed = await readFile(archive);
+    assert.deepEqual(compressed, compact);
+    assert.deepEqual(gunzipSync(compressed), raw);
+    await assert.rejects(compressCheckpoint(rawArchive, archive, compact.length - 1), /exceeds the Cloudflare upload budget/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('concurrent version and preview writes cannot change an in-flight checkpoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'protolab-persistence-test-'));
@@ -37,11 +71,11 @@ test('concurrent version and preview writes cannot change an in-flight checkpoin
   let first: Promise<void> | undefined;
   let second: Promise<void> | undefined;
   try {
-    // Block the first compression immediately after capture, then mutate the real store.
+    // Block tar immediately after capture, then mutate the real store.
     const realTar = execFileSync('which', ['tar'], { encoding: 'utf8' }).trim();
     await mkdir(bin);
     await writeFile(join(bin, 'tar'), `#!/bin/sh
-if [ "$1" = "-czf" ] && [ ! -f '${ready}' ]; then
+if [ "$1" = "-cf" ] && [ ! -f '${ready}' ]; then
   touch '${ready}'
   while [ ! -f '${release}' ]; do sleep 0.02; done
 fi
@@ -63,7 +97,7 @@ exec '${realTar}' "$@"
     first = checkpoint.save(db);
     void first.catch(() => {});
     for (let i = 0; i < 100 && !existsSync(ready); i++) await delay(20);
-    assert.ok(existsSync(ready), 'checkpoint entered compression');
+    assert.ok(existsSync(ready), 'checkpoint entered tar staging');
 
     writeVersion('ver_shared', 2);
     writeVersion('ver_added', 2);
