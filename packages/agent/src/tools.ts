@@ -1,8 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
 import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, Euler, ParamError, shapeVolume, piecesBoundingRadius, piecesVerticalExtent, quatFromEuler, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
-import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegrity, auditSampledClearance, auditSampledRotorClearance, motorizedPropellerControls, type AssemblyIntegrityIssue, type CompoundGeometryIssue } from '@protolab/simulator';
+import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegrity, auditAssemblyClearance, auditSampledClearance, auditSampledRotorClearance, motorizedPropellerControls, type AssemblyIntegrityIssue, type CompoundGeometryIssue, type SampledClearance } from '@protolab/simulator';
 import { measurePlanarOrbit, type PlanarOrbit } from '@protolab/simulator/planar-orbit';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
@@ -54,7 +55,7 @@ const connectorToolSchema = {
 };
 
 export const TOOL_DEFS: ToolDef[] = [
-  { name: 'write_plan', description: 'Step 1–3 and 7 of the engineering procedure: state the purpose, the recognisable physical features, the required motions, the sub-assemblies, measurable success criteria, and which behaviours the rigid-body physics cannot verify (e.g. aerodynamic lift). Include exact candidate_part_ids from the catalog index when already known so the user can see the proposed parts. Call once before building; call again only if the plan changes.', parameters: { type: 'object', properties: { purpose: { type: 'string' }, features: { type: 'array', items: { type: 'string' } }, motions: { type: 'array', items: { type: 'string' } }, subassemblies: { type: 'array', items: { type: 'string' } }, successCriteria: { type: 'array', items: { type: 'string' } }, unverified: { type: 'array', items: { type: 'string' } }, assumptions: { type: 'array', items: { type: 'string' } }, maxMass_kg: { type: 'number' }, candidate_part_ids: { type: 'array', maxItems: 12, items: { type: 'string' } } }, required: ['purpose', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified'] } },
+  { name: 'write_plan', description: 'Step 1–3 and 7 of the engineering procedure: state the purpose, the recognisable physical features, the required motions, the sub-assemblies, measurable success criteria, and which behaviours the rigid-body physics cannot verify (e.g. aerodynamic lift). Include exact candidate_part_ids from the catalog index when already known so the user can see the proposed parts. Copy an explicit total-machine mass allowance into numeric maxMass_kg; mentioning a budget in purpose text does not change the cap. A payload mass is not a total-machine allowance. Call once before building; call again if the plan or allowed mass budget changes.', parameters: { type: 'object', properties: { purpose: { type: 'string' }, features: { type: 'array', items: { type: 'string' } }, motions: { type: 'array', items: { type: 'string' } }, subassemblies: { type: 'array', items: { type: 'string' } }, successCriteria: { type: 'array', items: { type: 'string' } }, unverified: { type: 'array', items: { type: 'string' } }, assumptions: { type: 'array', items: { type: 'string' } }, maxMass_kg: { type: 'number', maximum: 50, description: 'Positive total machine mass allowance in kg from the brief; updates the current cap (initially 5 kg).' }, candidate_part_ids: { type: 'array', maxItems: 12, items: { type: 'string' } } }, required: ['purpose', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified'] } },
   { name: 'search_catalog', description: 'Search the component library (100+ parts: beams, plates, chassis, towers, gears, shafts, bearings, wheels, spoked wheels, pulleys, hinges, sliders, linkages, cranks, eccentric cams, cam followers and guides, pistons, servos, gearmotors, springs, actuators, wings, propellers, gripper fingers, gondolas, tracks, payload balls/blocks/discs, trays, winged bodies with built-in flap hinges, left/right butterfly, bird and dragonfly wings…). Returns ids, parameters, mass, limits and connector ids with their kinds and axes.', parameters: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, limit: { type: 'integer' } } } },
   {
     name: 'get_part',
@@ -75,7 +76,7 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: 'inspect_assembly', description: 'Current assembly: world positions in metres, localY_world (part-local +Y in world coordinates), part masses, joint axes and their anchor points in the assembled pose, motors, drives, and lowest point. For passive leveling, check the tray’s local +Y and center the suspended mass below both pivot axes. For closed linkages, request instance_ids to see those parts’ world connector positions and axes before connecting the final joints.', parameters: { type: 'object', properties: { instance_ids: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Optional instance IDs whose connector poses to include' } } } },
   { name: 'validate_assembly', description: 'Check the current assembly before simulation: grounded supports, real fixed connections, and detached parts. Returns issue instance IDs, measured gaps, repair suggestions and world connector poses. Repairs must keep requested parts and test targets; mount supported parts or add visible material bridges, never hide a problem with free/anchored/decor flags. Does not spend simulation budget or modify the design.', parameters: { type: 'object', properties: {} } },
   { name: 'define_test', description: 'Define a measurable test (step 7). Motion: {kind:"motion", id, duration_s, measure:{joints:[controlIds], base?:<instance>, clearancePairs:[[a,b]], noGroundContact:[ids], uprightInstances?:[ids], jointSwing?:[{joint:<motorized revolute controlId>,minEachWay_rad}], linearTravel?:[{instance:<instance id>,axis:"x"|"y"|"z",minTravel_m,relativeTo?:<housing or rail instance id>}], synchronizedTravel?:{instances:[<instance ids>],axis:"x"|"y"|"z",minTravel_m,maxSpread_m}, endIn?:{instance:<payload id>,receiver:<catcher id>,centerOffset_m?:[x,y,z],halfExtents_m:[x,y,z],minHold_s} or [2–8 such receiver checks], indexedMotion?:{input:<powered revolute controlId>,body:<output marker instance>,center:<axle instance>,plane:"xy"|"xz"|"yz",minSteps,step_deg,stepTolerance_deg,minDwell_s,maxDwellDrift_deg}, followerTiming?:{shaft:<motorized revolute controlId>,followers:[<2–6 different instance ids>],axis:"x"|"y"|"z",minCycles:<integer>,minStroke_m,minLowDwell_s?,minPhaseGap_deg,maxPhaseGap_deg?}, orbits?:[{body:<instance id>,center:<instance id>,plane:"xy"|"xz"|"yz",reference?:<instance id>|{from:<instance id>,to:<instance id>},minTurns,direction?:"positive"|"negative",minRadius_m?,maxRadius_m?}], payload?:{instance:<load id>,holder?:<hook id>}}, criteria:{minJointAmplitude_rad?, minJointRate_rad_s?, minRevolutions?, maxBaseTilt_deg?, maxBaseDrift_m?, maxInstanceTilt_deg?, minPayloadLift_m?, maxPayloadSeparation_m?, maxPayloadReturnError_m?, torqueWithinRating}}. Joint swing checks that a revolute joint reaches both sides of its rest position. Linear travel measures peak-to-peak displacement along the world axis, or along the reference instance’s local axis when relativeTo is set. Use relativeTo for pistons or sliders on moving housings or rails to exclude motion carried by the parent. Sampled clearance checks expand declared clearancePairs to physical parts fixed to either side, excluding same-body parts and direct joint mates. Synchronized travel requires every listed part to move at least minTravel_m and limits the largest same-time difference in displacement from each part’s start to maxSpread_m. End-in checks that the tracked instance center finishes inside a box defined in the receiver’s local coordinates and stays there for minHold_s. With an array every receiver check must pass in the same run. Inset the box from the walls if the whole payload must fit. Indexed motion checks repeated same-direction steps, one per input revolution, with measured output dwell while the input keeps moving. Put the output marker away from the axle. Follower timing skips the first shaft turn, then checks each complete turn for each stroke, optional contiguous low dwell within 1 mm of the low point, and the angular spacing of adjacent peaks. For three or more outputs, set both phase bounds to verify every neighboring peak gap across the full circle. Allow enough time for the requested complete turns plus the first turn and motor ramp. Orbit targets measure net turns from sampled body positions relative to a moving center. Use a reference direction between two bodies when a nested orbit should be measured in the rotating frame. Radius targets check the full sampled path. Instance tilt is relative to world up throughout the run. Lift is peak rise from the starting payload height; retention uses maximum load-to-holder distance; return error is final distance from starting height. Motion also reports <joint>.cycles_hz. Other tests: {kind:"walk", id, duration_s, base, minDistance_m, maxTilt_deg, direction, signed?:false} (either direction counts unless signed:true) · {kind:"launch", id, duration_s, projectile:<free instance>, targetDistance_m, tolerance_m, direction} · {kind:"grip", id, duration_s, payload:<free instance>, holder:<instance>, supportUntil_s, maxSeparation_m}.', parameters: { type: 'object', properties: { test: { type: 'object' } }, required: ['test'] } },
-  { name: 'run_test', description: 'Run a defined test on the current assembly in the rigid-body simulator. Returns measured metrics, failure reasons and notes. Failed receiver checks also include sampled payload positions (time in seconds, world XYZ in metres) to help locate a missed transfer. Creates a version.', parameters: { type: 'object', properties: { test_id: { type: 'string' } }, required: ['test_id'] } },
+  { name: 'run_test', description: 'Run a defined test on the current assembly in the rigid-body simulator. Returns measured metrics, failure reasons and notes. Also returns diagnostic-only assemblyClearance observations across the complete machine: inspect reported part pairs, times and penetration depths for unintended collisions before running the remaining test suite. Intended contacts need interpretation; these observations do not change the native verdict. Failed receiver checks also include sampled payload positions (time in seconds, world XYZ in metres) to help locate a missed transfer. Creates a version.', parameters: { type: 'object', properties: { test_id: { type: 'string' } }, required: ['test_id'] } },
   { name: 'sweep_drive', description: 'Exploration (no version, no test budget): vary one drive field over a list of values and compare measured results. Indexed motion always uses the full recorded test duration and reports the qualifying step count. Apply a winning setting and use run_test to save evidence.', parameters: { type: 'object', properties: { test_id: { type: 'string' }, controlId: { type: 'string' }, field: { type: 'string', enum: ['amplitude', 'frequency_hz', 'value', 'offset'] }, values: { type: 'array', items: { type: 'number' } }, duration_s: { type: 'number' } }, required: ['test_id', 'controlId', 'field', 'values'] } },
   { name: 'finalize_design', description: 'Finish with an honest summary: what was built, what each test measured, what changed between iterations, and which behaviours remain unverified by the physics.', parameters: { type: 'object', properties: { summary: { type: 'string' }, status: { type: 'string', enum: ['passed', 'failed'] }, unverified: { type: 'array', items: { type: 'string' } } }, required: ['summary', 'status'] } },
 ];
@@ -249,6 +250,7 @@ export class ToolRuntime {
   private lastTestedAssembly: Assembly | null = null;
   private geometryChecks = new WeakMap<Assembly, Promise<CompoundGeometryIssue[]>>();
   private assemblyChecks = new WeakMap<Assembly, Promise<AssemblyIntegrityIssue[]>>();
+  private clearanceObservations = new WeakMap<Assembly, Map<string, Promise<SampledClearance>>>();
   validationFailures = 0;
   testCount = 0; sweeps = 0; calls = 0;
   finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
@@ -267,6 +269,25 @@ export class ToolRuntime {
     }
   }
   resolve = (id: string) => this.customParts.get(id) ?? this.savedParts.get(id) ?? getPart(id);
+
+  /** Reuse the same recorded-pose diagnostic across a test suite and its final review. */
+  clearanceObservation(assembly: Assembly, trace: TestResult['trace']): Promise<SampledClearance> {
+    let reports = this.clearanceObservations.get(assembly);
+    if (!reports) {
+      reports = new Map();
+      this.clearanceObservations.set(assembly, reports);
+    }
+    const fingerprint = createHash('sha256').update(JSON.stringify(trace)).digest('hex');
+    let observation = reports.get(fingerprint);
+    if (!observation) {
+      observation = auditAssemblyClearance(assembly, trace).catch((error: unknown): SampledClearance => ({
+        pairsChecked: 0, samplesChecked: 0, issues: [], complete: false,
+        failureReason: error instanceof Error ? error.message : 'Assembly clearance observation unavailable.',
+      }));
+      reports.set(fingerprint, observation);
+    }
+    return observation;
+  }
 
   private nextPartId(prefix: string) {
     let next = 1;
@@ -456,7 +477,7 @@ export class ToolRuntime {
           this.spec = { ...this.spec, plan, assumptions: a.assumptions ?? this.spec.assumptions, constraints: { ...this.spec.constraints, maxMass_kg: a.maxMass_kg ?? this.spec.constraints.maxMass_kg } };
           this.events.onPlan(this.spec);
           log(true, `Plan: ${plan.purpose.slice(0, 80)} — ${plan.subassemblies.length} sub-assemblies, ${plan.successCriteria.length} criteria, ${plan.unverified.length} unverified`, candidates.length ? candidates.map((p) => picked(p)) : undefined);
-          return { ok: true, plan };
+          return { ok: true, plan, constraints: this.spec.constraints };
         }
         case 'search_catalog': {
           const a = SearchArgs.parse(rawArgs);
@@ -644,7 +665,9 @@ export class ToolRuntime {
           log(true, `${result.testId}: ${result.passed ? 'PASS' : 'FAIL'} — ${summary}${result.failureReasons.length ? ' — ' + result.failureReasons.join('; ') : ''}`);
           this.events.onTest(result);
           const payloadPaths = failedReceiverPaths(spec, result);
+          const assemblyClearance = await this.clearanceObservation(this.assembly, result.trace);
           return { testId: result.testId, kind: result.kind, passed: result.passed, metrics: result.metrics, failureReasons: result.failureReasons, notes: result.notes,
+            assemblyClearance: { diagnosticOnly: true, ...assemblyClearance },
             ...(payloadPaths.length ? { payloadPaths } : {}),
           };
         }
@@ -684,8 +707,11 @@ export class ToolRuntime {
       }
     } catch (e) {
       const msg = e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}${describeReceived(rawArgs, i.path)}`).slice(0, 6).join('; ') : e instanceof AssemblyError ? `${e.opIndex !== undefined ? `op[${e.opIndex}]: ` : ''}${e.message}` : e instanceof ParamError || e instanceof Error ? e.message : String(e);
-      log(false, msg);
-      return { error: msg };
+      const guidance = e instanceof AssemblyError && /^Assembly mass [\d.]+ kg exceeds [\d.]+ kg$/.test(e.message)
+        ? ' This is the current plan mass cap. If the brief explicitly allows a larger total-machine budget, call write_plan with that numeric maxMass_kg and retry this batch. Budget prose alone does not update the cap. Otherwise reduce mass while preserving the requested features; do not invent a larger allowance.'
+        : '';
+      log(false, msg + guidance);
+      return { error: msg + guidance };
     }
   }
 }
