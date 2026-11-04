@@ -8,6 +8,7 @@ import { buildScissorLift, scissorLiftTest } from '@protolab/simulator/scissor-l
 import { buildCamSemaphore, measureCamSemaphore, camSemaphoreTest } from '@protolab/simulator/cam-semaphore';
 import { buildTwoAxisGimbal, twoAxisGimbalTest } from '@protolab/simulator/two-axis-gimbal';
 import { buildGenevaIndexer, genevaIndexerTest } from '@protolab/simulator/geneva-indexer';
+import { buildMarbleElevator, marbleElevatorTest } from '@protolab/simulator/marble-elevator';
 import { DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { now, versionSummary } from './jobs.ts';
 import type { ObjectStore } from './store.ts';
@@ -186,9 +187,31 @@ const genevaIndexer: Reference = {
   testSummary: 'Measure input turns, consecutive quarter turns, and dwell',
 };
 
+const marbleElevator: Reference = {
+  id: 'inv_marble_elevator',
+  versionId: 'ver_marble_elevator_1',
+  title: 'Marble elevator · lift, tip, and catch',
+  description: 'A loose marble rides a lifting cup. The cup tips, gravity carries the marble down the chute, and a fixed bin catches it. The replay shows the recorded path.',
+  prompt: 'Build a tabletop marble elevator that lifts a loose marble, tips it onto a chute, and catches it in a bin.',
+  plan: {
+    purpose: 'Demonstrate a timed handoff from powered lifting to gravity-fed delivery.',
+    features: ['Linear lift and tipping servo', 'Loose marble and rail-guided chute', 'Fixed catch bin'],
+    motions: ['The lift raises the cup. The servo tips it toward the chute, where the free marble rolls into the bin.'],
+    subassemblies: ['Elevator and tipping cup', 'Guide chute and catch bin'],
+    successCriteria: ['At least 100 mm of vertical marble travel', 'At least 120 mm of horizontal marble travel', 'Marble remains in the receiver for at least 0.75 s at the end'],
+    unverified: ['Repeated feeds and physical fabrication tolerances'],
+  },
+  build: buildMarbleElevator,
+  driveCount: 2,
+  test: marbleElevatorTest,
+  verify: ({ metrics }) => metrics.endInHold_s >= 0.75 && metrics.endInFinalMargin_m > 0,
+  decision: 'Delay tipping until the cup clears the chute, then let gravity carry the marble the rest of the way.',
+  testSummary: 'Measure free marble travel, drive loads, and time held in the receiver',
+};
+
 /** Save verified reference mechanisms once, with their real simulation traces. */
 export async function seedReferenceShowcases(db: DatabaseSync, store: ObjectStore, persist?: () => Promise<void>) {
-  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore, twoAxisGimbal, genevaIndexer]) {
+  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore, twoAxisGimbal, genevaIndexer, marbleElevator]) {
     try {
       await saveReference(reference, db, store, persist);
     } catch (error) {

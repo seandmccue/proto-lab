@@ -21,7 +21,7 @@ const drawingRemixId = 'inv_76b7fae5bdf941c9';
 const gimbalRepairId = 'inv_d3f76fcc393b49d6';
 const lotusId = 'inv_ba7b3c7716564397';
 const genevaRepairId = 'inv_b99f505fab294915';
-const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal', 'inv_geneva_indexer'];
+const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal', 'inv_geneva_indexer', 'inv_marble_elevator'];
 
 function penPathSize(test: TestSummary | null | undefined) {
   const width = test?.metrics['pen_tip.travel_x_m'];
