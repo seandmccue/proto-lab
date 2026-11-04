@@ -501,6 +501,38 @@
   .workbench-title h1 { -webkit-line-clamp: 1; }
 }
 
+.workbench-build-outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .25rem .8rem;
+  margin: 0 clamp(.75rem, 2vw, 1.5rem) .65rem;
+  padding: .45rem .75rem;
+  border: 1px solid #e5c78e;
+  border-radius: .85rem;
+  background: #fff3dc;
+  color: #593715;
+}
+.workbench-build-outcome-status { flex: 1; min-width: 0; }
+.workbench-build-outcome-status strong, .workbench-build-outcome-status span { display: block; }
+.workbench-build-outcome-status span, .workbench-build-summary p { font-size: .82rem; line-height: 1.4; overflow-wrap: anywhere; }
+.workbench-build-outcome .btn-primary, .workbench-build-outcome .btn-secondary { min-height: 44px; }
+.workbench-build-outcome-link { font-size: .82rem; font-weight: 650; text-decoration: underline; text-underline-offset: .18em; }
+.workbench-build-summary {
+  margin: 0 clamp(.75rem, 2vw, 1.5rem) .75rem;
+  padding: .85rem 1rem;
+  scroll-margin-top: 6rem;
+  border: 1px solid var(--bench-line);
+  border-radius: .85rem;
+  background: var(--bench-panel);
+}
+.workbench-build-summary h2 { margin-bottom: .3rem; font-size: 1rem; font-weight: 750; }
+@media (width <= 40rem) {
+  .workbench-build-outcome { gap: .2rem .45rem; padding: .35rem .6rem; }
+  .workbench-build-outcome .btn-primary, .workbench-build-outcome .btn-secondary { padding-inline: .7rem; font-size: .8rem; }
+  .workbench-build-outcome-link { flex-basis: 100%; }
+}
+
 /* Build progress (waiting view before the first assembly) */
 .build-heartbeat {
   --heartbeat-accent: #e4f784;

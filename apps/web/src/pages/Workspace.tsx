@@ -99,6 +99,7 @@ function walkTargets(test: TestSummary): string | null {
 }
 
 type LiveSnapshot = Awaited<ReturnType<typeof api.jobAssembly>>;
+const exhaustedTestBudget = /^Test budget \((\d+)\) exhausted\b/;
 
 function movedPart(before: Assembly['instances'][number] | undefined, after: Assembly['instances'][number]) {
   return !before || before.partId !== after.partId ||
@@ -596,6 +597,18 @@ export default function Workspace() {
   const diagnosticHighlights = pinnedPresentation ? undefined : tiltHighlight?.highlights ?? (showRevisionHighlights ? revisionHighlights : undefined);
   const showChangeColors = !pinnedPresentation && !preserveOrbitColors && !(comparing && storyStep === 0);
   const currentUntested = Boolean(inv?.currentVersionId && !inv.tests.length);
+  const savedProgress = Boolean(inv?.currentVersionId);
+  const stoppedBuild = jobStatus === 'error' || (jobStatus === 'done' && (currentUntested || inv?.status === 'failed'));
+  const stoppedEvent = stoppedBuild ? [...events].reverse().find((event) => jobStatus === 'error'
+    ? event.type === 'error' : event.type === 'done' && event.status === 'failed') : undefined;
+  const outcomeText = stoppedEvent?.type === 'error' ? stoppedEvent.message : stoppedEvent?.summary;
+  const stoppedSummary = typeof outcomeText === 'string' ? outcomeText.trim() : '';
+  const stoppedReason = jobStatus === 'error' ? jobStep || 'Build error'
+    : currentUntested ? 'Not tested' : savedProgress ? 'Design did not pass' : 'No version saved';
+  const exhaustedTest = stoppedBuild && jobStatus === 'done' ? events.find((event) =>
+    event.type === 'tool' && event.tool === 'run_test' && event.ok === false &&
+    typeof event.summary === 'string' && exhaustedTestBudget.test(event.summary)) : undefined;
+  const testLimit = typeof exhaustedTest?.summary === 'string' ? exhaustedTestBudget.exec(exhaustedTest.summary)?.[1] : undefined;
   const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
   const finalEvent = finalVersion && detail?.latestJob?.versionId === finalVersion.id
     ? [...events].reverse().find((event) => event.type === 'done' && event.status === 'passed')
@@ -685,12 +698,13 @@ export default function Workspace() {
       {!sideBySide && storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
     </div>
   );
+  const requestChangeButton = inv && (
+    <button type="button" className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
+      Request a change
+    </button>
+  );
   const workbenchActions = <>
-    {inv && (
-      <button className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
-        Request a change
-      </button>
-    )}
+    {!stoppedBuild && requestChangeButton}
     {inv?.isOwner && <button className="btn-secondary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode('remix'); }}>Remix</button>}
     {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
     {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => {
@@ -724,7 +738,14 @@ export default function Workspace() {
       </div>
       {error && !changeMode && <div role="alert" className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
       {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} />}
-      {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'Choose “Request a change” to continue from a recorded version.' : 'Start a new build to try again.'}</div>}
+      {stoppedBuild && <section className="workbench-build-outcome" aria-label="Build outcome">
+        <div className="workbench-build-outcome-status" role="status">
+          <strong>Build stopped</strong>
+          <span>{savedProgress && 'Progress saved · '}{stoppedReason}</span>
+        </div>
+        {savedProgress ? requestChangeButton : <Link to="/" className="btn-secondary">Start a new build</Link>}
+        {stoppedSummary && <a className="workbench-build-outcome-link" href="#build-outcome-summary">Build summary ↓{testLimit && ` · ${testLimit}-test limit reached`}</a>}
+      </section>}
 
       <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">
         {(['canvas', 'tree', 'agent'] as const).map((p) => <button key={p} onClick={() => setMobilePane(p)} aria-pressed={mobilePane === p}>{p === 'canvas' ? '3D view' : p === 'tree' ? 'Parts' : 'Agent'}</button>)}
@@ -896,6 +917,10 @@ export default function Workspace() {
         </aside>
       </div>
 
+      {stoppedSummary && <section id="build-outcome-summary" className="workbench-build-summary" aria-labelledby="build-outcome-heading">
+        <h2 id="build-outcome-heading">Build summary</h2>
+        <p>{stoppedSummary}</p>
+      </section>}
       {inv && <div className="workbench-mobile-details">
         <div className="workbench-detail-actions">{workbenchActions}</div>
         <details>
