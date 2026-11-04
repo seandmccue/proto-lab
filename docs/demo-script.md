@@ -33,6 +33,13 @@ The marble elevator reference makes the handoff easy to see. With the **Delivery
 
 In the Muse-built elevator comparison, v1 dropped the marble. The final revision keeps it in the receiver for four seconds and stays within both drive ratings. Use the synchronized scrubber to watch the two outcomes diverge.
 
+## Optional voice-over inserts
+
+| Clip | On screen | Voice-over |
+| --- | --- | --- |
+| Carousel, 13 s | Start with the failed v1 trace. Scrub v8 across the shaded pause into the second step. | “The first carousel stalled. In the repair, the motor keeps turning while the wheel holds its position, then advances exactly one station. Disable the drive pin, and the wheel stops moving entirely.” |
+| Marble elevator, 14 s | Scrub both versions through the tip, then hold on the receiver result. | “The first elevator dropped the marble. Muse’s revised cup tips it onto a chute. The loose marble rolls into the catch cup and stays there for four seconds. With tipping disabled, the same elevator still lifts, but the marble never reaches the cup.” |
+
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
