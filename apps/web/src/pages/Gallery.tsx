@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import Header from '../components/Header.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import { api, type InventionPublic } from '../api.ts';
@@ -12,30 +12,57 @@ const filters = [
 ] as const;
 type GalleryView = typeof filters[number]['id'];
 
-function GalleryResults({ view }: { view: GalleryView }) {
+const savedPageCounts = new Map<string, number>();
+const maxRestoredPages = 5;
+
+function rememberPageCount(entry: string, count: number) {
+  // Keep only page counts, never invention data or session identifiers.
+  savedPageCounts.delete(entry);
+  savedPageCounts.set(entry, Math.min(count, maxRestoredPages));
+  if (savedPageCounts.size > 24) savedPageCounts.delete(savedPageCounts.keys().next().value!);
+}
+
+function GalleryResults({ view, entry }: { view: GalleryView; entry: string }) {
   const [items, setItems] = useState<InventionPublic[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [request, setRequest] = useState({ cursor: 0 });
+  const [failedCursor, setFailedCursor] = useState(0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const loadedPages = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    const { cursor } = request;
-    const page = view === 'mine' ? api.mine(cursor) : api.gallery(view, 24, cursor);
-    page.then((result) => {
-      if (cancelled) return;
-      setItems((previous) => {
-        if (cursor === 0) return result.items;
-        const seen = new Set(previous.map((item) => item.id));
-        return [...previous, ...result.items.filter((item) => !seen.has(item.id))];
-      });
-      setNextCursor(result.nextCursor ?? null);
+    let cursor = request.cursor;
+    const pagesToFetch = cursor === 0 ? savedPageCounts.get(entry) ?? 1 : 1;
+    if (cursor === 0) loadedPages.current = 0;
+
+    async function load() {
+      for (let index = 0; index < pagesToFetch; index++) {
+        const result = await (view === 'mine' ? api.mine(cursor) : api.gallery(view, 24, cursor));
+        if (cancelled) return;
+        const replace = cursor === 0;
+        setItems((previous) => {
+          if (replace) return result.items;
+          const seen = new Set(previous.map((item) => item.id));
+          return [...previous, ...result.items.filter((item) => !seen.has(item.id))];
+        });
+        loadedPages.current++;
+        const next = result.nextCursor === cursor ? null : result.nextCursor ?? null;
+        setNextCursor(next);
+        if (next === null) break;
+        cursor = next;
+      }
+      rememberPageCount(entry, loadedPages.current);
       setStatus('ready');
-    }).catch(() => {
-      if (!cancelled) setStatus('error');
+    }
+
+    void load().catch(() => {
+      if (cancelled) return;
+      setFailedCursor(cursor);
+      setStatus('error');
     });
     return () => { cancelled = true; };
-  }, [request, view]);
+  }, [entry, request, view]);
 
   const loadPage = (cursor: number) => {
     setStatus('loading');
@@ -56,7 +83,7 @@ function GalleryResults({ view }: { view: GalleryView }) {
       {status === 'error' && (
         <div className="mt-4">
           <p className="invention-gallery__empty" role="alert">Could not load inventions.</p>
-          <button className="btn-secondary" type="button" onClick={() => loadPage(request.cursor)}>Try again</button>
+          <button className="btn-secondary" type="button" onClick={() => loadPage(failedCursor)}>Try again</button>
         </div>
       )}
       {status === 'ready' && nextCursor !== null && (
@@ -67,8 +94,10 @@ function GalleryResults({ view }: { view: GalleryView }) {
 }
 
 export default function Gallery() {
+  const { key } = useLocation();
   const [params, setParams] = useSearchParams();
   const view = filters.find(({ id }) => id === params.get('view'))?.id ?? 'recent';
+  const entry = `${key}:${view}`;
   return (
     <div className="min-h-full">
       <Header />
@@ -81,11 +110,11 @@ export default function Gallery() {
         <section aria-label="Gallery inventions">
           <div className="invention-gallery__filters" role="group" aria-label="Filter inventions">
             {filters.map(({ id, label }) => (
-              <button key={id} type="button" onClick={() => setParams(id === 'recent' ? {} : { view: id })} aria-pressed={view === id}>{label}</button>
+              <button key={id} type="button" onClick={() => { if (view !== id) setParams(id === 'recent' ? {} : { view: id }); }} aria-pressed={view === id}>{label}</button>
             ))}
           </div>
           {view === 'mine' && <p className="mb-4 text-sm text-muted">Inventions saved in this browser. Private builds appear here and on your homepage.</p>}
-          <GalleryResults key={view} view={view} />
+          <GalleryResults key={entry} view={view} entry={entry} />
         </section>
       </main>
     </div>

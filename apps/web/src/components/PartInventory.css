@@ -75,3 +75,7 @@
   .part-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .part-inventory-count { padding-bottom: 0; }
 }
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .part-inventory-results { max-height: clamp(8rem, calc(100dvh - 9.5rem), 22rem); }
+}
