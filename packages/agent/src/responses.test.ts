@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { test } from 'node:test';
-import { assistantMessage, chat, modelConfigFromEnv, type ChatMessage, type ModelConfig } from './llm.ts';
+import { assistantMessage, chat, modelConfigFromEnv, TransientModelError, type ChatMessage, type ModelConfig } from './llm.ts';
 
 test('Responses transport and reasoning effort require valid opt-in values', () => {
   assert.equal(modelConfigFromEnv({ MODEL_API_KEY: 'test' })?.transport, undefined);
@@ -15,7 +15,14 @@ test('Responses transport and reasoning effort require valid opt-in values', () 
 const tools = [{ name: 'echo', description: 'Echo', parameters: { type: 'object' } }];
 type Body = Record<string, unknown> & { input: Array<Record<string, unknown>> };
 
-async function withResponsesServer(run: (cfg: ModelConfig, requests: Body[]) => Promise<void>, expireFirst = false) {
+type Intercept = (res: ServerResponse, request: number) => boolean;
+const rejectLineage = (status: number, res: ServerResponse) => {
+  res.writeHead(status);
+  res.end(JSON.stringify({ error: { message: 'Referenced response not found', param: 'previous_response_id' } }));
+  return true;
+};
+
+async function withResponsesServer(run: (cfg: ModelConfig, requests: Body[]) => Promise<void>, intercept?: Intercept) {
   const requests: Body[] = [];
   const paths: (string | undefined)[] = [];
   const server = createServer(async (req, res) => {
@@ -26,11 +33,7 @@ async function withResponsesServer(run: (cfg: ModelConfig, requests: Body[]) => 
     paths.push(req.url);
     const n = requests.length;
     res.setHeader('content-type', 'application/json');
-    if (expireFirst && n === 2) {
-      res.writeHead(400);
-      res.end(JSON.stringify({ error: { message: 'Referenced response not found', param: 'previous_response_id' } }));
-      return;
-    }
+    if (intercept?.(res, n)) return;
     res.end(JSON.stringify({
       id: `resp_${n}`, status: 'completed',
       output: [
@@ -47,6 +50,7 @@ async function withResponsesServer(run: (cfg: ModelConfig, requests: Body[]) => 
     await run({ baseUrl: `http://127.0.0.1:${port}`, model: 'muse-spark-1.3', apiKey: 'test', maxTokens: 256, timeoutMs: 3000 }, requests);
     assert.ok(paths.length > 0 && paths.every((url) => url === '/responses'));
   } finally {
+    server.closeAllConnections();
     server.close();
   }
 }
@@ -108,5 +112,67 @@ test('stored continuation sends just new tool output and replays visible history
     assert.equal(requests[2].previous_response_id, undefined);
     assert.ok(requests[2].input.some((item) => item.type === 'function_call' && item.call_id === 'call_1'));
     assert.ok(requests[2].input.some((item) => item.type === 'function_call_output' && item.call_id === 'call_1'));
-  }, true);
+  }, (res, request) => request === 2 && rejectLineage(400, res));
+});
+
+test('an explicit 404 lineage error replays visible history, while a generic 404 remains terminal', async () => {
+  for (const lineage of [true, false]) {
+    await withResponsesServer(async (config, requests) => {
+      const cfg = { ...config, transport: 'responses-stored' as const };
+      const messages = history();
+      await toolTurn(cfg, messages);
+      if (lineage) {
+        await toolTurn(cfg, messages);
+        assert.equal(requests.length, 3);
+        assert.equal(requests[2].previous_response_id, undefined);
+        assert.deepEqual(requests[2].input.at(-1), { type: 'function_call_output', call_id: 'call_1', output: '{"n":13}' });
+      } else {
+        await assert.rejects(() => chat(cfg, messages, tools), /HTTP 404.*Route not found/);
+        assert.equal(requests.length, 2);
+      }
+      assert.equal(requests[1].previous_response_id, 'resp_1');
+    }, (res, request) => {
+      if (request !== 2) return false;
+      if (lineage) return rejectLineage(404, res);
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: { message: 'Route not found' } }));
+      return true;
+    });
+  }
+});
+
+test('a network failure and timeout after lineage recovery report the transient request error', async () => {
+  await withResponsesServer(async (config, requests) => {
+    const cfg = { ...config, transport: 'responses-stored' as const };
+    const messages = history();
+    await toolTurn(cfg, messages);
+    await assert.rejects(() => chat({ ...cfg, timeoutMs: 200 }, messages, tools), {
+      name: TransientModelError.name,
+      message: /no response within 0\.2 s.*after 2 attempts/,
+    });
+    assert.equal(requests.length, 4);
+    assert.equal(requests[1].previous_response_id, 'resp_1');
+    assert.equal(requests[2].previous_response_id, undefined);
+    assert.deepEqual(requests[3], requests[2]);
+  }, (res, request) => {
+    if (request === 2) return rejectLineage(400, res);
+    if (request === 3) res.destroy();
+    // The second fallback attempt never returns headers.
+    return request >= 3;
+  });
+});
+
+test('changing credentials resets stored and encrypted continuation', async () => {
+  for (const transport of ['responses-stored', 'responses-encrypted'] as const) {
+    await withResponsesServer(async (config, requests) => {
+      const cfg = { ...config, transport };
+      const messages = history();
+      await toolTurn(cfg, messages);
+      await toolTurn({ ...cfg, apiKey: 'another-test-credential' }, messages);
+      assert.equal(requests[1].previous_response_id, undefined);
+      assert.equal(requests[1].input.some((item) => item.type === 'reasoning'), false);
+      assert.ok(requests[1].input.some((item) => item.type === 'function_call' && item.call_id === 'call_1'));
+      assert.deepEqual(requests[1].input.at(-1), { type: 'function_call_output', call_id: 'call_1', output: '{"n":13}' });
+    });
+  }
 });

@@ -67,6 +67,18 @@ export class TransientModelError extends Error {
   constructor(message: string) { super(message); this.name = 'TransientModelError'; }
 }
 
+function isLineageError(status: number, text: string) {
+  if (status !== 400 && status !== 404) return false;
+  const reference = /\b(?:previous[_ -]response[_ -]id|previous response (?:with )?id|referenced response)\b/i;
+  try {
+    const { error } = JSON.parse(text) as { error?: { param?: string; code?: string; message?: string } };
+    return error?.param === 'previous_response_id' || error?.code === 'previous_response_not_found' ||
+      (typeof error?.message === 'string' && reference.test(error.message));
+  } catch {
+    return reference.test(text);
+  }
+}
+
 export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: ToolDef[], opts: { toolChoice?: 'auto' | 'required' | { name: string }; temperature?: number; signal?: AbortSignal; onRetry?: (info: { attempt: number; maxAttempts: number; delayMs: number; reason: string }) => void } = {}): Promise<ChatResult> {
   const responses = cfg.transport === 'responses-stored' || cfg.transport === 'responses-encrypted';
   let body: Record<string, unknown> = responses ? buildResponsesBody(cfg, messages, tools, opts) : {
@@ -93,19 +105,18 @@ export async function chat(cfg: ModelConfig, messages: ChatMessage[], tools: Too
         method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
         body: JSON.stringify(request), signal,
       });
-      res = await send(body);
-      if (res.ok) break;
-      let text = await res.text().catch(() => '');
-      if (res.status === 400 && body.previous_response_id && /previous.response.id|referenced response/i.test(text)) {
+      let response = await send(body);
+      if (response.ok) { res = response; break; }
+      let text = await response.text().catch(() => '');
+      if (body.previous_response_id && isLineageError(response.status, text)) {
         // A saved context can expire. Resume from the visible transcript on an explicit lineage error.
         body = buildResponsesBody(cfg, messages, tools, opts, false);
-        res = await send(body);
-        if (res.ok) break;
-        text = await res.text().catch(() => '');
+        response = await send(body);
+        if (response.ok) { res = response; break; }
+        text = await response.text().catch(() => '');
       }
-      lastErr = `Meta Model API error from ${cfg.model}: HTTP ${res.status} ${text.slice(0, 400)}`;
-      if (res.status !== 429 && res.status < 500) throw new Error(lastErr);
-      res = null;
+      lastErr = `Meta Model API error from ${cfg.model}: HTTP ${response.status} ${text.slice(0, 400)}`;
+      if (response.status !== 429 && response.status < 500) throw new Error(lastErr);
       if (process.env.MODEL_DEBUG) console.error(`[llm] ${lastErr.slice(0, 140)}; retrying (${attempt + 1}/${MAX_ATTEMPTS})`);
     } catch (e) {
       opts.signal?.throwIfAborted();

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ChatMessage, ChatResult, ModelConfig, ToolCall, ToolDef } from './llm.ts';
 
 type InputItem = Record<string, unknown>;
@@ -7,7 +8,8 @@ type ResponseMetadata = { modelKey: string; id: string; output: InputItem[] };
 // Keep reasoning in the current worker and out of the serialized transcript and logs.
 const resultMetadata = new WeakMap<ChatResult, ResponseMetadata>();
 const messageMetadata = new WeakMap<Assistant, ResponseMetadata>();
-const keyFor = (cfg: ModelConfig) => JSON.stringify([cfg.baseUrl, cfg.model, cfg.transport]);
+const keyFor = (cfg: ModelConfig) => createHash('sha256')
+  .update(JSON.stringify([cfg.baseUrl, cfg.model, cfg.transport, cfg.apiKey])).digest('hex');
 
 export function attachResponseMetadata(result: ChatResult, message: Assistant) {
   const metadata = resultMetadata.get(result);
