@@ -270,10 +270,7 @@ export const TestSpec = z.discriminatedUnion('kind', [
       })).min(1).max(4).optional(),
       followerTiming: z.object({
         shaft: z.string().min(1),
-        followers: z.union([
-          z.tuple([z.string().min(1), z.string().min(1)]),
-          z.tuple([z.string().min(1), z.string().min(1), z.string().min(1)]),
-        ]),
+        followers: z.array(z.string().min(1)).min(2).max(6),
         axis: Axis,
         minCycles: z.number().int().min(1).max(30),
         minStroke_m: z.number().gt(0.001),

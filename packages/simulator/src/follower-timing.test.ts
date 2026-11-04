@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Trace } from '@protolab/schema';
+import { TestSpec, type Trace } from '@protolab/schema';
 import { measureFollowerTiming } from './follower-timing.ts';
 
 const dt = 0.1;
@@ -53,4 +53,52 @@ test('three staggered peaks produce all neighboring gaps, including across the t
   for (const gap of cycles[0].phaseGaps_deg) near(gap, 120);
   assert.deepEqual(cycles[1].phaseGaps_deg.map(Math.round), [150, 90, 120]);
   near(cycles[1].phaseGap_deg, 90);
+});
+
+test('one timing definition verifies all six piston phases on every complete turn', () => {
+  const followers = ['piston_4', 'piston_1', 'piston_6', 'piston_2', 'piston_5', 'piston_3'];
+  const definition = {
+    kind: 'motion', id: 'six_piston_timing', duration_s: 6,
+    measure: { followerTiming: { ...measurement, followers, minCycles: 2, minStroke_m: 0.038, minPhaseGap_deg: 50, maxPhaseGap_deg: 70 } },
+    criteria: { torqueWithinRating: true },
+  };
+  const testSpec = TestSpec.parse(definition);
+  if (testSpec.kind !== 'motion' || !testSpec.measure.followerTiming) assert.fail('missing timing definition');
+  const timing = testSpec.measure.followerTiming;
+  for (const invalid of [followers.slice(0, 1), [...followers, 'piston_7']]) {
+    assert.equal(TestSpec.safeParse({ ...definition, measure: { followerTiming: { ...timing, followers: invalid } } }).success, false);
+  }
+
+  const samplesPerTurn = 24;
+  const sampleAngle = 2 * Math.PI / samplesPerTurn;
+  const trace = (secondTurnPhaseShift: number): Trace => ({
+    dt,
+    frames: Array.from({ length: 3 * samplesPerTurn + 1 }, (_, sample) => ({
+      t: sample * dt,
+      joints: { shaft: sample * sampleAngle },
+      bodies: Object.fromEntries(followers.map((id) => {
+        const peakSample = (Number(id.at(-1)) - 1) * 4;
+        const shift = id === 'piston_4' && sample >= 2 * samplesPerTurn ? secondTurnPhaseShift : 0;
+        const height = 0.02 * (1 + Math.cos((sample - peakSample - shift) * sampleAngle));
+        return [id, { position: [0, height, 0], rotation: [0, 0, 0, 1] }];
+      })),
+    })),
+  });
+  const cycles = measureFollowerTiming(trace(0), timing);
+  assert.equal(cycles.length, timing.minCycles);
+  for (const cycle of cycles) {
+    assert.deepEqual(cycle.flags.map(({ id }) => id), followers);
+    for (const flag of cycle.flags) near(flag.stroke_m, 0.04);
+    assert.deepEqual(cycle.phaseGaps_deg.map(Math.round), [60, 60, 60, 60, 60, 60]);
+  }
+
+  const drifted = measureFollowerTiming(trace(2), timing);
+  assert.equal(drifted.length, 2);
+  near(drifted[0].phaseGap_deg, 60);
+  assert.ok(drifted[1].phaseGap_deg < timing.minPhaseGap_deg);
+  assert.ok(Math.max(...drifted[1].phaseGaps_deg) > timing.maxPhaseGap_deg!);
+
+  const missing = trace(0);
+  delete missing.frames[samplesPerTurn + 1].bodies.piston_6;
+  assert.deepEqual(measureFollowerTiming(missing, timing), []);
 });
