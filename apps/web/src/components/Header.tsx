@@ -53,6 +53,7 @@ export default function Header({ compact = false }: { compact?: boolean }) {
       <nav id={navId} className="site-nav" data-open={menuOpen} aria-label="Main navigation" onClick={() => setMenuOpen(false)}>
         <Link to="/#how-it-works" className="btn-ghost">How it works</Link>
         <NavLink to="/gallery" className="btn-ghost">Gallery</NavLink>
+        <a href="https://framesixty.com" className="btn-ghost" target="_blank" rel="noopener noreferrer">About <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
   );
