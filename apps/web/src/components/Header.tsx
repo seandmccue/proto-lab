@@ -53,7 +53,6 @@ export default function Header({ compact = false }: { compact?: boolean }) {
       <nav id={navId} className="site-nav" data-open={menuOpen} aria-label="Main navigation" onClick={() => setMenuOpen(false)}>
         <NavLink to="/how-it-works" className="btn-ghost">How it works</NavLink>
         <NavLink to="/gallery" className="btn-ghost">Gallery</NavLink>
-        <Link to="/" className="btn-secondary site-new"><span aria-hidden="true">+</span> <span className="site-new-full">New invention</span><span className="site-new-short">Build</span></Link>
       </nav>
     </header>
   );
