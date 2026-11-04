@@ -2,10 +2,11 @@
  * Verify a running ProtoLab stack. Add --judge to verify the curated public
  * judge route, saved simulation evidence, and hosted demo video.
  */
-import type { TestResult, VersionRecord } from '@protolab/schema';
+import type { TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import { len, sub, transformPoint } from '@protolab/parts';
 import { measureFollowerTiming } from '@protolab/simulator/follower-timing';
 import { measurePlanarOrbit } from '@protolab/simulator/planar-orbit';
+import { measureIndexedMotion } from '@protolab/simulator/indexed-motion';
 
 const arg = (name: string, fallback: string) => {
   const index = process.argv.indexOf(name);
@@ -33,8 +34,8 @@ async function publicBuild(id: string) {
   }
   return detail;
 }
-const version = async (id: string, versionId: string) => (
-  await get<{ version: VersionRecord }>(`/api/inventions/${id}/versions/${versionId}?trace=1`)
+const version = async (id: string, versionId: string, trace = true) => (
+  await get<{ version: VersionRecord }>(`/api/inventions/${id}/versions/${versionId}?trace=${trace ? 1 : 0}`)
 ).version;
 const recorded = (record: VersionRecord, check: (test: TestResult) => boolean) => (
   record.tests.some((test) => test.trace.frames.length > 1 && check(test))
@@ -260,6 +261,39 @@ if (judge) checks.push(
       throw new Error('Expected a featured reference with one drive and a saved indexing pass');
     }
     return 'two consecutive quarter turns with dwell while one motor kept turning';
+  }],
+  ['Muse Geneva carousel repair', async () => {
+    const id = 'inv_b99f505fab294915';
+    const { invention, versions } = await publicBuild(id);
+    const first = versions.find(({ iteration }) => iteration === 1);
+    if (!first || !invention.featured) throw new Error('Expected the initial failure and a featured carousel');
+    const [before, after] = await Promise.all([version(id, first.id), version(id, invention.currentVersionId)]);
+    const motorized = after.assembly.joints.filter(({ motor }) => motor);
+    const passed = after.tests.find((test) => test.passed && test.metrics.indexedConsecutiveSteps >= 2);
+    const idPrefix = passed?.testId.replace(/#\d+$/, '');
+    let definition: TestSpec | undefined;
+    let ancestor = after;
+    const visited = new Set<string>();
+    while (idPrefix && !visited.has(ancestor.id)) {
+      visited.add(ancestor.id);
+      const entry = ancestor.toolLog.slice().reverse().find(({ tool, ok, args }) =>
+        tool === 'define_test' && ok && (args as { test?: TestSpec } | null)?.test?.id === idPrefix);
+      definition = (entry?.args as { test?: TestSpec } | undefined)?.test;
+      if (definition || !ancestor.parentVersionId) break;
+      ancestor = await version(id, ancestor.parentVersionId, false);
+    }
+    const goal = definition?.kind === 'motion' ? definition.measure.indexedMotion : undefined;
+    if (!after.modelId.startsWith('muse-') || motorized.length !== 1 || motorized[0].type !== 'revolute'
+      || after.assembly.controller.drives.length !== 1 || !goal || goal.input !== motorized[0].motor?.controlId
+      || goal.minSteps < 2 || goal.step_deg !== 90 || goal.stepTolerance_deg > 8
+      || goal.minDwell_s < 0.6 || goal.maxDwellDrift_deg > 3 || !passed
+      || !(passed.metrics[`${goal.input}.revolutions`] >= 2) || passed.metrics.groundContactViolation !== 0
+      || !recorded(before, (test) => !test.passed && test.metrics['spin.revolutions'] >= 2
+        && Math.abs(test.metrics['jewel_0.orbitSignedTurns']) < 0.01)
+      || (measureIndexedMotion(passed.trace, goal)?.consecutiveSteps ?? 0) < 2) {
+      throw new Error('Expected a stalled baseline and a genuine Muse repair with one drive and repeated indexed motion');
+    }
+    return 'the motor kept turning while the passive carousel advanced and held position';
   }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');

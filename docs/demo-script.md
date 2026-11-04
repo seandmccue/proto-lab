@@ -27,6 +27,8 @@ The mechanical lotus shows one actuator opening six passive petals. The first te
 
 The Geneva reference shows intermittent motion. Scrub across a flat section of the output trace while the input trace keeps rising, then advance to the next quarter turn. This is the catalog reference.
 
+The separate Muse-built jewel carousel shows how an actual build improved. Compare v1 against v8, then scrub across the roughly 2.8-second pause between the two 90° steps. The motor kept turning throughout. In a separate control run, disabling the single drive pin stopped the carousel while the motor still completed more than two revolutions.
+
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
@@ -37,6 +39,7 @@ The Geneva reference shows intermittent motion. Scrub across a flat section of t
 - Orrery comparison · `/i/inv_adc081059ea44ab9?replay=1&compare=1`
 - Two-axis gimbal repair · `/i/inv_d3f76fcc393b49d6?replay=1&compare=1`
 - Mechanical lotus · `/i/inv_ba7b3c7716564397?replay=1&compare=1`
+- Muse jewel carousel · `/i/inv_b99f505fab294915?replay=1&compare=1`
 - Geneva indexer reference · `/i/inv_geneva_indexer?replay=1`
 - Self-leveling tray · `/i/inv_f72fb06c611342eb?replay=1`
 - Gravity Clock · `/i/inv_a1f1665e649b41c2`
