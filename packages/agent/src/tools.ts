@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
 import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, Euler, ParamError, shapeVolume, piecesBoundingRadius, piecesVerticalExtent, quatFromEuler, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
-import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegrity, auditSampledRotorClearance, type AssemblyIntegrityIssue, type CompoundGeometryIssue } from '@protolab/simulator';
+import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegrity, auditSampledRotorClearance, motorizedPropellerControls, type AssemblyIntegrityIssue, type CompoundGeometryIssue } from '@protolab/simulator';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
 
@@ -219,6 +219,14 @@ export class ToolRuntime {
       if (evidence.geometry !== geometry) return [`${id}: assembly geometry changed; rerun the original test`];
       return evidence.result.passed ? [] : [`${id}: latest test failed`];
     });
+    for (const control of motorizedPropellerControls(this.assembly)) {
+      const hasTarget = [...this.testSpecs.values()].some((test) => test.kind === 'motion' && (
+        (test.measure.joints.includes(control) && [test.criteria.minRevolutions, test.criteria.minJointRate_rad_s,
+          test.criteria.minJointAmplitude_rad].some((minimum) => minimum !== undefined && minimum > 0))
+        || test.measure.jointSwing?.some((swing) => swing.joint === control && swing.minEachWay_rad > 0)
+      ));
+      if (!hasTarget) pending.push(`${control}: no quantified rotor motion target. Define an additional test with the original brief's minimum revolutions, rate or swing and run it. Torque, stability and clearance alone do not verify the requested rotation; keep the existing test unchanged`);
+    }
     if (this.lastTestedAssembly !== this.assembly) pending.push('The latest assembly or drive settings have not been tested');
     return pending;
   }
@@ -291,7 +299,7 @@ export class ToolRuntime {
       result.failureReasons.push(...clearance.issues.map(({ rotorId, obstacleId, time_s, penetration_m }) =>
         `Rotor clearance: ${rotorId} intersects ${obstacleId} by ${(penetration_m * 1000).toFixed(2)} mm at ${time_s.toFixed(3)} s. Inspect their geometry and move or reshape the casing, vane or support to clear the blade sweep; preserve the requested components and original test targets.`));
     }
-    if (clearance.pairsChecked) result.notes.push(`Automatic rotor clearance checked ${clearance.pairsChecked} rotor/stator pairs at ${clearance.samplesChecked} recorded poses (30 Hz). This does not verify clearance between frames or airflow.`);
+    if (clearance.pairsChecked) result.notes.push(`Automatic rotor clearance checked ${clearance.pairsChecked} rotor/obstacle pairs at ${clearance.samplesChecked} recorded poses (30 Hz). This does not verify clearance between frames or airflow.`);
     return result;
   }
 

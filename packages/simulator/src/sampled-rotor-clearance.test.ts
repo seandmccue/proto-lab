@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { emptyAssembly, getPart, quatFromAxisAngle } from '@protolab/parts';
 import { IDENTITY, type Assembly, type GeometryPiece, type PartDefinition, type Trace, type Vec3 } from '@protolab/schema';
-import { auditSampledRotorClearance } from './index.ts';
+import { auditSampledRotorClearance, motorizedPropellerControls } from './index.ts';
 
 function box(position: Vec3, size: Vec3): GeometryPiece {
   return { shape: { kind: 'box', size }, offset: { ...IDENTITY, position }, role: 'structure', collide: true };
@@ -41,7 +41,7 @@ function fixture() {
     ],
     joints: [
       { ...joint('motor', 'rotor', 'revolute'), motor: { controlId: 'spin', stiffness: 1, damping: 1 } },
-      joint('rotor', 'spinner'), joint('motor', 'shroud'), joint('motor', 'brace'), joint('motor', 'payload'),
+      joint('rotor', 'spinner'), joint('motor', 'shroud'), joint('motor', 'brace'),
     ],
   };
   const bodies = Object.fromEntries(assembly.instances.map(({ id, transform }) => [id, transform]));
@@ -64,6 +64,43 @@ test('sampled clearance detects an omitted brace overlap during rotation and pre
   assert.deepEqual(trace, originalTrace);
 });
 
+test('sampled clearance also checks a separately grounded casing support', async () => {
+  const { assembly, trace } = fixture();
+  const stand = part('stand', [box([0, .2, 0], [.04, .4, .04])]);
+  const grounded = { ...instance('separate-stand', stand.id, [.07, 0, 0]), anchored: true };
+  assembly.parts.push(stand);
+  assembly.instances.push(grounded);
+  for (const frame of trace.frames) frame.bodies[grounded.id] = grounded.transform;
+
+  const report = await auditSampledRotorClearance(assembly, trace);
+  assert.equal(report.complete, true);
+  assert.equal(report.pairsChecked, 3);
+  assert.deepEqual(report.issues.map(({ obstacleId, time_s }) => ({ obstacleId, time_s })), [
+    { obstacleId: 'separate-stand', time_s: 0 },
+    { obstacleId: 'brace', time_s: 1 / 30 },
+  ]);
+});
+
+test('motorized propeller controls include the drive to a shaft fixed to a propeller', () => {
+  const { assembly } = fixture();
+  assembly.joints[0].b.instanceId = 'spinner';
+  assert.deepEqual(motorizedPropellerControls(assembly), ['spin']);
+});
+
+test('contact-enabled mounted parts are checked while loose payloads are exempt', async () => {
+  const { assembly, trace } = fixture();
+  for (const instance of assembly.instances) {
+    if (instance.id === 'rotor' || instance.id === 'brace') instance.free = true;
+  }
+  assert.deepEqual(motorizedPropellerControls(assembly), ['spin']);
+  const report = await auditSampledRotorClearance(assembly, trace);
+  assert.equal(report.complete, true);
+  assert.equal(report.pairsChecked, 2);
+  assert.deepEqual(report.issues.map(({ rotorId, obstacleId }) => ({ rotorId, obstacleId })), [
+    { rotorId: 'rotor', obstacleId: 'brace' },
+  ]);
+});
+
 test('a shallow fit under one tenth of a millimetre does not fail the clearance check', async () => {
   const { assembly, trace } = fixture();
   trace.frames = trace.frames.slice(0, 1);
@@ -77,6 +114,7 @@ test('a shallow fit under one tenth of a millimetre does not fail the clearance 
 test('a non-propeller mechanism is outside the clearance check scope', async () => {
   const { assembly, trace } = fixture();
   assembly.parts[0] = { ...rotor, category: 'wheels' };
+  assert.deepEqual(motorizedPropellerControls(assembly), []);
   assert.deepEqual(await auditSampledRotorClearance(assembly, trace), {
     complete: true, pairsChecked: 0, samplesChecked: 0, issues: [],
   });
