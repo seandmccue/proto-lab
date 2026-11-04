@@ -179,7 +179,7 @@
 .invention-card__tags span {
   padding: .26rem .45rem;
   border-radius: var(--radius);
-  background: rgba(9, 11, 15, .8);
+  background: var(--overlay);
   color: var(--ink);
   border: 1px solid var(--line-strong);
   backdrop-filter: blur(6px);

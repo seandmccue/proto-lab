@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { Assembly, Axis, Instance, Shape, TestResult, TestSpec, Transform } from '@protolab/schema';
 import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
 import IsoPreview from './IsoPreview.tsx';
+import { useTheme } from '../theme.ts';
 import { diagnosticColors, type DiagnosticTone } from './diagnosticColors.ts';
 
 export interface ViewerProps {
@@ -283,15 +284,19 @@ function Scene(props: ViewerProps) {
     }
   });
 
+  const light = useTheme() === 'light';
+  const stage = light
+    ? { bg: '#e9edf3', sky: '#ffffff', ground: '#c9d2dd', cell: '#d3dae3', section: '#bcc6d3' }
+    : { bg: '#0d1016', sky: '#dfe7f3', ground: '#0b0d12', cell: '#1b222c', section: '#2c3745' };
   const chassis = assembly.parts.find((p) => p.kind === 'body_frame');
   const body = assembly.instances.find((i) => i.id === 'body');
   const upper = assembly.parts.find((p) => p.kind === 'leg_segment');
 
   return (
     <>
-      <color attach="background" args={[blueprint ? '#0b1f36' : '#0d1016']} />
-      {!blueprint && <fog attach="fog" args={['#0d1016', radius * 6, radius * 14]} />}
-      <hemisphereLight args={['#dfe7f3', '#0b0d12', 0.55]} />
+      <color attach="background" args={[blueprint ? '#0b1f36' : stage.bg]} />
+      {!blueprint && <fog attach="fog" args={[stage.bg, radius * 6, radius * 14]} />}
+      <hemisphereLight args={[stage.sky, stage.ground, light ? 0.9 : 0.55]} />
       <directionalLight position={[0.6, 1.2, 0.8]} intensity={2.2} color="#fff4e6" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-camera-near={0.1} shadow-camera-far={5} shadow-camera-left={-1} shadow-camera-right={1} shadow-camera-top={1} shadow-camera-bottom={-1} />
       <directionalLight position={[-0.9, 0.6, -0.7]} intensity={0.8} color="#9cc4ff" />
       <directionalLight position={[0, 0.3, -1.2]} intensity={0.6} color="#2f7cff" />
@@ -304,9 +309,9 @@ function Scene(props: ViewerProps) {
           <Lightformer form="circle" intensity={0.5} color="#2f7cff" position={[0, -2, 0]} rotation-x={Math.PI / 2} scale={6} />
         </Environment>
       )}
-      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.5} cellColor={blueprint ? '#1e3a5f' : '#1b222c'} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : '#2c3745'} fadeDistance={radius * 8} fadeStrength={1.2} infiniteGrid />
-      {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={0.5} color="#000000" /></mesh>}
-      {!blueprint && !mini && <ContactShadows position={[0, 0, 0]} opacity={0.55} scale={radius * 6} blur={2.2} far={radius * 2} resolution={512} color="#000000" />}
+      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.5} cellColor={blueprint ? '#1e3a5f' : stage.cell} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : stage.section} fadeDistance={radius * 8} fadeStrength={1.2} infiniteGrid />
+      {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={light ? 0.22 : 0.5} color="#000000" /></mesh>}
+      {!blueprint && !mini && <ContactShadows position={[0, 0, 0]} opacity={light ? 0.35 : 0.55} scale={radius * 6} blur={2.2} far={radius * 2} resolution={512} color="#000000" />}
       <group onPointerMissed={() => onSelect?.(null)}>
         {assembly.instances.map((inst: Instance) => {
           const part = partById.get(inst.partId);
