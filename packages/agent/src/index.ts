@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { Assembly, Decision, Spec, TestResult, TestSpec, ToolLogEntry, VersionRecord } from '@protolab/schema';
 import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
@@ -57,9 +58,34 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   const versions: VersionRecord[] = [];
   const firstIteration = (input.startIteration ?? 0) + 1;
   let iteration = firstIteration - 1;
-  let pending: { assembly: Assembly; decision: Decision; log: ToolLogEntry[] } | null = null;
+  type PendingVersion = { assembly: Assembly; decision: Decision; log: ToolLogEntry[] };
+  let pending: PendingVersion | null = null;
   let currentLog: ToolLogEntry[] = [];
   let parentId: string | null = input.parent?.id ?? null;
+  const recordVersion = (draft: PendingVersion, tests: TestResult[], status: VersionRecord['status'], versionSpec: Spec) => {
+    const version: VersionRecord = {
+      id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId,
+      iteration, prompt: fullPrompt, spec: versionSpec, assembly: draft.assembly, tests,
+      decisions: [draft.decision], toolLog: [...draft.log, ...currentLog],
+      modelId: draft.decision.modelId ?? modelId, status, createdAt: new Date().toISOString(),
+    };
+    currentLog = [];
+    versions.push(version);
+    parentId = version.id;
+    emit({ type: 'version', version });
+  };
+  const untestedNote = 'The latest assembly was saved without a completed simulation. You can continue from this version.';
+  const checkpointUntested = (status: 'failed' | 'error', latestSpec: Spec) => {
+    const lastSaved = versions.at(-1);
+    if (!pending || !pending.assembly.instances.length || lastSaved?.iteration === iteration) return false;
+    const baseline = lastSaved?.assembly ?? input.parent?.assembly;
+    if (baseline && isDeepStrictEqual(pending.assembly, baseline)) return false;
+
+    recordVersion({
+      ...pending, decision: { ...pending.decision, summary: `${pending.decision.summary} ${untestedNote}` },
+    }, [], status, latestSpec);
+    return true;
+  };
   const rt = new ToolRuntime(spec, {
     onLog: (entry) => { currentLog.push(entry); emit({ type: 'tool', entry }); },
     onPlan: (s) => { spec = s; emit({ type: 'spec', spec: s }); },
@@ -96,8 +122,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       if (!pending) return;
       const existing = versions.length && versions[versions.length - 1].iteration === iteration ? versions[versions.length - 1] : null;
       if (existing) { existing.tests = [...existing.tests, result]; existing.assembly = rt.assembly; existing.spec = spec; existing.toolLog = [...existing.toolLog, ...currentLog]; existing.status = existing.tests.every((t) => t.passed) ? 'passed' : 'failed'; currentLog = []; emit({ type: 'version', version: existing }); return; }
-      const v: VersionRecord = { id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId, iteration, prompt: fullPrompt, spec, assembly: rt.assembly, tests: [result], decisions: [pending.decision], toolLog: [...pending.log, ...currentLog], modelId: pending.decision.modelId ?? modelId, status: result.passed ? 'passed' : 'failed', createdAt: new Date().toISOString() };
-      currentLog = []; versions.push(v); parentId = v.id; emit({ type: 'version', version: v });
+      recordVersion(pending, [result], result.passed ? 'passed' : 'failed', spec);
     },
   }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 }, savedParent?.assembly);
 
@@ -105,13 +130,16 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
     if (model) await runModelLoop(model, specialist, rt, input, savedParent, emit, maxIterations, (id) => { activeModelId = id; });
     else await runPlanner(rt, spec, { parent: input.parent ?? null, changeRequest: input.changeRequest, maxIterations });
   } catch (e) {
-    const message = (e as Error).message; emit({ type: 'error', message });
+    const checkpoint = checkpointUntested('error', rt.spec);
+    const message = (e as Error).message + (checkpoint ? ` ${untestedNote}` : '');
+    emit({ type: 'error', message });
     return { versions, status: 'error', summary: message, modelId, spec: rt.spec };
   }
   const status: 'passed' | 'failed' = rt.finalized?.status ?? (rt.pendingChecks().length ? 'failed' : 'passed');
-  const summary = rt.finalized?.summary ?? (status === 'passed' ? 'Design passed its tests.' : 'Prototype did not pass its tests. The design is inspectable; try a change request.');
-  // Keep the spec's unverified list in sync with the final statement.
-  if (versions.length) versions[versions.length - 1].spec = rt.spec;
+  const checkpoint = status === 'failed' && checkpointUntested(status, rt.spec);
+  const summary = (rt.finalized?.summary ?? (status === 'passed' ? 'Design passed its tests.' : 'Prototype did not pass its tests. The design is inspectable; try a change request.')) + (checkpoint ? ` ${untestedNote}` : '');
+  // Keep the most recent recorded spec's unverified list in sync with the final statement.
+  if (!checkpoint && versions.length) versions[versions.length - 1].spec = rt.spec;
   emit({ type: 'done', status, summary, modelId });
   return { versions, status, summary, modelId, spec: rt.spec };
 }

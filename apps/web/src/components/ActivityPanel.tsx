@@ -111,8 +111,8 @@ export default function ActivityPanel({ events, running, versions, currentVersio
       {versions.length > 0 && (
         <div className="flex flex-wrap gap-1 px-3 pb-2">
           {versions.map((v) => (
-            <button key={v.id} aria-pressed={currentVersionId === v.id} onClick={() => onPickVersion(v.id)} className={`rounded-full border px-2 py-0.5 text-xs ${currentVersionId === v.id ? 'border-accent bg-accent-soft text-accent-dark' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`} title={v.tests.map((t) => `${t.testId}: ${t.passed ? 'pass' : 'fail'}`).join('\n')}>
-              v{v.iteration} <span className={v.status === 'passed' ? 'text-emerald-600' : 'text-rose-500'}>{v.status === 'passed' ? '✓' : '✗'}</span>
+            <button key={v.id} aria-pressed={currentVersionId === v.id} onClick={() => onPickVersion(v.id)} className={`rounded-full border px-2 py-0.5 text-xs ${currentVersionId === v.id ? 'border-accent bg-accent-soft text-accent-dark' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`} title={v.tests.map((t) => `${t.testId}: ${t.passed ? 'pass' : 'fail'}`).join('\n') || 'No completed simulation'}>
+              v{v.iteration} <span className={!v.tests.length ? 'text-slate-500' : v.status === 'passed' ? 'text-emerald-600' : 'text-rose-500'}>{!v.tests.length ? 'Not tested' : v.status === 'passed' ? '✓' : '✗'}</span>
             </button>
           ))}
         </div>

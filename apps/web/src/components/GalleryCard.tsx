@@ -11,12 +11,14 @@ const buildDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', time
 export default function GalleryCard({ item, replay = false }: { item: InventionPublic; replay?: boolean }) {
   const summaryId = useId();
   const [hover, setHover] = useState(false);
-  const lastTest = item.latestWalk ?? item.latestTest ?? item.tests[item.tests.length - 1];
+  const untested = Boolean(item.currentVersionId && !item.tests.length);
+  const showReplay = replay && !untested;
+  const lastTest = untested ? undefined : item.latestWalk ?? item.latestTest ?? item.tests.at(-1);
   const metric = keyMetric(lastTest);
   const passed = item.status === 'passed';
   const createdAt = new Date(item.createdAt);
   return (
-    <Link to={`/i/${item.id}${replay ? '?replay=1' : ''}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={replay ? `Replay ${item.title}` : `Explore ${item.title} in 3D`} aria-describedby={summaryId}>
+    <Link to={`/i/${item.id}${showReplay ? '?replay=1' : ''}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={showReplay ? `Replay ${item.title}` : `Explore ${item.title} in 3D`} aria-describedby={summaryId}>
       <div className="invention-card__preview">
         <GalleryPreview key={item.currentVersionId ?? item.id} item={item} hover={hover} testId={lastTest?.testId} />
         <div className="invention-card__tags">
@@ -28,7 +30,7 @@ export default function GalleryCard({ item, replay = false }: { item: InventionP
       </div>
       <div className="invention-card__body">
         <div className="invention-card__metrics">
-          <span className={`invention-card__status ${passed ? 'is-passed' : ''}`}>{passed ? 'Tests passed' : 'Did not pass'}</span>
+          <span className={`invention-card__status ${passed ? 'is-passed' : ''}`}>{untested ? 'Not tested' : passed ? 'Tests passed' : 'Did not pass'}</span>
           {metric && <span className="invention-card__distance">{metric}</span>}
         </div>
         <h3>{item.title}</h3>
@@ -38,7 +40,7 @@ export default function GalleryCard({ item, replay = false }: { item: InventionP
         )}
         <div className="invention-card__footer">
           <span>{item.ownerLabel} · {item.modelId === 'deterministic-planner' ? 'planner' : item.modelId}</span>
-          <span className="invention-card__explore" aria-hidden="true">{replay ? 'Replay test ↗' : 'Explore in 3D ↗'}</span>
+          <span className="invention-card__explore" aria-hidden="true">{showReplay ? 'Replay test ↗' : 'Explore in 3D ↗'}</span>
         </div>
       </div>
     </Link>

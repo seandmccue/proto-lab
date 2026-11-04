@@ -115,6 +115,7 @@ export class JobRunner {
     update('running', 'Starting');
     this.db.prepare('UPDATE inventions SET status=?, updated_at=? WHERE id=?').run('running', now(), invention.id);
     let lastVersionId: string | null = null;
+    let savedUntestedVersion = false;
     const onEvent = (e: AgentEvent) => {
       const t = now();
       switch (e.type) {
@@ -153,6 +154,7 @@ export class JobRunner {
             VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET metrics_json=excluded.metrics_json, status=excluded.status, spec_json=excluded.spec_json`)
             .run(v.id, v.inventionId, v.parentVersionId, v.iteration, v.prompt, JSON.stringify(v.spec), `versions/${v.id}.json`, metrics, v.modelId, v.status, v.createdAt);
           lastVersionId = v.id;
+          savedUntestedVersion = !v.tests.length;
           this.db.prepare('UPDATE inventions SET current_version_id=?, updated_at=? WHERE id=?').run(v.id, now(), invention.id);
           push({ t, type: 'version', versionId: v.id, iteration: v.iteration, status: v.status });
           reportTiming();
@@ -193,7 +195,7 @@ export class JobRunner {
       reportTiming();
       // The description follows the latest build's summary until the owner publishes (publishing stores their own text).
       this.db.prepare('UPDATE inventions SET status=?, description=CASE WHEN visibility=\'public\' AND description<>\'\' THEN description ELSE ? END, updated_at=? WHERE id=?').run(out.status, out.summary, now(), invention.id);
-      update(out.status === 'error' ? 'error' : 'done', out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
+      update(out.status === 'error' ? 'error' : 'done', savedUntestedVersion ? 'Untested assembly saved' : out.status === 'passed' ? 'Passed' : out.status === 'failed' ? 'Did not pass' : 'Error', lastVersionId, out.status === 'error' ? 'agent_error' : null);
       await this.checkpoint(job.id);
     } catch (e) {
       push({ t: now(), type: 'error', message: (e as Error).message });

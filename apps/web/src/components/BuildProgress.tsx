@@ -285,8 +285,8 @@ export function IterationRibbon({ versions, currentId, onPick }: { versions: Ver
       <li className="iteration-ribbon-label">Versions</li>
       {versions.map((v) => { const t = v.tests[v.tests.length - 1]; return (
         <li key={v.id}>
-          <button type="button" className={`iteration-chip ${v.status === 'passed' ? 'is-pass' : 'is-fail'}`} aria-pressed={v.id === currentId} onClick={() => onPick(v.id)} title={t ? `${t.testId}: ${t.passed ? 'passed' : 'did not pass'}` : `v${v.iteration}`}>
-            v{v.iteration} <span className="iteration-chip-mark">{v.status === 'passed' ? 'Passed' : 'Failed'}</span>{t && keyMetric(t) && <span className="iteration-chip-metric">{keyMetric(t)}</span>}
+          <button type="button" className={`iteration-chip ${!t ? '' : v.status === 'passed' ? 'is-pass' : 'is-fail'}`} aria-pressed={v.id === currentId} onClick={() => onPick(v.id)} title={t ? `${t.testId}: ${t.passed ? 'passed' : 'did not pass'}` : 'No completed simulation'}>
+            v{v.iteration} <span className="iteration-chip-mark">{!t ? 'Not tested' : v.status === 'passed' ? 'Passed' : 'Failed'}</span>{t && keyMetric(t) && <span className="iteration-chip-metric">{keyMetric(t)}</span>}
           </button>
         </li>); })}
     </ol>

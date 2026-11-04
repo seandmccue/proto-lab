@@ -552,6 +552,7 @@ export default function Workspace() {
     prevVersion?.id === story[0]?.version.id && revisionHighlights.size > 0;
   const preserveOrbitColors = inv?.id === curatedOrreryId && !comparing;
   const diagnosticHighlights = tiltHighlight?.highlights ?? (showRevisionHighlights ? revisionHighlights : undefined);
+  const currentUntested = Boolean(inv?.currentVersionId && !inv.tests.length);
   const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
   const finalEvent = finalVersion && detail?.latestJob?.versionId === finalVersion.id
     ? [...events].reverse().find((event) => event.type === 'done' && event.status === 'passed')
@@ -660,7 +661,7 @@ export default function Workspace() {
           <p className="workbench-label">Invention workbench</p>
           <div className="workbench-title">
             <h1>{inv?.title ?? 'Loading invention…'}</h1>
-            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
+            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : currentUntested || inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
             {inv?.visibility === 'public' && <span className="workbench-badge workbench-published">published</span>}
           </div>
           <p className="workbench-prompt workbench-heading-prompt">{prompt}</p>
@@ -720,6 +721,7 @@ export default function Workspace() {
             {version && !showLive && (
               <div className="workbench-readout">
                 <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!diagnosticHighlights && !(comparing && storyStep === 0) && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
+                {!version.tests.length && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">Assembly saved · No completed simulation</span>}
                 {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
                 {diagnosticHighlights && <div className={`workbench-diagnostic${tiltHighlight ? ' is-failure' : ''}`}>
                   <strong>{tiltHighlight ? 'Tilt limit exceeded' : stepDecision ? 'Changed by Muse' : 'Changed in this revision'}</strong>
@@ -785,7 +787,7 @@ export default function Workspace() {
             {tab === 'spec' && <div className="overflow-auto p-3">{version ? <SpecPanel spec={version.spec} /> : <p className="text-xs text-slate-400">No spec yet.</p>}</div>}
             {tab === 'tests' && (
               <div className="overflow-auto p-3 space-y-3">
-                {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} · engine: {version?.tests[0]?.engine}</p>}
+                {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} {version?.tests[0]?.engine ? ` · engine: ${version.tests[0].engine}` : ''}</p>}
                 {version && !running && !finalVersion && <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">{renderExplanation(version)}</div>}
                 {detail && detail.versions.length > 1 && (
                   <div className="rounded-md border border-slate-200 p-2 text-xs">
@@ -793,7 +795,7 @@ export default function Workspace() {
                     <table className="w-full mono"><tbody>
                       {detail.versions.map((v) => { const t = v.tests[v.tests.length - 1]; const key = t ? (t.metrics.distance_m !== undefined ? ['distance', fmt.m2(t.metrics.distance_m)] : t.metrics.landingDistance_m !== undefined ? ['landing', fmt.m2(t.metrics.landingDistance_m)] : t.metrics.payloadDrop_m !== undefined ? ['payload drop', fmt.m2(t.metrics.payloadDrop_m)] : Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad')) ? ['amplitude', `${Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad'))![1].toFixed(2)} rad`] : ['tilt', fmt.deg(t.metrics.maxTilt_deg ?? 0)]) : ['', '']; return (
                         <tr key={v.id} className={`${v.id === versionId ? 'bg-accent-soft' : ''} cursor-pointer hover:bg-slate-50`} onClick={() => setVersionId(v.id)}>
-                          <td className="px-1 py-0.5 text-slate-500">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-slate-500">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${v.status === 'passed' ? 'text-emerald-700' : 'text-rose-600'}`}>{v.status === 'passed' ? '✓' : '✗'}</td>
+                          <td className="px-1 py-0.5 text-slate-500">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-slate-500">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${!t ? 'text-slate-500' : v.status === 'passed' ? 'text-emerald-700' : 'text-rose-600'}`}>{!t ? 'Not tested' : v.status === 'passed' ? '✓' : '✗'}</td>
                         </tr>); })}
                     </tbody></table>
                   </div>
@@ -868,7 +870,7 @@ export default function Workspace() {
             <p className="mt-1 text-sm text-slate-500">Anyone will be able to open the interactive 3D assembly, see its measured test results and remix it. Credit stays with you.</p>
             <label className="mt-4 block text-sm">Title<input name="title" defaultValue={inv.title} maxLength={80} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
             <label className="mt-3 block text-sm">What it does<textarea name="description" defaultValue={inv.description.slice(0, 400)} maxLength={400} rows={3} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <p className="mt-3 text-xs text-slate-500">Status shown on the card: {inv.status === 'passed' ? 'tests passed' : 'did not pass'} · model: {version?.modelId}</p>
+            <p className="mt-3 text-xs text-slate-500">Status shown on the card: {currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : 'did not pass'} · model: {version?.modelId}</p>
             <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setPublishOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>Publish</button></div>
           </form>
         </div>
