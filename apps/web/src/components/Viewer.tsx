@@ -291,7 +291,7 @@ function Scene(props: ViewerProps) {
   const stage = look === 'light'
     ? { bg: '#e9edf3', sky: '#ffffff', ground: '#c9d2dd', cell: '#d3dae3', section: '#bcc6d3' }
     : look === 'graphite'
-      ? { bg: '#222b38', sky: '#e8eef7', ground: '#141a24', cell: '#2f3a4a', section: '#3f4c60' }
+      ? { bg: '#1a1530', sky: '#ece7ff', ground: '#0f0b1f', cell: '#4a3f8f', section: '#7466c4' }
       : { bg: '#0d1016', sky: '#dfe7f3', ground: '#0b0d12', cell: '#1b222c', section: '#2c3745' };
   const chassis = assembly.parts.find((p) => p.kind === 'body_frame');
   const body = assembly.instances.find((i) => i.id === 'body');
@@ -314,7 +314,7 @@ function Scene(props: ViewerProps) {
           <Lightformer form="circle" intensity={0.5} color="#2f7cff" position={[0, -2, 0]} rotation-x={Math.PI / 2} scale={6} />
         </Environment>
       )}
-      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.5} cellColor={blueprint ? '#1e3a5f' : stage.cell} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : stage.section} fadeDistance={radius * 8} fadeStrength={1.2} infiniteGrid />
+      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={look === 'graphite' ? 0.9 : 0.5} cellColor={blueprint ? '#1e3a5f' : stage.cell} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={look === 'graphite' ? 1.5 : 1} sectionColor={blueprint ? '#2d5c99' : stage.section} fadeDistance={radius * 8} fadeStrength={1.2} infiniteGrid />
       {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={light ? 0.22 : 0.5} color="#000000" /></mesh>}
       {!blueprint && !mini && <ContactShadows position={[0, 0, 0]} opacity={light ? 0.35 : 0.55} scale={radius * 6} blur={2.2} far={radius * 2} resolution={512} color="#000000" />}
       <group onPointerMissed={() => onSelect?.(null)}>
