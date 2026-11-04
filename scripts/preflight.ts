@@ -68,9 +68,10 @@ const checks: [string, () => Promise<string>][] = [
     const failures = items.filter((item) => item.status !== 'passed');
     if (failures.length) throw new Error(`Featured builds without a pass: ${failures.map(({ title }) => title).join(', ')}`);
     if (judge) {
-      const required = ['inv_633b4887ad7f4cdc', 'inv_a1f1665e649b41c2', ...largeShowcases.map((entry) => entry.inventionId)];
+      const required = ['inv_633b4887ad7f4cdc', 'inv_a1f1665e649b41c2', ...largeShowcases.filter((entry) => entry.featured !== false).map((entry) => entry.inventionId)];
       const missing = required.filter((id) => !ids.has(id));
       if (missing.length) throw new Error(`Curated builds missing from the featured gallery: ${missing.join(', ')}`);
+      if (largeShowcases.some((entry) => entry.featured === false && ids.has(entry.inventionId))) throw new Error('An unfeatured build is still in the featured gallery');
     }
     return `${items.length} passing builds`;
   }],
@@ -363,8 +364,8 @@ if (judge) checks.push(
 if (judge) for (const entry of largeShowcases) {
   checks.push([`Large showcase ${entry.inventionId}`, async () => {
     const { invention } = await publicBuild(entry.inventionId);
-    if (!invention.featured || invention.currentVersionId !== entry.versionId || !invention.modelId?.startsWith('muse-')) {
-      throw new Error('Expected a featured Muse invention at the verified version');
+    if (invention.featured !== (entry.featured !== false) || invention.currentVersionId !== entry.versionId || !invention.modelId?.startsWith('muse-')) {
+      throw new Error('Expected the configured feature status and verified Muse version');
     }
     const replay = await version(entry.inventionId, entry.versionId);
     if (replay.id !== entry.versionId || replay.inventionId !== entry.inventionId || replay.modelId !== invention.modelId ||

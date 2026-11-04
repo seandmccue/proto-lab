@@ -1,0 +1,19 @@
+.starting-build-page { min-height: 100%; background: var(--bg); }
+.starting-build-shell { width: min(760px, 100%); margin: 0 auto; padding: clamp(24px, 7vh, 80px) 20px; }
+.starting-build-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: clamp(24px, 5vw, 48px); background: var(--panel); box-shadow: var(--shadow-panel); }
+.starting-build-label { color: var(--accent); font: 700 12px/1.5 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; margin: 0 0 18px; }
+.starting-build-status { display: flex; align-items: center; gap: 14px; }
+.starting-build-status h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.12; letter-spacing: -.04em; margin: 0; color: var(--ink); }
+.starting-build-pulse { flex: 0 0 14px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 8px var(--accent-soft); animation: starting-build-pulse 1.6s ease-in-out infinite; }
+.starting-build-description { color: var(--muted); line-height: 1.6; margin: 22px 0; }
+.starting-build-brief { white-space: pre-wrap; overflow-wrap: anywhere; margin: 24px 0 0; padding: 20px; border-radius: var(--radius); border-left: 3px solid var(--accent); background: var(--panel-2); color: var(--ink-2); line-height: 1.6; }
+.starting-build-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.starting-build-actions:empty { display: none; }
+.starting-build-footnote { margin: 16px 0 0; font-size: 13px; color: var(--muted); }
+.creation-save-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--accent-soft); color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.creation-save-notice p { margin: 0; flex: 1 1 240px; }
+.creation-save-notice strong { display: block; color: var(--ink); }
+.creation-save-notice--error { border-color: var(--warn); background: var(--warn-soft); color: var(--ink-2); }
+.creation-save-notice--error strong { color: var(--warn); }
+@keyframes starting-build-pulse { 50% { opacity: .45; box-shadow: 0 0 0 12px transparent; } }
+@media (prefers-reduced-motion: reduce) { .starting-build-pulse { animation: none; } }

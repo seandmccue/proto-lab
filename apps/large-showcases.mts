@@ -6,12 +6,14 @@ export interface LargeShowcase {
   componentCount: number;
   detail: string;
   showStrokeGuidesInitially?: boolean;
+  featured?: boolean;
 }
 
 // Add an entry after reviewing the exact saved Muse assembly and recorded tests.
 export const largeShowcases: readonly LargeShowcase[] = [
   {
     inventionId: 'inv_68d1f230cc8a4fd1',
+    featured: false,
     versionId: 'ver_7a88b2edc4fa4866',
     testIds: ['liftDump#2', 'deepHold#6'],
     baseline: { versionId: 'ver_49f6609375f34c0d', testId: 'liftDump#10' },

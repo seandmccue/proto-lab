@@ -4,6 +4,7 @@ import { createBrowserRouter, Outlet, RouterProvider, useLocation, useNavigation
 import './index.css';
 import Home from './pages/Home.tsx';
 import Workspace from './pages/Workspace.tsx';
+import StartingBuild from './pages/StartingBuild.tsx';
 import Gallery from './pages/Gallery.tsx';
 import HowItWorks from './pages/HowItWorks.tsx';
 import NotFound from './pages/NotFound.tsx';
@@ -118,6 +119,7 @@ function RouteLayout() {
 
 const router = createBrowserRouter([{ element: <RouteLayout />, children: [
   { path: '/', element: <Home />, errorElement: <NotFound /> },
+  { path: '/build/:requestId', element: <StartingBuild />, errorElement: <NotFound /> },
   { path: '/i/:id', element: <WorkspaceRoute />, errorElement: <NotFound /> },
   { path: '/gallery', element: <Gallery />, errorElement: <NotFound /> },
   { path: '/how-it-works', element: <HowItWorks />, errorElement: <NotFound /> },

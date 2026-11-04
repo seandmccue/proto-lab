@@ -52,6 +52,11 @@ test('large showcase curation requires the exact public passing Muse version and
     assert.equal(curateLargeShowcases(db, store, [entry]), 1);
     assert.deepEqual({ ...db.prepare('SELECT * FROM inventions WHERE id=?').get(entry.inventionId) }, { ...before, featured: 1 });
     assert.equal(curateLargeShowcases(db, store, [entry]), 0, 'already curated');
+    const beforeRemoval = db.prepare('SELECT * FROM inventions WHERE id=?').get(entry.inventionId);
+    assert.equal(curateLargeShowcases(db, store, [{ ...entry, featured: false }]), 1);
+    assert.deepEqual({ ...db.prepare('SELECT * FROM inventions WHERE id=?').get(entry.inventionId) }, { ...beforeRemoval, featured: 0 });
+    assert.deepEqual(store.getJson(key), manifest, 'unfeaturing preserves the saved model and replay');
+    assert.equal(curateLargeShowcases(db, store, [{ ...entry, featured: false }]), 0, 'stays unfeatured on restart');
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

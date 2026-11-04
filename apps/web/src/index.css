@@ -222,15 +222,17 @@ hr { border-color: var(--line); }
 .lab-hero h1 em { color: var(--violet); font-style: normal; }
 .lab-intro { max-width: 48ch; color: var(--muted); font-size: clamp(.95rem, 1.65vw, 1.12rem); line-height: 1.55; }
 .lab-form { margin-top: 1.4rem; }
-.lab-input { display: flex; gap: .4rem; align-items: center; margin-top: .45rem; padding: .35rem; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 3px 0 var(--line); }
+.lab-input { display: flex; gap: .4rem; align-items: flex-end; margin-top: .45rem; padding: .35rem; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 3px 0 var(--line); }
 .lab-input:focus-within { border-color: var(--violet); outline: 2px solid var(--violet); outline-offset: 2px; }
-.lab-input input { flex: 1; min-width: 0; padding: .45rem .65rem; background: transparent; outline: none; font-size: 1rem; }
-.lab-input input::placeholder { color: var(--muted); }
+.lab-input textarea { flex: 1; min-width: 0; min-height: 5rem; max-height: 14rem; padding: .45rem .65rem; background: transparent; outline: none; font-size: 1rem; line-height: 1.45; resize: vertical; }
+.lab-input textarea::placeholder { color: var(--muted); }
 .lab-input button { min-height: 44px; white-space: nowrap; border-radius: var(--radius); }
 .lab-form p { margin-top: .65rem; color: var(--muted); font-size: .78rem; line-height: 1.45; }
 .lab-examples { display: grid; gap: .45rem; margin-block: 1rem 0; }
 .lab-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .lab-chips .chip { min-height: 38px; padding-block: .35rem; font-size: .78rem; }
+.lab-chips .chip[aria-pressed="true"] { color: var(--violet); border-color: var(--violet); background: var(--accent-soft); }
+.lab-example-hint { color: var(--muted); font-size: .75rem; }
 .lab-chip-muse { background: var(--lavender); color: var(--violet-dark); border-color: var(--line-strong); }
 .lab-hero-links { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .9rem; margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
 .lab-hero-links > a:not(.lab-hero-proof) { display: inline-flex; align-items: center; gap: .35rem; min-height: 44px; color: var(--violet-dark); font-size: .88rem; font-weight: 700; }
@@ -329,6 +331,8 @@ hr { border-color: var(--line); }
   .site-new-short { display: inline; }
   .lab-how-steps { grid-template-columns: minmax(0, 1fr); }
   .lab-input button { padding-inline: .65rem; }
+  .lab-input { flex-direction: column; align-items: stretch; }
+  .lab-input textarea { width: 100%; flex: auto; }
   .lab-hero-title { margin-block: .4rem .5rem; }
   .lab-form { margin-top: .85rem; }
 }

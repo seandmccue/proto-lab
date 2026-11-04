@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { tiltDeg, upVector } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
+import CreationSaveNotice from '../components/CreationSaveNotice.tsx';
 import Viewer from '../components/Viewer.tsx';
 import { recordedPenPath } from '../components/replayEvidence.ts';
 import ReplayComparison from '../components/ReplayComparison.tsx';
@@ -340,14 +341,15 @@ export default function Workspace() {
     return saved;
   }, [detail?.versions, detail?.invention.id, ownBaselineId, sourceVersion, replayLink, revisionResultId, showcase]);
 
+  const [missing, setMissing] = useState(false);
   const refresh = useCallback(async () => {
     const d = await api.invention(id);
     setDetail(d);
+    setMissing(false);
     if (!jobId && d.latestJob) { setJobId(d.latestJob.id); setJobStatus(d.latestJob.status); }
     return d;
   }, [id, jobId]);
 
-  const [missing, setMissing] = useState(false);
   useEffect(() => { refresh().catch((e) => { if (/not found|HTTP 404/i.test((e as Error).message)) setMissing(true); else setError((e as Error).message); }); }, [refresh]);
 
   // Poll the job while it runs
@@ -649,6 +651,7 @@ export default function Workspace() {
     return (
       <div className="min-h-screen">
         <Header />
+        <CreationSaveNotice requestId={params.get('request')} inventionId={id} jobId={jobId} onRecovered={() => { void refresh().catch(() => {}); }} />
         <main className="mx-auto max-w-2xl px-4 py-20 text-center">
           <p className="text-xs font-mono uppercase tracking-widest text-muted">Invention unavailable</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">This invention is private or doesn’t exist</h1>
@@ -738,6 +741,7 @@ export default function Workspace() {
         <div className="workbench-heading-actions">{workbenchActions}</div>
       </div>
       {error && !changeMode && <div role="alert" className="bg-fail/15 px-4 py-2 text-sm text-fail">{error}</div>}
+      <CreationSaveNotice requestId={params.get('request')} inventionId={id} jobId={jobId} />
       {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} saving={saving} />}
       {stoppedBuild && <section className="workbench-build-outcome" aria-label="Build outcome">
         <div className="workbench-build-outcome-status" role="status">
