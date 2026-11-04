@@ -510,6 +510,28 @@ test('define_test rejects minRevolutions on a swinging joint, and the dance floo
   assert.ok(!ok.error, `one leg-bar pendulum is not a legged machine: ${ok.error}`);
 });
 
+test('a velocity sine with a positive offset can pass a revolution target', async () => {
+  const rt = new ToolRuntime(baseSpec('Variable-speed rotor'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  const assembly = await rt.call('assemble', { rationale: 'Mount a rotor on a gearmotor', ops: [
+    { op: 'place', id: 'tower', part: 'tower-150', position: [0, 0, 0], anchored: true },
+    { op: 'mount', id: 'motor', part: 'gearmotor-37', onto: 'tower', connector: 'top', via: 'flange', joint: 'fixed' },
+    { op: 'mount', id: 'rotor', part: 'propeller-3x200', onto: 'motor', connector: 'shaft', via: 'shaft', joint: 'revolute', motor: { controlId: 'spin', stiffness: 0.3, damping: 0.1 } },
+  ] }) as { error?: string };
+  assert.ok(!assembly.error, assembly.error);
+  const drives = await rt.call('set_drives', { drives: [{
+    controlId: 'spin', mode: 'velocity', rampIn_s: 0.5, profile: { kind: 'sine', offset: 6, amplitude: 0.25, frequency_hz: 1 },
+  }] }) as { error?: string };
+  assert.ok(!drives.error, drives.error);
+  const test = await rt.call('define_test', { test: {
+    kind: 'motion', id: 'variable_speed_spin', duration_s: 4, measure: { joints: ['spin'], noGroundContact: ['rotor'] },
+    criteria: { minRevolutions: 2, torqueWithinRating: true },
+  } }) as { error?: string };
+  assert.ok(!test.error, test.error);
+  const run = await rt.call('run_test', { test_id: 'variable_speed_spin' }) as { passed: boolean; metrics: Record<string, number>; failureReasons: string[] };
+  assert.equal(run.passed, true, JSON.stringify(run.failureReasons));
+  assert.ok(run.metrics['spin.revolutions'] >= 2);
+});
+
 test('define_test accepts its test object sent as a JSON string', async () => {
   const rt = new ToolRuntime(baseSpec('Windmill'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
   await rt.call('assemble', { rationale: 'tower + rotor', ops: [
@@ -535,10 +557,22 @@ test('assemble treats an op that names only an instance, or says delete, as remo
 
 test('define_test lifts walk/launch thresholds nested under criteria; place without a position stands a tower on the ground, anchored', async () => {
   const rt = new ToolRuntime(baseSpec('Catapult'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
-  const r = await rt.call('assemble', { rationale: 'tower with no position', ops: [{ op: 'place', id: 'tower', part: 'tower-500' }] }) as { error?: string };
+  const r = await rt.call('assemble', { rationale: 'tower with no position', ops: [{ op: 'place', id: 'tower', part: 'tower-500' }] }) as { error?: string; assembly: { lowestPoint_m: number } };
   assert.ok(!r.error, r.error);
-  const tower = rt.assembly.instances.find((i) => i.id === 'tower')!;
-  assert.ok(tower.anchored, 'tower anchored'); assert.ok(Math.abs(tower.transform.position[1] - 0.25) < 1e-6, `tower stands on the ground (${tower.transform.position[1]})`);
+  assert.ok(rt.assembly.instances[0].anchored);
+  assert.ok(Math.abs(r.assembly.lowestPoint_m) < 1e-6);
+  const rotated = await rt.call('assemble', { rationale: 'Lay the tower on its side', ops: [
+    { op: 'place', id: 'tower', part: 'tower-500', rotation_deg: [0, 0, 90], anchored: false },
+  ] }) as { error?: string; assembly: { lowestPoint_m: number } };
+  assert.ok(!rotated.error, rotated.error);
+  assert.equal(rt.assembly.instances[0].anchored, false);
+  assert.ok(Math.abs(rotated.assembly.lowestPoint_m) < 1e-6);
+  assert.ok(Math.abs(rt.assembly.instances[0].transform.position[1] - 0.182079) < 1e-6);
+  await rt.call('assemble', { rationale: 'Use the specified pose', ops: [
+    { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0.1, 0], anchored: false },
+  ] });
+  assert.deepEqual(rt.assembly.instances[0].transform.position, [0, 0.1, 0]);
+  assert.equal(rt.assembly.instances[0].anchored, false);
   await rt.call('assemble', { rationale: 'projectile', ops: [{ op: 'place', id: 'pizza', part: 'foam-pizza-80', position: [0.1, 0.6, 0], free: true }] });
   const t = await rt.call('define_test', { test: { kind: 'launch', id: 'throw', duration_s: 5, projectile: 'pizza', direction: 'x', criteria: { targetDistance_m: 0.5, tolerance_m: 0.2 } } }) as { error?: string };
   assert.ok(!t.error, t.error);

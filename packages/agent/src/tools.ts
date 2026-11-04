@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
-import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, ParamError, shapeVolume, piecesBoundingRadius, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
+import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, Euler, ParamError, shapeVolume, piecesBoundingRadius, piecesVerticalExtent, quatFromEuler, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
 import { runTest, auditCompoundGeometry, auditPartGeometry, type CompoundGeometryIssue } from '@protolab/simulator';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
@@ -342,10 +342,24 @@ export class ToolRuntime {
         case 'assemble': {
           { const r = rawArgs as Record<string, unknown>; for (const k of ['operations', 'steps', 'assembly_ops', 'actions']) if (r.ops === undefined && Array.isArray(r[k])) { r.ops = r[k]; delete r[k]; } for (const k of ['reason', 'why', 'description', 'note']) if (r.rationale === undefined && typeof r[k] === 'string') { r.rationale = r[k]; delete r[k]; } if (r.rationale === undefined && Array.isArray(r.ops)) r.rationale = 'Assembly step'; }
           const raw = rawArgs as { ops?: unknown[] };
-          if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((o) => normaliseOp(o));
-          if (Array.isArray(raw?.ops)) for (const o of raw.ops as Array<Record<string, unknown>>) { // a place with no position stands on the ground; a tower/base/stand placed that way is anchored
-            if (o.op === 'place' && o.position === undefined && typeof o.part === 'string') { const p = this.resolve(o.part); if (p) { o.position = [0, +(p.dimensions_m[1] / 2).toFixed(4), 0]; if (o.anchored === undefined && /tower|base|stand|pedestal|plate|mast|pole/i.test(`${o.id} ${o.part}`)) o.anchored = true; } }
-          }
+          if (Array.isArray(raw?.ops)) raw.ops = raw.ops.map((input) => {
+            const normalized = normaliseOp(input);
+            if (!normalized || typeof normalized !== 'object') return normalized;
+            const op = normalized as Record<string, unknown>;
+            if (op.op !== 'place' || op.position !== undefined || typeof op.part !== 'string') return op;
+            const part = this.resolve(op.part);
+            const rotation = Euler.safeParse(op.rotation_deg === undefined ? [0, 0, 0] : op.rotation_deg);
+            if (!part || !rotation.success) return op;
+            const [x, y, z] = rotation.data;
+            const radians = Math.PI / 180;
+            const [lowestY] = piecesVerticalExtent(part.geometry, {
+              position: [0, 0, 0],
+              rotation: quatFromEuler([x * radians, y * radians, z * radians]),
+            });
+            op.position = [0, -lowestY || 0, 0];
+            if (op.anchored === undefined && /tower|base|stand|pedestal|plate|mast|pole/i.test(`${op.id} ${op.part}`)) op.anchored = true;
+            return op;
+          });
           const a = AssembleArgs.parse(rawArgs);
           const before = new Map(this.assembly.instances.map((instance) => [instance.id, instance.partId]));
           const r = applyOps(this.assembly, a.ops, this.resolve, { maxInstances: this.spec.constraints.maxParts, maxMass_kg: this.spec.constraints.maxMass_kg, maxSize_m: this.spec.constraints.maxSize_m }, () => [...catalog().map((part) => this.savedParts.get(part.id) ?? part), ...this.customParts.values()]);
@@ -386,19 +400,27 @@ export class ToolRuntime {
           }
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.minDistance_m === 'number' && raw.test.minDistance_m > 1.5) throw new Error(`minDistance_m ${raw.test.minDistance_m} m is unrealistic for a tabletop walker in ${raw.test.duration_s ?? 6} s; small legged machines manage 0.2–0.6 m. Use a target the user asked for or a realistic one.`);
           if (raw?.test && raw.test.kind === 'walk' && typeof raw.test.maxTilt_deg === 'number' && raw.test.maxTilt_deg < 8) throw new Error(`maxTilt_deg ${raw.test.maxTilt_deg}° is tighter than this simulator measures for the recipes (3–5° bare, 6–8° with a shell or claws on top); a limit that tight burns the whole test budget chasing noise. Use 10–15° unless the user asked for a stability figure.`);
-          if (raw?.test && raw.test.kind === 'motion') { // a swing never completes a revolution: minRevolutions on a sine/gait-driven joint is a test that can only fail
-            const m = raw.test.measure as { joints?: unknown } | undefined; const c0 = raw.test.criteria as Record<string, unknown> | undefined;
-            if (c0 && typeof c0.minRevolutions === 'number' && Array.isArray(m?.joints)) {
-              const swinging = (m!.joints as unknown[]).filter((j) => this.assembly.controller.drives.some((d) => d.controlId === j && (d.profile.kind === 'sine' || d.profile.kind === 'gait')));
-              if (swinging.length) throw new Error(`minRevolutions cannot be met by ${swinging.join(', ')}: a sine or gait drive swings back and forth and never completes a revolution. Measure swinging joints with minJointAmplitude_rad (or define a separate test for the spinning joints only).`);
-            }
-          }
           if (raw?.test && raw.test.kind === 'motion' && this.assembly.parts.some((p) => p.category === 'legs') && this.assembly.instances.filter((i) => this.assembly.parts.find((p) => p.id === i.partId)?.category === 'legs').length >= 4) { // a legged machine (four or more leg segments; a single leg-bar pendulum is not one) dancing in place measures 8–12° of tilt and 5–12 cm of drift on the recipe
             const c = raw.test.criteria as Record<string, unknown> | undefined;
             if (c && typeof c.maxBaseTilt_deg === 'number' && c.maxBaseTilt_deg < 10) throw new Error(`maxBaseTilt_deg ${c.maxBaseTilt_deg}° is tighter than a legged machine measures while dancing in place (8–12° on the recipe, more with big feet); use 12–15° unless the user asked for a stability figure.`);
             if (c && typeof c.maxBaseDrift_m === 'number' && c.maxBaseDrift_m < 0.12) throw new Error(`maxBaseDrift_m ${c.maxBaseDrift_m} m is tighter than a legged machine measures while dancing in place (5–12 cm on the recipe); use 0.15 m, or test a walk if travel is the point.`);
           }
           const a = DefineTestArgs.parse(rawArgs);
+          const test = a.test;
+          if (test.kind === 'motion' && test.criteria.minRevolutions !== undefined) {
+            const requiredTravel = test.criteria.minRevolutions * 2 * Math.PI;
+            const insufficient = this.assembly.controller.drives.filter(({ controlId, mode, profile }) => {
+              if (mode !== 'position' || !test.measure.joints.includes(controlId)
+                || (profile.kind !== 'sine' && profile.kind !== 'gait')) return false;
+              const amplitude = Math.abs(profile.amplitude);
+              const lift = profile.kind === 'gait' && profile.role === 'lift';
+              const low = profile.offset + (lift ? Math.min(0, profile.amplitude) : -amplitude);
+              const high = profile.offset + (lift ? Math.max(0, profile.amplitude) : amplitude);
+              // The trace also counts travel from the zero-angle assembled pose.
+              return requiredTravel > Math.max(0, high) - Math.min(0, low);
+            });
+            if (insufficient.length) throw new Error(`minRevolutions cannot be met by ${insufficient.map(({ controlId }) => controlId).join(', ')}: the commanded position range is smaller than the requested travel. Measure swinging joints with minJointAmplitude_rad or test the spinning joints separately.`);
+          }
           const previous = this.testSpecs.get(a.test.id);
           if (previous && this.testEvidence.get(a.test.id)?.result.trace.frames.length) {
             const criteria = (test: TestSpec) => {
