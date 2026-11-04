@@ -34,7 +34,7 @@
 }
 .part-inventory-results {
   min-height: 4.5rem;
-  max-height: clamp(44rem, 88vh, 70rem);
+  max-height: 140rem;
   overflow: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
