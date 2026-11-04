@@ -230,9 +230,9 @@ hr { border-color: var(--line); }
 .lab-input input::placeholder { color: var(--muted); }
 .lab-input button { min-height: 44px; white-space: nowrap; border-radius: var(--radius); }
 .lab-form p { margin-top: .65rem; color: var(--muted); font-size: .78rem; line-height: 1.45; }
-.lab-examples { display: grid; gap: .45rem; margin-block: .7rem 1.25rem; }
+.lab-examples { display: grid; gap: .45rem; margin-block: 1.1rem 0; padding-top: 1rem; border-top: 1px solid var(--line); }
 .lab-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
-.lab-chips .chip { min-height: 44px; font-size: .8rem; }
+.lab-chips .chip { min-height: 38px; padding-block: .35rem; font-size: .78rem; }
 .lab-chip-muse { background: var(--lavender); color: var(--violet-dark); border-color: var(--line-strong); }
 .lab-hero-links { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .9rem; margin-top: .7rem; }
 .lab-hero-links > a:not(.lab-hero-proof) { display: inline-flex; align-items: center; gap: .35rem; min-height: 44px; color: var(--violet-dark); font-size: .88rem; font-weight: 700; }

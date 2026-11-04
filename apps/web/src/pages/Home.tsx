@@ -207,6 +207,16 @@ export default function Home() {
               <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
               <a href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>
             </div>
+            {examples.length > 0 && <div className="lab-examples">
+              <span className="lab-label">Try a brief</span>
+              <div className="lab-chips">
+                {examples.map((ex) => (
+                  <button key={ex.id} onClick={() => { setPrompt(ex.prompt); document.getElementById('invention-prompt')?.focus(); }} disabled={busy} className={`chip ${ex.id === 'muse' ? 'lab-chip-muse' : ''}`} title={ex.prompt}>
+                    {ex.id === 'muse' && <span aria-hidden="true">✦</span>}{ex.title}
+                  </button>
+                ))}
+              </div>
+            </div>}
           </div>
           <figure className="lab-art">
             <div className="lab-art-heading">
@@ -235,16 +245,6 @@ export default function Home() {
             </figcaption>
           </figure>
         </section>
-        {examples.length > 0 && <div className="lab-examples">
-          <span className="lab-label">Try a brief</span>
-          <div className="lab-chips">
-            {examples.map((ex) => (
-              <button key={ex.id} onClick={() => { setPrompt(ex.prompt); document.getElementById('invention-prompt')?.focus(); }} disabled={busy} className={`chip ${ex.id === 'muse' ? 'lab-chip-muse' : ''}`} title={ex.prompt}>
-                {ex.id === 'muse' && <span aria-hidden="true">✦</span>}{ex.title}
-              </button>
-            ))}
-          </div>
-        </div>}
         {largeBuilds.length > 0 && (
           <section className="lab-section" aria-labelledby="large-builds-title">
             <div className="lab-section-heading">
