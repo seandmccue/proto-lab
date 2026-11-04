@@ -36,6 +36,9 @@ A running instance can otherwise overwrite the replacement with its next checkpo
 The pre-migration import remains at its separate R2 key. Archives contain private creations and
 session identifiers, so keep the bucket and backups private.
 
-The archive checkpoint is designed for a single writer and small demo data. It uploads the whole
-archive for each checkpoint and has a 90 MiB cap. For longer-term use, move version traces to
-immutable R2 objects and checkpoint metadata independently.
+The archive checkpoint uses a single writer and uploads the complete history for each checkpoint.
+Archives up to 90 MiB use one request; larger archives use authenticated 16 MiB multipart uploads,
+with a 512 MiB archive limit. R2 keeps the prior checkpoint available until the replacement completes.
+Restore verifies the downloaded size and, for new checkpoints, its SHA-256 checksum before replacing
+local data. Legacy checkpoints remain readable. For longer-term use, move version traces to immutable
+R2 objects and checkpoint metadata independently.
