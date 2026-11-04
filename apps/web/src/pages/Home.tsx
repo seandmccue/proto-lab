@@ -221,7 +221,7 @@ export default function Home() {
             <div className="lab-art-stage">
               {activeVersion ? (
                 <div className="lab-art-machine" aria-hidden="true">
-                  <Viewer assembly={activeVersion.assembly} test={activeTest} playing={heroPlaying} explode={0} blueprint={false} selectedId={null} mini />
+                  <Viewer assembly={activeVersion.assembly} test={activeTest} playing={heroPlaying} explode={0} blueprint={false} selectedId={null} mini stage="dark" />
                 </div>
               ) : hero?.previewUrl ? (
                 <img src={hero.previewUrl} alt="Mechanical crab assembly" width="500" height="414" />

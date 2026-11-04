@@ -5,7 +5,9 @@
 /* ProtoLab design tokens — dark engineering instrument theme.
    Legacy names (--paper, --surface, --violet, --lavender, --citron …) are kept as aliases so
    every stylesheet picks up the theme without renaming. New code should use the semantic names. */
-:root {
+/* The dark set is also the look of the 'stage' surfaces (header bar, hero preview, thumbnail plates) inside the light theme. */
+:root,
+:root[data-theme="light"] :is(.stage-dark, .site-header, .lab-art, .invention-card__preview) {
   color-scheme: dark;
   /* channel triples feed Tailwind's opacity modifiers (bg-accent/15); keep the hex twins in sync */
   --bg-rgb: 9 11 15;           --bg: #090b0f;            /* page canvas */
@@ -36,6 +38,7 @@
   --glow: 0 0 0 1px var(--accent-line), 0 0 24px -6px rgba(47, 124, 255, .55);
   --shadow-panel: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 12px 32px -20px rgba(0, 0, 0, .9);
   --shadow-pop: 0 .5rem 1.5rem rgba(0, 0, 0, .6);
+  --stage-dots: rgba(255, 255, 255, .13);        /* dot grid behind thumbnails */
   --radius: 6px;
   --radius-lg: 10px;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -50,6 +53,7 @@
 }
 /* Light theme: the same instrument-panel language on cool white, like a CAD workspace in daylight. */
 :root[data-theme="light"] {
+  --stage-dots: rgba(255, 255, 255, .13);
   color-scheme: light;
   --bg-rgb: 243 245 248;       --bg: #f3f5f8;
   --bg-elev: #ffffff;
@@ -112,6 +116,7 @@ hr { border-color: var(--line); }
 .panel-title { @apply text-[11px] font-semibold uppercase tracking-wider; color: var(--muted); font-family: var(--font-mono); letter-spacing: .12em; }
 
 .site-header {
+  color: var(--ink);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -210,6 +215,7 @@ hr { border-color: var(--line); }
 }
 .lab-hero-proof:hover, .lab-art-link:hover { text-decoration: underline; }
 .lab-art {
+  color: var(--ink);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);

@@ -30,6 +30,7 @@ export interface ViewerProps {
   seekTo?: number | null;
   autoRotate?: boolean;
   mini?: boolean;
+  stage?: 'dark' | 'light';  // force a stage look regardless of the site theme (dark plates on the light theme)
   zoom?: number;
   strokeTargets?: NonNullable<Extract<TestSpec, { kind: 'motion' }>['measure']['linearTravel']>;
   pathInstanceId?: string;
@@ -284,7 +285,8 @@ function Scene(props: ViewerProps) {
     }
   });
 
-  const light = useTheme() === 'light';
+  const siteTheme = useTheme();
+  const light = (props.stage ?? siteTheme) === 'light';
   const stage = light
     ? { bg: '#e9edf3', sky: '#ffffff', ground: '#c9d2dd', cell: '#d3dae3', section: '#bcc6d3' }
     : { bg: '#0d1016', sky: '#dfe7f3', ground: '#0b0d12', cell: '#1b222c', section: '#2c3745' };
