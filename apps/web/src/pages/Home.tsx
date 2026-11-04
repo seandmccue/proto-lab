@@ -187,7 +187,10 @@ export default function Home() {
       <main className="home-shell">
         <section className="lab-hero" aria-labelledby="hero-title">
           <div className="lab-hero-copy">
-            <h1 id="hero-title">Turn an idea into a <em>3D prototype.</em></h1>
+            <div className="lab-hero-title">
+              <img className="lab-hero-mascot" src="/muse-blueprint.png" alt="" width="512" height="512" decoding="async" />
+              <h1 id="hero-title">Turn an idea into a <em>3D prototype.</em></h1>
+            </div>
             <p className="lab-intro">Describe a mechanism. Meta Muse assembles it from parts, tests how it moves, and revises it from the results.</p>
             <form onSubmit={submit} className="lab-form">
               <label htmlFor="invention-prompt" className="lab-label">Describe your prototype</label>

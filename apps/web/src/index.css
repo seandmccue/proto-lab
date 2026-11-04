@@ -82,9 +82,9 @@
   --shadow-panel: 0 1px 2px rgba(15, 20, 25, .04), 0 12px 32px -22px rgba(15, 20, 25, .25);
   --shadow-pop: 0 .5rem 1.5rem rgba(15, 20, 25, .18);
 }
-/* Stage surfaces inside the light theme (header bar, hero preview card): a mid graphite blue,
+/* Stage surfaces inside the light theme (the hero preview card): a mid graphite blue,
    darker than the page so machines sit on a stage, but well short of the night-mode black. */
-:root[data-theme="light"] :is(.stage-dark, .site-header, .lab-art) {
+:root[data-theme="light"] :is(.stage-dark, .lab-art) {
   color-scheme: dark;
   --bg-rgb: 30 38 50;          --bg: #1e2632;
   --bg-elev: #232c3a;
@@ -163,7 +163,7 @@ hr { border-color: var(--line); }
 }
 .site-header--compact { padding-inline: clamp(1rem, 2.5vw, 2rem); padding-block: .5rem; }
 .site-brand { display: inline-flex; align-items: center; gap: .55rem; font-size: 1.2rem; font-weight: 800; letter-spacing: -.04em; }
-.site-brand img { border-radius: 8px; }
+.site-brand img { object-fit: contain; }
 .site-brand-accent { color: var(--accent); }
 .site-identity { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: .32rem; min-height: 4.2rem; }
 .site-attribution {
@@ -197,7 +197,7 @@ hr { border-color: var(--line); }
 .lab-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.16fr) minmax(0, 1fr);
-  align-items: center;
+  align-items: start;   /* headline top sits level with the top of the preview card */
   gap: clamp(1.5rem, 5vw, 5rem);
   padding-block: clamp(1.25rem, 4vw, 3.6rem) clamp(1rem, 2vw, 1.75rem);
 }
@@ -207,10 +207,14 @@ hr { border-color: var(--line); }
   text-transform: uppercase;
 }
 .lab-kicker { display: inline-flex; align-items: center; gap: .45rem; border-radius: 4px; padding: .4rem .7rem; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent-hi); }
+.lab-hero { --hero-size: clamp(2.1rem, 4.2vw, 4rem); }
+/* Mascot beside the headline, exactly two title lines tall. */
+.lab-hero-title { display: flex; align-items: center; gap: clamp(.6rem, 1.6vw, 1.25rem); margin: -.1em 0 .8rem; }
+.lab-hero-mascot { flex: none; height: calc(1.88 * var(--hero-size)); width: auto; filter: drop-shadow(0 .6rem 1rem rgba(15, 20, 25, .18)); }
 .lab-hero h1 {
-  max-width: 12ch;
-  margin: .9rem 0 .8rem;
-  font-size: clamp(2.65rem, 5.8vw, 5.4rem);
+  max-width: 11ch;
+  margin: 0;
+  font-size: var(--hero-size);
   font-weight: 800;
   line-height: .94;
   letter-spacing: -.07em;
@@ -314,7 +318,7 @@ hr { border-color: var(--line); }
   .site-new-short { display: inline; }
   .lab-how-steps { grid-template-columns: minmax(0, 1fr); }
   .lab-input button { padding-inline: .65rem; }
-  .lab-hero h1 { margin-block: .55rem .5rem; }
+  .lab-hero-title { margin-block: .4rem .5rem; }
   .lab-form { margin-top: .85rem; }
 }
 @media (max-width: 390px) {
