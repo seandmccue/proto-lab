@@ -335,3 +335,37 @@ test('sampled rotor clearance blocks a false pass and Muse repairs the same meas
   assert.equal(verified.metrics.sampledRotorClearanceViolations, 0);
   assert.equal(verified.metrics.sampledRotorClearanceComplete, 1);
 });
+
+test('a rotor requires a quantified motion test before finalization', async () => {
+  const rt = new ToolRuntime(baseSpec('Verify two rotor turns in four seconds and rated load'), {
+    onLog() {}, onPlan() {}, onAssembly() {}, onTest() {},
+  });
+  const loadCheck = { ...spinCheck, id: 'rated_load', criteria: { torqueWithinRating: true } };
+  for (const [name, args] of [
+    ['assemble', buildRotor], ['set_drives', drive], ['define_test', { test: loadCheck }],
+  ] as const) {
+    const result = await rt.call(name, structuredClone(args)) as { error?: string };
+    assert.equal(result.error, undefined, result.error);
+  }
+  const load = await rt.call('run_test', { test_id: loadCheck.id }) as { passed: boolean; metrics: Record<string, number> };
+  assert.equal(load.passed, true);
+  assert(load.metrics['spin.revolutions'] >= 2, 'incidental rotation is measured without an authored threshold');
+  const savedLoad = structuredClone(rt.tests[0]);
+  const blocked = await rt.call('finalize_design', finalize) as { error: string };
+  assert.match(blocked.error, /spin: no quantified rotor motion target/);
+  assert.match(blocked.error, /Define an additional test/);
+  assert.equal(rt.finalized, null);
+
+  const overwrite = await rt.call('define_test', { test: { ...spinCheck, id: loadCheck.id } }) as { error: string };
+  assert.match(overwrite.error, /fixed when comparing revisions/);
+  const defined = await rt.call('define_test', { test: structuredClone(spinCheck) }) as { error?: string };
+  assert.equal(defined.error, undefined, defined.error);
+  const untested = await rt.call('finalize_design', finalize) as { error: string };
+  assert.match(untested.error, /integrity_spin: current criteria have not been tested/);
+  const motion = await rt.call('run_test', testRequest) as { passed: boolean };
+  assert.equal(motion.passed, true);
+  assert.deepEqual([...rt.testSpecs.values()], [TestSpec.parse(loadCheck), TestSpec.parse(spinCheck)]);
+  assert.deepEqual(rt.tests[0], savedLoad);
+  assert.deepEqual(rt.tests.map(({ testId }) => testId), [`${loadCheck.id}#1`, `${testId}#1`]);
+  assert.deepEqual(await rt.call('finalize_design', finalize), { ok: true });
+});

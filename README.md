@@ -59,11 +59,14 @@ opens the actual assembly and simulation trace.
   Motion tests also observe elevated members of grounded mechanisms for unexpected floor contact
   without changing collision masks or authored targets. Loose payloads and intended floor supports
   remain allowed. Motor-driven propeller groups also receive an automatic material-clearance review
-  against their connected stator at the saved 30 Hz replay poses, including omitted test pairs.
+  against physical parts outside their fixed group at the saved 30 Hz replay poses, including
+  separate stands and omitted test pairs.
   Intersections report both parts, penetration and time; incomplete audits fail closed. This is
   sampled geometry verification, not continuous collision detection or airflow simulation.
   Saved definitions cannot silently lose measured targets, and geometry edits require
-  retesting earlier checks. Archived replays are preserved; new tests use the current checks.
+  retesting earlier checks. Passing finalization requires a quantified motion target for every
+  motor-driven propeller group; torque and clearance alone do not verify rotation.
+  Archived replays are preserved; new tests use the current checks.
 - **Watching a build** is part of the product: before the first assembly the workbench shows the
   stage stepper (plan → parts → assemble → test → revise), the current step with a reasoning timer,
   and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly

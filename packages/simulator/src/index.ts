@@ -6,7 +6,7 @@ import { measureIndexedMotion } from './indexed-motion.ts';
 import { measureEndIn } from './end-in.ts';
 import { auditFixedGeometry, auditStandalonePart, colliderAt, isPhysicalPiece } from './compound-geometry.ts';
 import { inspectAssemblyIntegrity } from './assembly-integrity.ts';
-import { inspectSampledRotorClearance } from './sampled-rotor-clearance.ts';
+import { inspectMotorizedPropellers, inspectSampledRotorClearance } from './sampled-rotor-clearance.ts';
 import type { Assembly, Instance, Joint, PartDefinition, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatMul, rotate, tiltDeg, transformPoint, sub, len, shapeVolume, norm, dot } from '@protolab/parts';
 
@@ -69,6 +69,11 @@ function rigidGroups(a: Assembly): RigidGroup[] {
 export async function auditAssemblyIntegrity(assembly: Assembly) {
   await initSimulator();
   return inspectAssemblyIntegrity(assembly);
+}
+
+/** Return the controls for driven propeller groups without running a simulation. */
+export function motorizedPropellerControls(assembly: Assembly): string[] {
+  return [...inspectMotorizedPropellers(assembly, rigidGroups(assembly)).controls];
 }
 
 /** Independently inspect propeller clearance at the original recorded poses. */

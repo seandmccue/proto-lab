@@ -84,8 +84,11 @@ export function useElapsed(events: JobEvent[], running: boolean): string {
 }
 
 export default function ActivityPanel({ events, running, versions, currentVersionId, onPickVersion, status }: { events: JobEvent[]; running: boolean; versions: VersionMeta[]; currentVersionId: string | null; onPickVersion: (id: string) => void; status?: string }) {
-  const end = useRef<HTMLLIElement>(null);
-  useEffect(() => { if (running) end.current?.scrollIntoView({ block: 'nearest' }); }, [events.length, running]);
+  const activityList = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const list = activityList.current;
+    if (running && list) list.scrollTop = list.scrollHeight;
+  }, [events.length, running]);
   const visible = events.filter((e) => e.type !== 'version' && e.type !== 'timing' && e.type !== 'test_start' && !(e.type === 'spec' && !(e.spec as { plan?: unknown } | undefined)?.plan));
   const stage = stageOf(events); const elapsed = useElapsed(events, running);
   const lastStatus = [...events].reverse().find((e) => e.type === 'status');
@@ -117,10 +120,9 @@ export default function ActivityPanel({ events, running, versions, currentVersio
           ))}
         </div>
       )}
-      <ol className="min-h-0 flex-1 overflow-auto px-3 pb-3 text-xs space-y-1.5">
+      <ol ref={activityList} className="min-h-0 max-h-[50dvh] flex-1 overflow-auto px-3 pb-3 text-xs space-y-1.5 lg:max-h-none">
         {visible.length === 0 && <li className="text-slate-400">{status === 'error' ? 'This build was interrupted; its activity log was not kept.' : 'Waiting for the agent…'}</li>}
         {visible.map((e, i) => <li key={i}><EventRow e={e} /></li>)}
-        <li ref={end} aria-hidden="true" />
       </ol>
     </div>
   );
