@@ -4,7 +4,7 @@ import TrayTiltEvidence from './TrayTiltEvidence.tsx';
 import LotusReplayEvidence from './LotusReplayEvidence.tsx';
 import IndexedMotionEvidence from './IndexedMotionEvidence.tsx';
 import ReceiverReplayEvidence, { replayReceiverTargets } from './ReceiverReplayEvidence.tsx';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { tiltDeg } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import { api, fmt, type JobEvent } from '../api.ts';
@@ -53,11 +53,12 @@ interface Props {
   reducedMotion: boolean;
   events: JobEvent[];
   baselineDefinition?: TestSpec;
+  onShowSingle: () => void;
   findTilt: (assembly: Assembly, test: TestResult, definition: TestSpec | undefined, time: number) => Tilt | null;
   revisionChanges: (before: Assembly, after: Assembly) => { changed: Set<string>; drives: Set<string> };
 }
 
-export default function ReplayComparison({ before, after, reducedMotion, baselineDefinition, findTilt, revisionChanges, events }: Props) {
+export default function ReplayComparison({ before, after, reducedMotion, baselineDefinition, findTilt, revisionChanges, events, onShowSingle }: Props) {
   const [versions, setVersions] = useState<[VersionRecord, VersionRecord] | null>(null);
   const [error, setError] = useState(false);
   const [playing, setPlaying] = useState(!reducedMotion);
@@ -78,6 +79,31 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
   const cameraBounds = useMemo(() => versions && replayBounds(versions[0].assembly, beforeTest)
     .union(replayBounds(versions[1].assembly, afterTest)), [versions, beforeTest, afterTest]);
   const duration = Math.min(beforeTest?.trace.frames.at(-1)?.t ?? 0, afterTest?.trace.frames.at(-1)?.t ?? 0);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const ready = Boolean(versions && beforeTest && afterTest && duration);
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const canvas = frame?.querySelector('.workbench-comparison-canvas');
+    if (!frame || !canvas) return;
+    const fit = () => {
+      const top = canvas.getBoundingClientRect().top + window.scrollY;
+      const viewport = window.visualViewport?.height ?? window.innerHeight;
+      frame.style.setProperty('--comparison-room', `${Math.floor(viewport - top - 12)}px`);
+    };
+    const observer = new ResizeObserver(fit);
+    frame.closest('.workbench')?.querySelectorAll(':scope > :not(.workbench-grid)').forEach((element) => observer.observe(element));
+    const heading = frame.closest('.workbench-panel')?.querySelector('.workbench-panel-heading');
+    if (heading) observer.observe(heading);
+    frame.querySelectorAll('header, .workbench-comparison-metric').forEach((element) => observer.observe(element));
+    window.addEventListener('resize', fit);
+    window.visualViewport?.addEventListener('resize', fit);
+    fit();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fit);
+      window.visualViewport?.removeEventListener('resize', fit);
+    };
+  }, [ready]);
   useEffect(() => {
     if (!playing || !duration) return;
     let last = performance.now();
@@ -144,8 +170,10 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
     return peak;
   }, [beforeTest, definition, duration]);
 
-  if (error || (versions && !duration)) return <p className="workbench-comparison-message" role="status">Both recorded traces are needed for side-by-side replay.</p>;
-  if (!versions || !beforeTest || !afterTest) return <p className="workbench-comparison-message" role="status">Loading both recorded simulations…</p>;
+  if (error || !versions || !beforeTest || !afterTest || !duration) return <div className="workbench-comparison-message">
+    <p role="status">{error || versions ? 'Both recorded traces are needed for side-by-side replay.' : 'Loading both recorded simulations…'}</p>
+    <button className="btn-secondary" type="button" onClick={onShowSingle}>Show one replay</button>
+  </div>;
 
   const tilt = findTilt(versions[0].assembly, beforeTest, definition, time);
   const adjustment = versions[1].decisions.slice().reverse().find((decision) => decision.source === 'model' && (decision.previousTestId || decision.basedOn));
@@ -157,24 +185,30 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
   ];
 
   return <section className="workbench-comparison" aria-label="Side-by-side simulation comparison">
-    <div className="workbench-toolbar workbench-comparison-controls">
-      <div className="workbench-control-group" role="group" aria-label="Synchronized replay controls">
-        <button className="btn-secondary" type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
-        <button className="btn-ghost" type="button" onClick={() => setTime(0)}>Reset</button>
-        {peakTime !== null && <button className="btn-ghost" type="button" onClick={() => { setPlaying(false); setTime(peakTime); }}>Jump to peak tilt</button>}
-        <input type="range" min={0} max={duration} step={0.01} value={time} onChange={(event) => { setPlaying(false); setTime(Number(event.target.value)); }} className="workbench-timeline" aria-label="Scrub both simulations" />
-        <span className="mono whitespace-nowrap text-xs text-slate-600">{time.toFixed(2)} / {duration.toFixed(1)} s</span>
-        <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
-      </div>
-      <span className="workbench-view-hint">Same clock · Same camera</span>
-    </div>
-    <div className="workbench-comparison-panes">
-      {panes.map(({ replay, version, test, highlights, receiverTargets }, index) => <article key={replay.versionId} className="workbench-comparison-pane" aria-label={`${replay.label}, version ${version.iteration}`}>
+    <div className="workbench-comparison-panes" ref={frameRef}>
+      {panes.map(({ replay, version, test, highlights, receiverTargets }) => <article key={replay.versionId} className="workbench-comparison-pane" aria-label={`${replay.label}, version ${version.iteration}`}>
         <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
         <p className="workbench-comparison-metric">{test.metrics.distance_m !== undefined ? `${fmt.cm(test.metrics.distance_m)} travelled` : keyMetric(test)}{test.metrics.maxTilt_deg !== undefined && ` · ${fmt.deg(test.metrics.maxTilt_deg)} peak tilt`}</p>
         <div className="workbench-comparison-canvas">
           <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} pathInstanceId={(Array.isArray(receiverTargets) ? undefined : receiverTargets?.instance) ?? recordedPenPath(version.assembly, test)} />
         </div>
+      </article>)}
+    </div>
+    <div className="workbench-toolbar workbench-comparison-controls">
+      <div className="workbench-control-group" role="group" aria-label="Synchronized replay controls">
+        <button className="btn-secondary" type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+        <input type="range" min={0} max={duration} step={0.01} value={time} onChange={(event) => { setPlaying(false); setTime(Number(event.target.value)); }} className="workbench-timeline" aria-label="Scrub both simulations" />
+        <span className="mono whitespace-nowrap text-xs text-slate-600">{time.toFixed(2)} / {duration.toFixed(1)} s</span>
+        <button className="btn-ghost" type="button" onClick={() => setTime(0)}>Reset</button>
+        <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
+        {peakTime !== null && <button className="btn-ghost" type="button" onClick={() => { setPlaying(false); setTime(peakTime); }}>Jump to peak tilt</button>}
+        <button className="btn-secondary" type="button" onClick={onShowSingle}>Show one replay</button>
+      </div>
+      <span className="workbench-view-hint">Same clock · Same camera</span>
+    </div>
+    <div className="workbench-comparison-evidence">
+      {panes.map(({ replay, version, test, receiverTargets }, index) => <article key={replay.versionId} className="workbench-comparison-evidence-pane" aria-label={`${replay.label} evidence, version ${version.iteration}`}>
+        <h3 className="workbench-comparison-evidence-title">{replay.label} · v{version.iteration}</h3>
         <ReceiverReplayEvidence targets={receiverTargets} time={time} test={test} compareTarget={index === 0 && !beforeTargets} />
         <div className={`workbench-comparison-note${index === 0 || !test.passed ? ' is-failure' : ''}`}>
           {index === 0 || !test.passed ? <><strong>{tilt && index === 0 ? 'Tilt limit exceeded' : test.passed ? 'Recorded result' : 'Why this failed'}</strong><span>{tilt && index === 0 ? `${fmt.deg(tilt.tilt)} · ${fmt.deg(tilt.limit)} limit${tilt.feet ? ' · Lean-side legs highlighted' : ''}` : test.failureReasons.join(' · ') || 'No failure recorded.'}</span></> : <><strong>{changes.size ? adjustment ? 'Changed by Muse' : 'Revised parts' : 'Recorded result'}</strong><span>{adjustment?.summary || (changes.size ? `${changes.size} changed parts highlighted` : 'This replay has no recorded part changes.')}</span></>}

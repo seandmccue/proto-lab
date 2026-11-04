@@ -72,7 +72,10 @@ export default function PartsBin({ parts, plan, brief }: { parts: PickedPart[]; 
         <div className="build-blueprint-controls">
           <span>{active ? `${parts.length} part types` : systems.length ? `${systems.length} subassemblies` : 'Awaiting plan'}</span>
           {nextId && (
-            <button type="button" onClick={() => setPlaying((value) => !value)}>{playing ? 'Pause slideshow' : 'Play slideshow'}</button>
+            <>
+              <button type="button" onClick={() => setPlaying((value) => !value)}>{playing ? 'Pause slideshow' : 'Play slideshow'}</button>
+              <button type="button" className="build-blueprint-next" onClick={() => { setSelectedId(nextId); setPlaying(false); }}>Next part</button>
+            </>
           )}
         </div>
       </div>

@@ -489,6 +489,25 @@ export default function Workspace() {
   const sideBySide = comparisonOpen && canCompare;
   const stageRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    if (!changeMode && !publishOpen) return;
+    const viewport = window.visualViewport;
+    const fitDialog = () => {
+      document.querySelectorAll<HTMLElement>('.workbench-dialog').forEach((dialog) => {
+        dialog.style.top = `${viewport?.offsetTop ?? 0}px`;
+        dialog.style.height = `${viewport?.height ?? window.innerHeight}px`;
+      });
+    };
+    fitDialog();
+    window.addEventListener('resize', fitDialog);
+    viewport?.addEventListener('resize', fitDialog);
+    viewport?.addEventListener('scroll', fitDialog);
+    return () => {
+      window.removeEventListener('resize', fitDialog);
+      viewport?.removeEventListener('resize', fitDialog);
+      viewport?.removeEventListener('scroll', fitDialog);
+    };
+  }, [changeMode, publishOpen]);
+  useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const workbench = stage.closest('.workbench');
@@ -500,6 +519,7 @@ export default function Workspace() {
       stage.style.setProperty('--stage-room', `${Math.floor(viewport - top - 12)}px`);
     };
     const observer = new ResizeObserver(fit);
+    if (workbench) observer.observe(workbench);
     workbench?.querySelectorAll(':scope > :not(.workbench-grid)').forEach((element) => observer.observe(element));
     if (heading) observer.observe(heading);
     window.addEventListener('resize', fit);
@@ -609,14 +629,13 @@ export default function Workspace() {
       <div className="workbench-story-heading">
         <span className="workbench-label">Saved simulation</span>
         {target ? <span><strong>Original test target</strong> {target}</span> : <span>{separateChecks ? 'Each version has its own recorded test.' : 'Compare the recorded simulations before and after the revision.'}</span>}
-        {canCompare && <button type="button" className="btn-secondary workbench-comparison-toggle" aria-pressed={sideBySide} onClick={() => {
-          setComparisonOpen(!sideBySide);
-          if (sideBySide) return;
+        {canCompare && !sideBySide && <button type="button" className="btn-secondary workbench-comparison-toggle" onClick={() => {
+          setComparisonOpen(true);
           setVersionId(story[0].version.id);
           setTestId(story[0].test.testId);
           setStageMode(true);
           setMobilePane('canvas');
-        }}>{sideBySide ? 'Show one replay' : 'Compare side by side'}</button>}
+        }}>Compare side by side</button>}
       </div>
       {changeBrief && <p className="workbench-story-brief"><strong>Requested change</strong> {changeBrief}</p>}
       {!sideBySide && <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
@@ -654,7 +673,7 @@ export default function Workspace() {
   </>;
   const prompt = <>{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</>;
   return (
-    <div className={`workbench${stageMode ? ' workbench--stage' : ''}`}>
+    <div className={`workbench${stageMode ? ' workbench--stage' : ''}${running || reconnecting ? ' workbench--building' : ''}`}>
       <Header compact />
       <div className="workbench-heading">
         <div className="min-w-0">
@@ -695,8 +714,8 @@ export default function Workspace() {
             {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setComparisonOpen(false); setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
           {sideBySide ? <>
+            <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} events={events} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} onShowSingle={() => setComparisonOpen(false)} />
             {storyControls}
-            <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} events={events} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} />
             {canonicalProof && <CrabProofPanel />}
           </> : <>
           <div className="workbench-stage" ref={stageRef}>
@@ -850,7 +869,7 @@ export default function Workspace() {
         </details>
       </div>}
       {changeMode && inv && version && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
+        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
           <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); if (request.trim().length >= 2) void act(changeMode, request.trim()); }}>
             <h2 id="revision-title" className="text-lg font-semibold">Request a change</h2>
             <p className="mt-1 text-sm text-slate-600">
@@ -864,9 +883,9 @@ export default function Workspace() {
         </div>
       )}
       {publishOpen && inv && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal>
+        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="publish-title">
           <form className="card w-full max-w-md p-5" onSubmit={async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); setBusy(true); try { await api.publish(id, { title: String(f.get('title') || inv.title), description: String(f.get('description') || inv.description) }); setPublishOpen(false); await refresh(); } catch (err) { setError((err as Error).message); } finally { setBusy(false); } }}>
-            <h2 className="text-lg font-semibold">Publish to the gallery</h2>
+            <h2 id="publish-title" className="text-lg font-semibold">Publish to the gallery</h2>
             <p className="mt-1 text-sm text-slate-500">Anyone will be able to open the interactive 3D assembly, see its measured test results and remix it. Credit stays with you.</p>
             <label className="mt-4 block text-sm">Title<input name="title" defaultValue={inv.title} maxLength={80} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
             <label className="mt-3 block text-sm">What it does<textarea name="description" defaultValue={inv.description.slice(0, 400)} maxLength={400} rows={3} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>

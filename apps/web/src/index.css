@@ -53,7 +53,7 @@ body {
 .site-header--compact { padding-inline: clamp(1rem, 2.5vw, 2rem); padding-block: .5rem; }
 .site-brand { display: inline-flex; align-items: center; gap: .55rem; font-size: 1.25rem; font-weight: 800; letter-spacing: -.06em; }
 .site-brand-accent { color: var(--violet); }
-.site-identity { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: .32rem; }
+.site-identity { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: .32rem; min-height: 4.2rem; }
 .site-attribution {
   display: inline-flex;
   align-items: center;
@@ -75,6 +75,7 @@ body {
 .site-nav a { min-height: 44px; }
 .site-new > [aria-hidden="true"] { font-size: 1.1em; }
 .site-new-short { display: none; }
+.site-mobile-actions { display: none; }
 .home-shell { width: min(100% - 2rem, 75rem); margin-inline: auto; }
 .lab-hero {
   display: grid;
@@ -219,3 +220,31 @@ body {
   .lab-art-stage { height: 10rem; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+@media (width <= 40rem) {
+  .site-header, .home-page .site-header { flex-wrap: nowrap; gap: .4rem; padding: .5rem .65rem; }
+  .site-identity { min-width: 0; min-height: 4.6rem; flex: 0 1 auto; }
+  .site-brand { font-size: 1.07rem; }
+  .site-brand img { width: 30px; height: 30px; }
+  .site-attribution { max-width: 10rem; font-size: .64rem; }
+  .site-mobile-actions { display: flex; flex: none; align-items: center; gap: .1rem; }
+  .site-mobile-actions :is(a, button) { min-height: 44px; padding-inline: .65rem; font-size: .8rem; }
+  .site-header .site-nav {
+    display: none;
+    position: absolute;
+    top: calc(100% + .3rem);
+    left: .65rem;
+    right: .65rem;
+    padding: .45rem;
+    border: 1px solid var(--line);
+    border-radius: .85rem;
+    background: var(--surface);
+    box-shadow: 0 .5rem 1.5rem #251b3826;
+  }
+  .site-header .site-nav[data-open='true'] { display: flex; flex-direction: column; align-items: stretch; }
+  .site-header .site-nav a { min-height: 44px; justify-content: flex-start; padding-inline: .85rem; }
+}
+
+@media (pointer: coarse) {
+  input:not([type='range']):not([type='checkbox']), textarea, select { font-size: 1rem; }
+}
