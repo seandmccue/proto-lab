@@ -52,6 +52,18 @@ opens the actual assembly and simulation trace.
   (write_plan) → search the library → design missing parts → assemble and set drives → define
   measurable tests → simulate → analyse failures and revise → finalize with the behaviours the
   physics cannot verify listed as "unverified". Every version records which model made each decision.
+- **Automatic assembly review:** `validate_assembly` checks grounded supports, detached parts and
+  rigid joints across empty space. The same review gates simulation, drive sweeps and a passing
+  finalization. Muse receives affected instance IDs, measured gaps and connector poses, and repairs
+  the assembly in the same job; structural rejections do not spend the simulation-test budget.
+  Motion tests also observe elevated members of grounded mechanisms for unexpected floor contact
+  without changing collision masks or authored targets. Loose payloads and intended floor supports
+  remain allowed. Motor-driven propeller groups also receive an automatic material-clearance review
+  against their connected stator at the saved 30 Hz replay poses, including omitted test pairs.
+  Intersections report both parts, penetration and time; incomplete audits fail closed. This is
+  sampled geometry verification, not continuous collision detection or airflow simulation.
+  Saved definitions cannot silently lose measured targets, and geometry edits require
+  retesting earlier checks. Archived replays are preserved; new tests use the current checks.
 - **Watching a build** is part of the product: before the first assembly the workbench shows the
   stage stepper (plan → parts → assemble → test → revise), the current step with a reasoning timer,
   and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly

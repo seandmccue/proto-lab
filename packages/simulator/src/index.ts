@@ -5,10 +5,14 @@ import { measurePlanarOrbit } from './planar-orbit.ts';
 import { measureIndexedMotion } from './indexed-motion.ts';
 import { measureEndIn } from './end-in.ts';
 import { auditFixedGeometry, auditStandalonePart, colliderAt, isPhysicalPiece } from './compound-geometry.ts';
+import { inspectAssemblyIntegrity } from './assembly-integrity.ts';
+import { inspectSampledRotorClearance } from './sampled-rotor-clearance.ts';
 import type { Assembly, Instance, Joint, PartDefinition, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatMul, rotate, tiltDeg, transformPoint, sub, len, shapeVolume, norm, dot } from '@protolab/parts';
 
 export type { CompoundGeometryIssue } from './compound-geometry.ts';
+export type { AssemblyIntegrityIssue } from './assembly-integrity.ts';
+export type { SampledRotorClearance, SampledRotorClearanceIssue } from './sampled-rotor-clearance.ts';
 
 export const ENGINE = 'rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace';
 const DT = 1 / 240;
@@ -61,6 +65,18 @@ function rigidGroups(a: Assembly): RigidGroup[] {
   return [...groups.values()].map((members) => ({ rootId: members[0].id, members, anchored: members.some((m) => m.anchored) }));
 }
 
+/** Audit physical support and fixed attachments in the assembled pose. */
+export async function auditAssemblyIntegrity(assembly: Assembly) {
+  await initSimulator();
+  return inspectAssemblyIntegrity(assembly);
+}
+
+/** Independently inspect propeller clearance at the original recorded poses. */
+export async function auditSampledRotorClearance(assembly: Assembly, trace: Trace) {
+  await initSimulator();
+  return inspectSampledRotorClearance(assembly, trace, rigidGroups(assembly));
+}
+
 /** Flag custom parts whose collision geometry has disconnected regions at rest. */
 export async function auditCompoundGeometry(assembly: Assembly) {
   await initSimulator();
@@ -78,7 +94,13 @@ function axisAngle(q: Quat, axis: Vec3): number {
   const n = Math.hypot(proj, w) || 1; const ang = 2 * Math.atan2(proj / n, w / n); return Math.atan2(Math.sin(ang), Math.cos(ang));
 }
 
-export interface RunOptions { env: SimEnvironment; test: TestSpec; controller?: Controller }
+export interface RunOptions {
+  env: SimEnvironment;
+  test: TestSpec;
+  controller?: Controller;
+  /** Observe ground contact for extra instances without changing the authored test or solver. */
+  additionalNoGroundContact?: string[];
+}
 
 export async function runTest(assembly: Assembly, opts: RunOptions): Promise<TestResult> {
   await initSimulator();
@@ -106,6 +128,8 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   // Two parts joined by a bearing touch each other at that bearing by construction; that is not a clearance violation.
   const joined = new Set<string>(assembly.joints.map((j) => [j.a.instanceId, j.b.instanceId].sort().join('|')));
   const noGround = new Set<string>(test.kind === 'motion' ? test.measure.noGroundContact : []);
+  const automaticNoGround = new Set(opts.additionalNoGroundContact);
+  for (const id of noGround) automaticNoGround.delete(id);
 
   for (const g of rgroups) {
     const root = instById.get(g.rootId)!;
@@ -173,6 +197,9 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const baseId = test.kind === 'walk' ? test.base : test.kind === 'motion' ? test.measure.base : test.kind === 'grip' ? test.holder : undefined;
   const baseRb = baseId ? bodyOf.get(baseId) : undefined;
   if (!assembly.instances.length) failureReasons.push('There are no parts to test');
+  for (const id of automaticNoGround) {
+    if (!instById.has(id)) failureReasons.push(`Automatic ground check instance "${id}" not found`);
+  }
   if (baseId && !baseRb) failureReasons.push(`Base instance "${baseId}" not found`);
   const projRb = test.kind === 'launch' ? bodyOf.get(test.projectile) : undefined;
   if (test.kind === 'launch' && !projRb) failureReasons.push(`Projectile instance "${test.projectile}" not found`);
@@ -306,6 +333,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     }
   };
   let clearanceHit: string | null = null, groundHit: string | null = null, landing: Vec3 | null = null, maxProjHeight = projStart?.position[1] ?? 0, released = false;
+  const automaticGroundHits = new Map<string, number>();
   const snapshot = (t: number) => {
     const bodies: Record<string, Transform> = {}; const joints: Record<string, number> = {};
     for (const g of rgroups) { const T = rootT(bodyOf.get(g.rootId)!); for (const m of g.members) bodies[m.id] = compose(T, localOffset.get(m.id)!); }
@@ -353,6 +381,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const i1 = colliderOwner.get(h1), i2 = colliderOwner.get(h2);
       const isG = h1 === groundCol.handle || h2 === groundCol.handle;
       if (isG) { const other = h1 === groundCol.handle ? i2 : i1; if (other && noGround.has(other) && !groundHit) groundHit = other;
+        if (other && automaticNoGround.has(other) && !automaticGroundHits.has(other)) automaticGroundHits.set(other, t);
         if (test.kind === 'grip' && other === test.payload && t >= test.supportUntil_s && !payloadGrounded) payloadGrounded = true; // a payload that lands on the floor was not held
         if (test.kind === 'launch' && other === test.projectile && released && !landing) { const p = projRb!.translation(); landing = [p.x, p.y, p.z]; } }
       else if (i1 && i2 && !clearanceHit && test.kind === 'motion' && !joined.has([i1, i2].sort().join('|'))) { for (const [a, b] of test.measure.clearancePairs) if ((a === i1 && b === i2) || (a === i2 && b === i1)) clearanceHit = `${i1} touched ${i2}`; }
@@ -553,6 +582,16 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       else if (Math.abs(sep) > test.maxSeparation_m || payStart!.position[1] - pe.y > test.maxSeparation_m) failureReasons.push(`Payload slipped: separation ${Math.abs(sep).toFixed(3)} m, dropped ${(payStart!.position[1] - pe.y).toFixed(3)} m (limit ${test.maxSeparation_m} m)`);
       saturationNote();
       break;
+    }
+  }
+  if (automaticNoGround.size) {
+    metrics.automaticGroundContactChecks = automaticNoGround.size;
+    metrics.automaticGroundContactViolation = automaticGroundHits.size ? 1 : 0;
+    for (const [id, time] of [...automaticGroundHits].slice(0, 3)) {
+      failureReasons.push(`Automatic ground check: ${id} touched the ground at ${time.toFixed(2)} s`);
+    }
+    if (automaticGroundHits.size > 3) {
+      failureReasons.push(`Automatic ground check: ${automaticGroundHits.size - 3} more parts touched the ground`);
     }
   }
   world.free();
