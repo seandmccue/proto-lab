@@ -168,11 +168,11 @@ test('a failed coalesced batch rejects only its waiters and a later queued snaps
 
     f.writeVersion(5); const laterA = f.save();
     f.writeVersion(6); const laterB = f.save();
-    failedUpload.reply(503);
+    failedUpload.reply(400);
     const failures = await settled(Promise.all(doomed.map(({ outcome }) => outcome)));
     for (const failure of failures) {
       assert.equal(failure.status, 'rejected');
-      if (failure.status === 'rejected') assert.match(String(failure.error), /HTTP 503/);
+      if (failure.status === 'rejected') assert.match(String(failure.error), /HTTP 400/);
     }
     const recoveryUpload = await f.waitForUpload(2);
     assert.equal(f.published, 0, 'failed publication must retain the last successful checkpoint');

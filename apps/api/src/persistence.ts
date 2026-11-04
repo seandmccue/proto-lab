@@ -17,6 +17,31 @@ const singleUploadBytes = 90 * 1024 * 1024;
 const maxArchiveBytes = 512 * 1024 * 1024;
 const partBytes = 16 * 1024 * 1024;
 
+class CheckpointHttpError extends Error {
+  constructor(message: string, readonly status: number) { super(`${message} (HTTP ${status}).`); }
+}
+
+async function checkUploadResponse(response: Response, message: string): Promise<void> {
+  if (response.ok) return;
+  try { await response.body?.cancel(); } catch { /* Keep the HTTP status as the failure. */ }
+  throw new CheckpointHttpError(message, response.status);
+}
+
+/** Retry the same captured bytes, never recapture state or resolve a save before durable completion. */
+async function withCheckpointRetries<T>(operation: () => Promise<T>): Promise<T> {
+  const delays = [500, 1500];
+  for (let attempt = 0; ; attempt++) {
+    try { return await operation(); }
+    catch (error) {
+      const retryable = error instanceof CheckpointHttpError
+        ? error.status === 408 || error.status === 429 || error.status >= 500 && error.status < 600
+        : error instanceof TypeError || error instanceof Error && ['AbortError', 'TimeoutError', 'NetworkError'].includes(error.name);
+      if (!retryable || attempt >= delays.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 export async function compressCheckpoint(rawArchive: string, archive: string, maxBytes = singleUploadBytes): Promise<number> {
   for (const level of [3, 6]) {
     await pipeline(createReadStream(rawArchive), createGzip({ level }), createWriteStream(archive, { mode: 0o600 }));
@@ -45,9 +70,12 @@ export async function uploadCheckpointArchive(url: string, token: string, archiv
   const headers = { authorization: `Bearer ${token}` };
   const matchingCompletedCheckpoint = async () => {
     try {
-      const response = await fetch(url, { method: 'HEAD', headers, signal: AbortSignal.timeout(15_000) });
-      return response.ok && Number(response.headers.get('content-length')) === size
-        && response.headers.get('x-checkpoint-id') === checkpointId && response.headers.get('x-checkpoint-sha256') === sha256;
+      return await withCheckpointRetries(async () => {
+        const response = await fetch(url, { method: 'HEAD', headers, signal: AbortSignal.timeout(15_000) });
+        await checkUploadResponse(response, 'Cloudflare checkpoint confirmation failed');
+        return Number(response.headers.get('content-length')) === size
+          && response.headers.get('x-checkpoint-id') === checkpointId && response.headers.get('x-checkpoint-sha256') === sha256;
+      });
     } catch { return false; }
   };
   const uploadStream = async (target: string, start: number, length: number, extraHeaders: Record<string, string> = {}) => {
@@ -60,50 +88,60 @@ export async function uploadCheckpointArchive(url: string, token: string, archiv
     } finally { stream.destroy(); }
   };
   if (size <= singleUploadBytes) {
-    try {
-      const response = await uploadStream(url, 0, size, { 'x-checkpoint-id': checkpointId, 'x-checkpoint-sha256': sha256 });
-      if (!response.ok) throw new Error(`Cloudflare checkpoint upload failed (HTTP ${response.status}).`);
-    } catch (error) {
-      // A response can be lost after the object was committed. Only this exact archive counts as success.
-      if (!await matchingCompletedCheckpoint()) throw error;
-    }
+    await withCheckpointRetries(async () => {
+      try {
+        const response = await uploadStream(url, 0, size, { 'x-checkpoint-id': checkpointId, 'x-checkpoint-sha256': sha256 });
+        await checkUploadResponse(response, 'Cloudflare checkpoint upload failed');
+      } catch (error) {
+        // A response can be lost after commit. Confirm this exact archive before retrying its PUT.
+        if (!await matchingCompletedCheckpoint()) throw error;
+      }
+    });
     return;
   }
 
   let uploadId: string | undefined;
-  let completing = false;
   try {
-    const created = await fetch(multipartUrl(url, 'multipart-create'), {
-      method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ size, checkpointId, sha256 }), signal: AbortSignal.timeout(30_000),
+    uploadId = await withCheckpointRetries(async () => {
+      const created = await fetch(multipartUrl(url, 'multipart-create'), {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ size, checkpointId, sha256 }), signal: AbortSignal.timeout(30_000),
+      });
+      await checkUploadResponse(created, 'Cloudflare checkpoint multipart creation failed');
+      const info = await created.json() as { uploadId?: unknown };
+      if (typeof info?.uploadId !== 'string' || !info.uploadId.trim() || info.uploadId.length > 1024 || /[\x00-\x1f\x7f]/.test(info.uploadId)) {
+        throw new Error('Cloudflare checkpoint returned an invalid multipart upload ID.');
+      }
+      return info.uploadId;
     });
-    if (!created.ok) throw new Error(`Cloudflare checkpoint multipart creation failed (HTTP ${created.status}).`);
-    const info = await created.json() as { uploadId?: unknown };
-    if (typeof info.uploadId !== 'string' || !info.uploadId.trim() || info.uploadId.length > 1024 || /[\x00-\x1f\x7f]/.test(info.uploadId)) {
-      throw new Error('Cloudflare checkpoint returned an invalid multipart upload ID.');
-    }
-    uploadId = info.uploadId;
     const parts: { partNumber: number; etag: string }[] = [];
     for (let start = 0, partNumber = 1; start < size; start += partBytes, partNumber++) {
       const length = Math.min(partBytes, size - start);
-      const response = await uploadStream(multipartUrl(url, 'multipart-part', {
-        uploadId, partNumber: String(partNumber), size: String(size),
-      }), start, length);
-      if (!response.ok) throw new Error(`Cloudflare checkpoint part ${partNumber} upload failed (HTTP ${response.status}).`);
-      const part = await response.json() as { partNumber?: unknown; etag?: unknown };
-      if (part.partNumber !== partNumber || typeof part.etag !== 'string' || !part.etag.trim() || part.etag.length > 256) {
-        throw new Error(`Cloudflare checkpoint part ${partNumber} returned an invalid receipt.`);
-      }
-      parts.push({ partNumber, etag: part.etag });
+      const target = multipartUrl(url, 'multipart-part', { uploadId, partNumber: String(partNumber), size: String(size) });
+      parts.push(await withCheckpointRetries(async () => {
+        // A new stream replays this same part even if the preceding response was lost after upload.
+        const response = await uploadStream(target, start, length);
+        await checkUploadResponse(response, `Cloudflare checkpoint part ${partNumber} upload failed`);
+        const part = await response.json() as { partNumber?: unknown; etag?: unknown };
+        if (part?.partNumber !== partNumber || typeof part.etag !== 'string' || !part.etag.trim() || part.etag.length > 256) {
+          throw new Error(`Cloudflare checkpoint part ${partNumber} returned an invalid receipt.`);
+        }
+        return { partNumber, etag: part.etag };
+      }));
     }
-    completing = true;
-    const completed = await fetch(multipartUrl(url, 'multipart-complete'), {
-      method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ uploadId, size, checkpointId, sha256, parts }), signal: AbortSignal.timeout(60_000),
+    await withCheckpointRetries(async () => {
+      try {
+        const completed = await fetch(multipartUrl(url, 'multipart-complete'), {
+          method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ uploadId, size, checkpointId, sha256, parts }), signal: AbortSignal.timeout(60_000),
+        });
+        await checkUploadResponse(completed, 'Cloudflare checkpoint multipart completion failed');
+      } catch (error) {
+        // Complete may already have consumed the upload ID; exact HEAD proof wins before any retry.
+        if (!await matchingCompletedCheckpoint()) throw error;
+      }
     });
-    if (!completed.ok) throw new Error(`Cloudflare checkpoint multipart completion failed (HTTP ${completed.status}).`);
   } catch (error) {
-    if (completing && await matchingCompletedCheckpoint()) return;
     if (uploadId) {
       try {
         await fetch(multipartUrl(url, 'multipart-abort', { uploadId }), {
