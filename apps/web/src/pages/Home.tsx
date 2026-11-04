@@ -7,6 +7,7 @@ import PartInventory from '../components/PartInventory.tsx';
 import Viewer from '../components/Viewer.tsx';
 import { api, fmt, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
 import type { TestSpec, VersionRecord } from '@protolab/schema';
+import { largeShowcases } from '../../../large-showcases.mts';
 
 const steps = [
   { title: 'Describe your idea', detail: 'Tell Muse what you want to build and what it should do. Give it a target, like a crab that scuttles at least 25 cm.' },
@@ -76,7 +77,14 @@ export default function Home() {
     && item.tests.some((test) => test.passed && test.metrics.indexedConsecutiveSteps >= 2));
   const marbleRepair = featured.find((item) => item.id === marbleRepairId && item.status === 'passed'
     && item.tests.some((test) => test.passed && test.metrics.endInHold_s >= 0.75));
-  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id && item.id !== (showLotus ? lotus.id : undefined));
+  const largeBuilds = largeShowcases.flatMap((showcase) => {
+    const item = featured.find((item) => item.id === showcase.inventionId && item.currentVersionId === showcase.versionId &&
+      item.visibility === 'public' && item.featured && item.status === 'passed' && item.modelId?.startsWith('muse-') &&
+      item.tests.every((test) => test.passed) && showcase.testIds.every((id) => item.tests.some((test) => test.testId === id)));
+    return item ? [{ item, showcase }] : [];
+  });
+  const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId &&
+    item.id !== gimbalRepair?.id && item.id !== (showLotus ? lotus.id : undefined) && !largeBuilds.some((build) => build.item.id === item.id));
   const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
@@ -219,6 +227,20 @@ export default function Home() {
             ))}
           </div>
         </div>}
+        {largeBuilds.length > 0 && (
+          <section className="lab-section" aria-labelledby="large-builds-title">
+            <div className="lab-section-heading">
+              <div>
+                <span className="lab-label">New · Built by Muse</span>
+                <h2 id="large-builds-title">Bigger ideas. More moving parts.</h2>
+                <p>Replay the physics tests for Muse’s larger assemblies.</p>
+              </div>
+            </div>
+            <div className="invention-grid invention-grid--showcase">
+              {largeBuilds.map(({ item, showcase }) => <GalleryCard key={item.id} item={item} replay showcase={showcase} />)}
+            </div>
+          </section>
+        )}
         {(references.length > 0 || spotlightId || orrery || gimbalRepair || showLotus || genevaRepair || marbleRepair) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">

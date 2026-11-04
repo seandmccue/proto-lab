@@ -7,6 +7,7 @@ import { len, sub, transformPoint } from '@protolab/parts';
 import { measureFollowerTiming } from '@protolab/simulator/follower-timing';
 import { measurePlanarOrbit } from '@protolab/simulator/planar-orbit';
 import { measureIndexedMotion } from '@protolab/simulator/indexed-motion';
+import { largeShowcases } from '../apps/large-showcases.mts';
 
 const arg = (name: string, fallback: string) => {
   const index = process.argv.indexOf(name);
@@ -339,6 +340,29 @@ if (judge) checks.push(
     return 'public MP4 supports range playback';
   }],
 );
+
+if (judge) for (const entry of largeShowcases) {
+  checks.push([`Large showcase ${entry.inventionId}`, async () => {
+    const { invention } = await publicBuild(entry.inventionId);
+    if (!invention.featured || invention.currentVersionId !== entry.versionId || !invention.modelId?.startsWith('muse-')) {
+      throw new Error('Expected a featured Muse invention at the verified version');
+    }
+    const replay = await version(entry.inventionId, entry.versionId);
+    if (replay.id !== entry.versionId || replay.inventionId !== entry.inventionId || replay.modelId !== invention.modelId ||
+      replay.status !== 'passed' || replay.assembly.instances.length !== entry.componentCount ||
+      !replay.tests.every((test) => test.passed) || !entry.testIds.every((id) => recorded(replay, (test) => test.testId === id))) {
+      throw new Error('Expected exact component count and passing named test traces');
+    }
+    if (entry.baseline) {
+      const baseline = await version(entry.inventionId, entry.baseline.versionId);
+      if (baseline.inventionId !== entry.inventionId || baseline.id !== entry.baseline.versionId || baseline.iteration >= replay.iteration ||
+        !recorded(baseline, (test) => test.testId === entry.baseline?.testId && !test.passed)) {
+        throw new Error('Expected the earlier recorded failure for comparison');
+      }
+    }
+    return `${invention.title} · ${entry.componentCount} components with recorded tests`;
+  }]);
+}
 
 console.log(`ProtoLab preflight · api ${api} · web ${web}`);
 const results = await Promise.allSettled(checks.map(([, check]) => check()));

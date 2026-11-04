@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { VersionRecord } from '@protolab/schema';
+import type { LargeShowcase } from '../../../large-showcases.mts';
 import { api, sessionId, type InventionPublic } from '../api.ts';
 import { keyMetric } from './BuildProgress.tsx';
 import IsoPreview from './IsoPreview.tsx';
@@ -8,17 +9,18 @@ import './gallery.css';
 
 const buildDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-export default function GalleryCard({ item, replay = false }: { item: InventionPublic; replay?: boolean }) {
+export default function GalleryCard({ item, replay = false, showcase }: { item: InventionPublic; replay?: boolean; showcase?: LargeShowcase }) {
   const summaryId = useId();
   const [hover, setHover] = useState(false);
   const untested = Boolean(item.currentVersionId && !item.tests.length);
   const showReplay = replay && !untested;
-  const lastTest = untested ? undefined : item.latestWalk ?? item.latestTest ?? item.tests.at(-1);
-  const metric = keyMetric(lastTest);
+  const replayQuery = showReplay ? `?replay=1${showcase ? `&version=${encodeURIComponent(showcase.versionId)}` : ''}` : '';
+  const lastTest = untested ? undefined : showcase ? item.tests.find((test) => test.testId === showcase.testIds[0]) : item.latestWalk ?? item.latestTest ?? item.tests.at(-1);
+  const metric = showcase ? `${showcase.componentCount} components` : keyMetric(lastTest);
   const passed = item.status === 'passed';
   const createdAt = new Date(item.createdAt);
   return (
-    <Link to={`/i/${item.id}${showReplay ? '?replay=1' : ''}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={showReplay ? `Replay ${item.title}` : `Explore ${item.title} in 3D`} aria-describedby={summaryId}>
+    <Link to={`/i/${item.id}${replayQuery}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={showReplay ? `Replay ${item.title}` : `Explore ${item.title} in 3D`} aria-describedby={summaryId}>
       <div className="invention-card__preview">
         <GalleryPreview key={item.currentVersionId ?? item.id} item={item} hover={hover} testId={lastTest?.testId} />
         <div className="invention-card__tags">
@@ -34,7 +36,7 @@ export default function GalleryCard({ item, replay = false }: { item: InventionP
           {metric && <span className="invention-card__distance">{metric}</span>}
         </div>
         <h3>{item.title}</h3>
-        <p className="line-clamp-2" id={summaryId}>{item.description || item.prompt}</p>
+        <p className="line-clamp-2" id={summaryId}>{showcase?.detail || item.description || item.prompt}</p>
         {Number.isFinite(createdAt.getTime()) && (
           <time className="invention-card__date" dateTime={item.createdAt}>Created {buildDate.format(createdAt)}</time>
         )}

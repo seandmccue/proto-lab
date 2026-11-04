@@ -86,6 +86,7 @@
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
   gap: clamp(.875rem, 2vw, 1.25rem);
 }
+.invention-grid--showcase { grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
 
 .invention-card {
   display: flex;
