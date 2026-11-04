@@ -133,37 +133,61 @@ function fitBridge(local: [Pivot, Pivot], world: [Pivot, Pivot], i: number): Tra
 
 export interface ApplyResult { assembly: Assembly; summary: string[] }
 
+function declareInstances(op: AssemblyOp, ids: Set<string>) {
+  if (op.op === 'place' || op.op === 'mount' || op.op === 'bridge') ids.add(op.id);
+  if (op.op === 'pattern') {
+    const copies = op.kind === 'mirror' ? 1 : (op.count ?? 2) - 1;
+    for (let k = 1; k <= copies; k++) for (const id of op.instances) ids.add(`${id}${op.suffix ?? '_'}${k}`);
+  }
+}
+
 /** Apply a batch of ops. Fails atomically: on error the input assembly is unchanged and the failing op index is reported. */
 export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartResolver, limits: Limits = DEFAULT_LIMITS, library?: () => PartDefinition[]): ApplyResult {
   const a: Assembly = structuredClone(input);
   const summary: string[] = [];
   const partById = new Map(a.parts.map((p) => [p.id, p]));
-  // First-batch recovery: a batch that mounts onto an instance nobody placed (typically "body" or "base") gets that
-  // instance placed automatically when the referenced connectors identify exactly one library part.
-  const ops: AssemblyOp[] = [...inputOps];
-  // A batch that mounts onto an id and only places it later (the model wrote the ops out of order): move that place
-  // op ahead of the first reference instead of auto-placing a guess that the model's own place would then replace.
-  {
-    const existing = new Set(a.instances.map((x) => x.id));
-    for (let i = 0; i < ops.length; i++) {
-      const op = ops[i];
-      if (op.op !== 'mount' || existing.has(op.onto) || ops.slice(0, i).some((o) => (o.op === 'place' || o.op === 'mount' || o.op === 'bridge') && o.id === op.onto)) continue;
-      const j = ops.findIndex((o, k) => k > i && o.op === 'place' && o.id === op.onto);
-      if (j < 0) continue;
-      const [late] = ops.splice(j, 1); ops.splice(i, 0, late);
-      summary.push(`reordered: placed ${op.onto} before the ops that mount onto it`);
+  const ops: { op: AssemblyOp; index: number }[] = [];
+  const declared = new Set(a.instances.map((instance) => instance.id));
+  const scheduled = new Set<number>();
+  const resolving = new Set<number>();
+  // Pull forward explicit producers of missing mount parents, including chains of mounts. Keep
+  // operations on existing ids in order so an intentional replacement still takes effect where written.
+  const schedule = (index: number) => {
+    if (scheduled.has(index)) return;
+    const op = inputOps[index];
+    if (op.op === 'mount' && !declared.has(op.onto)) {
+      if (resolving.has(index)) throw new AssemblyError(`Circular mount dependency involving "${op.id}"`, index);
+      const producerIndex = inputOps.findIndex((candidate, i) => !scheduled.has(i) &&
+        (candidate.op === 'place' || candidate.op === 'mount') && candidate.id === op.onto);
+      if (producerIndex >= 0) {
+        resolving.add(index);
+        schedule(producerIndex);
+        resolving.delete(index);
+        const action = inputOps[producerIndex].op === 'place' ? 'placed' : 'mounted';
+        summary.push(`reordered: ${action} ${op.onto} before the ops that mount onto it`);
+      }
     }
-  }
+    declareInstances(op, declared);
+    ops.push({ op, index });
+    scheduled.add(index);
+  };
+  inputOps.forEach((_, index) => schedule(index));
+
+  // Recover genuinely missing parents when their connector names identify a library part.
   if (library) {
     const placed = new Set(a.instances.map((x) => x.id));
-    const refs = new Map<string, Set<string>>();
-    for (const op of ops) {
-      if (op.op === 'place' || op.op === 'mount' || op.op === 'bridge') placed.add(op.id);
-      if (op.op === 'mount' && !placed.has(op.onto)) { if (!refs.has(op.onto)) refs.set(op.onto, new Set()); refs.get(op.onto)!.add(op.connector); }
+    const refs = new Map<string, { connectors: Set<string>; index: number }>();
+    for (const { op, index } of ops) {
+      if (op.op === 'mount' && !placed.has(op.onto)) {
+        const ref = refs.get(op.onto) ?? { connectors: new Set<string>(), index };
+        ref.connectors.add(op.connector);
+        refs.set(op.onto, ref);
+      }
+      declareInstances(op, placed);
     }
     let insertAt = 0;
-    for (const [id, conns] of refs) {
-      const cands = library().filter((p) => !p.decorative && [...conns].every((c) => p.connectors.some((k) => k.id === c)));
+    for (const [id, { connectors, index }] of refs) {
+      const cands = library().filter((p) => !p.decorative && [...connectors].every((c) => p.connectors.some((k) => k.id === c)));
       // One match: take it. A few matches (e.g. hex vs octo chassis both carry hip_R2): take the smallest part that fits,
       // unless two are equally small. Many matches (generic connectors like "top"): do not guess.
       let best: PartDefinition | null = null;
@@ -179,7 +203,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
       if (!best) continue;
       const anchored = /base|stand|ground|floor|plate|pedestal|tower/i.test(id) || best.category === 'plates';
       const y = anchored ? best.dimensions_m[1] / 2 : Math.max(0.1, best.dimensions_m[1]);
-      ops.splice(insertAt++, 0, { op: 'place', id, part: best.id, position: [0, +y.toFixed(4), 0], anchored });
+      ops.splice(insertAt++, 0, { op: { op: 'place', id, part: best.id, position: [0, +y.toFixed(4), 0], anchored }, index });
       summary.push(`auto-placed ${id} as ${best.id}${anchored ? ' (anchored)' : ''} because nothing by that name existed — move or replace it if that is not the part you meant`);
     }
   }
@@ -208,7 +232,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
     summary.push(`connected ${op.a}.${ca.id} ↔ ${op.b}.${cb.id} [${op.joint}]`);
   };
 
-  ops.forEach((op, i) => {
+  ops.forEach(({ op, index: i }) => {
     switch (op.op) {
       case 'place': {
         unique(op.id, i); const p = usePart(op.part, i);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { catalog, searchCatalog, generatePart, buildWalker, DEFAULT_WALKER, ParamError, AssemblyOp, applyOps, emptyAssembly, getPart, mateTransform, transformPoint, summarize } from './index.ts';
+import { catalog, searchCatalog, generatePart, buildWalker, DEFAULT_WALKER, ParamError, AssemblyError, AssemblyOp, applyOps, emptyAssembly, getPart, mateTransform, transformPoint, summarize } from './index.ts';
 import { Assembly, billOfMaterials } from '@protolab/schema';
 
 test('catalog has 80+ valid parts across categories', () => {
@@ -292,4 +292,56 @@ test('a batch that mounts onto an id it places later is reordered, not auto-plac
   assert.equal(r.assembly.joints.length, 1, 'the wheel stays joined to the tower the model placed');
   assert.ok(r.summary[0].startsWith('reordered: placed tower1'), r.summary[0]);
   assert.ok(!r.summary.some((x) => x.startsWith('auto-placed')), 'no guess when the batch places it itself');
+});
+
+test('late mounted parents are resolved in order and retain all eight child joints', () => {
+  const base = AssemblyOp.parse({ op: 'place', id: 'base', part: 'base-plate-300x200', position: [.03, .005, -.04], anchored: true });
+  const stand = AssemblyOp.parse({ op: 'mount', id: 'stand', part: 'tower-150', onto: 'base', connector: 'top', via: 'base' });
+  const hub = AssemblyOp.parse({ op: 'mount', id: 'hub', part: 'radial-hub-8x160', onto: 'stand', connector: 'top', via: 'mount' });
+  const shoulders = Array.from({ length: 8 }, (_, index) => AssemblyOp.parse({
+    op: 'mount', id: `sh${index}`, part: 'servo-ds3218', onto: 'hub', connector: `hinge_${index}`, via: 'mount',
+  }));
+  const expected = applyOps(emptyAssembly(), [base, stand, hub, ...shoulders], getPart).assembly;
+  for (const library of [undefined, catalog]) {
+    const result = applyOps(emptyAssembly(), [...shoulders, stand, base, hub], getPart, undefined, library);
+    assert.deepEqual(result.assembly, expected);
+    assert.equal(result.assembly.joints.filter((joint) => joint.a.instanceId === 'hub').length, 8);
+    assert.ok(!result.summary.some((entry) => entry.startsWith('auto-placed') || entry.startsWith('replaced')));
+  }
+});
+
+test('a circular forward mount fails atomically without guessing a library part', () => {
+  const input = emptyAssembly();
+  const before = structuredClone(input);
+  const cycle = [
+    { op: 'mount', id: 'left', part: 'beam-100', onto: 'right', connector: 'end_a', via: 'end_b' },
+    { op: 'mount', id: 'right', part: 'beam-100', onto: 'left', connector: 'end_a', via: 'end_b' },
+  ].map((op) => AssemblyOp.parse(op));
+  assert.throws(() => applyOps(input, cycle, getPart, undefined, catalog),
+    (error) => error instanceof AssemblyError && error.opIndex === 0 && /Circular mount dependency/.test(error.message));
+  assert.deepEqual(input, before);
+});
+
+test('a pattern-produced parent keeps its authored order before an explicit replacement', () => {
+  const ops = [
+    { op: 'place', id: 'stand', part: 'tower-150', position: [0, .075, 0], anchored: true },
+    { op: 'place', id: 'hub', part: 'radial-hub-8x160', position: [0, .2, 0] },
+    { op: 'pattern', kind: 'linear', instances: ['hub'], step: [.15, 0, 0] },
+    { op: 'mount', id: 'arm', part: 'servo-ds3218', onto: 'hub_1', connector: 'hinge_0', via: 'mount' },
+    { op: 'mount', id: 'hub_1', part: 'radial-hub-8x160', onto: 'stand', connector: 'top', via: 'mount' },
+  ].map((op) => AssemblyOp.parse(op));
+  const { assembly, summary } = applyOps(emptyAssembly(), ops, getPart, undefined, catalog);
+  assert.ok(!summary.some((entry) => entry.startsWith('reordered') || entry.startsWith('auto-placed')));
+  assert.equal(summary.filter((entry) => entry === 'replaced hub_1').length, 1);
+  assert.deepEqual(assembly.joints.map((joint) => joint.id), ['j_hub_1'], 'the intentional replacement removes the old arm joint');
+});
+
+test('a forward mount producer reports its original operation index on failure', () => {
+  const ops = [
+    { op: 'mount', id: 'arm', part: 'beam-100', onto: 'hub', connector: 'hinge_0', via: 'end_a' },
+    { op: 'place', id: 'stand', part: 'tower-150', position: [0, .075, 0], anchored: true },
+    { op: 'mount', id: 'hub', part: 'missing-hub', onto: 'stand', connector: 'top' },
+  ].map((op) => AssemblyOp.parse(op));
+  assert.throws(() => applyOps(emptyAssembly(), ops, getPart, undefined, catalog),
+    (error) => error instanceof AssemblyError && error.opIndex === 2 && /Unknown part "missing-hub"/.test(error.message));
 });
