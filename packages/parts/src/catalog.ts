@@ -35,6 +35,7 @@ const PRESETS: Preset[] = [
   { id: 'adjustable-link-100', kind: 'adjustable_link', params: { span: 0.1, thickness: 0.005 } },
   { id: 'leg-bar-40', kind: 'leg_segment', params: { length: 0.04, width: 0.012, thickness: 0.004 } }, { id: 'leg-bar-60', kind: 'leg_segment', params: { length: 0.06, width: 0.012, thickness: 0.004 } }, { id: 'leg-bar-80', kind: 'leg_segment', params: { length: 0.08, width: 0.014, thickness: 0.004 } }, { id: 'leg-bar-100', kind: 'leg_segment', params: { length: 0.1, width: 0.015, thickness: 0.005 } },
   { id: 'crank-30', kind: 'crank', params: { throw: 0.03, width: 0.012, thickness: 0.005 } }, { id: 'crank-60', kind: 'crank', params: { throw: 0.06, width: 0.015, thickness: 0.006 } },
+  { id: 'geneva-wheel-4x60', kind: 'geneva_wheel', params: {} }, { id: 'geneva-crank-4x60', kind: 'geneva_crank', params: {} },
   { id: 'eccentric-disc-40', kind: 'eccentric_disc', params: { radius: 0.02, throw: 0.01, thickness: 0.006 } },
   { id: 'eccentric-disc-70', kind: 'eccentric_disc', params: { radius: 0.035, throw: 0.02, thickness: 0.008 } },
   { id: 'eccentric-cam-48', kind: 'eccentric_cam', params: { coreRadius: 0.024, lobeRadius: 0.017, eccentricity: 0.02, thickness: 0.009 } },

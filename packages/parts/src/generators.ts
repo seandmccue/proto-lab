@@ -1,4 +1,4 @@
-import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape, type Profile } from '@protolab/schema';
+import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape, type Profile, type Vec2 } from '@protolab/schema';
 import { QUAT_ID, quatFromAxisAngle, quatMul, rotate } from './math.ts';
 import { profiles, shapeVolume, ensureCCW } from './geometry.ts';
 
@@ -19,6 +19,26 @@ export function finish(base: Omit<PartDefinition, 'source' | 'limits' | 'cost_us
 const mm = (v: number) => (v * 1000).toFixed(0);
 const vol = (pieces: GeometryPiece[]) => pieces.reduce((s, p) => s + shapeVolume(p.shape), 0);
 const fx = (id: string, position: Vec3, axis: Vec3, kind: Connector['kind'] = 'fixed', description?: string): Connector => ({ id, position, axis, kind, description });
+
+const GENEVA_PARAMS: ParamSpec = {
+  centreDistance: { min: 0.025, max: 0.2, default: 0.06, unit: 'm', description: 'Distance between driver and output axes. Match both parts.' },
+  pinRadius: { min: 0.001, max: 0.012, default: 0.0025, unit: 'm', description: 'Driver pin radius. Match both parts.' },
+  clearance: { min: 0.0002, max: 0.004, default: 0.0008, unit: 'm', description: 'Total slot clearance. Match both parts.' },
+  thickness: { min: 0.003, max: 0.02, default: 0.006, unit: 'm', description: 'Wheel thickness and driver axial offset. Match both parts.' },
+};
+
+function genevaDimensions(centreDistance: number, pinRadius: number, clearance: number) {
+  const crankRadius = centreDistance / Math.SQRT2;
+  if (pinRadius + clearance > crankRadius / 7) throw new ParamError('Geneva pin and clearance must total at most one seventh of the crank radius.');
+  const halfSlot = pinRadius + clearance / 2;
+  const lockRadius = crankRadius - 3 * pinRadius;
+  const recessRadius = lockRadius + clearance / 2 + crankRadius * 0.004;
+  const slotLipX = Math.sqrt(crankRadius ** 2 - halfSlot ** 2);
+  if (Math.hypot(crankRadius - slotLipX, crankRadius - halfSlot) <= recessRadius) {
+    throw new ParamError('Geneva locking recess reaches the slot lip. Increase the pin radius or reduce the clearance.');
+  }
+  return { crankRadius, halfSlot, lockRadius, recessRadius };
+}
 
 // ------------------------------------------------------------------------------------------------
 // Generators. Conventions: X is the main length axis; Y is up; Z is lateral. Connector axes point
@@ -269,6 +289,87 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.width, p.length, p.thickness] }, [0, -p.length / 2, 0], COLORS.titanium), piece({ kind: 'cylinder', radius: p.width * 0.7, height: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'leg_segment', name: `Leg bar ${mm(p.length)} mm`, category: 'legs', description: 'Aluminium leg bar.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.width, p.length, p.thickness], material: 'aluminium', geometry: g, connectors: [fx('pivot', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'top pivot; mount onto a servo horn'), fx('pivot_front', [0, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('tip', [0, -p.length, 0], [0, -1, 0]), fx('tip_side', [0, -p.length + p.width / 2, p.thickness / 2], [0, 0, 1])], cost_usd: 1.2 }); } },
   crank: { kind: 'crank', name: 'Crank arm', category: 'cranks', description: 'Crank: "shaft" bore (revolute Z) at origin and "pin" (revolute Z) at radius `throw` along +X for a connecting rod.', params: { throw: { min: 0.005, max: 0.3, default: 0.03, unit: 'm', description: 'Crank radius' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Arm width' }, thickness: { min: 0.002, max: 0.02, default: 0.005, unit: 'm', description: 'Thickness' } },
     generate: (p, id) => { const g = [piece({ kind: 'extrude', profile: profiles.roundedRect(p.throw + p.width, p.width, p.width / 2), depth: p.thickness, axis: 'z' }, [p.throw / 2, 0, 0], COLORS.steel), piece({ kind: 'cylinder', radius: p.width * 0.3, height: p.thickness * 2, axis: 'z' }, [p.throw, 0, p.thickness], COLORS.brass)]; return finish({ id, kind: 'crank', name: `Crank ${mm(p.throw)} mm throw`, category: 'cranks', description: 'Steel crank arm with pin.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.throw + p.width, p.width, p.thickness * 3], material: 'steel', geometry: g, connectors: [fx('shaft', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'mount onto a motor shaft or axle'), fx('pin', [p.throw, 0, p.thickness * 2], [0, 0, 1], 'revolute', 'crank pin for a connecting rod')], cost_usd: 2 }); } },
+  geneva_wheel: {
+    kind: 'geneva_wheel', name: 'Four-slot Geneva index wheel', category: 'linkages',
+    description: 'Passive four-stop Geneva wheel. A matching offset pin enters its open slots to index it by a quarter turn. Put the driver centre on +X, rotate this wheel +45° around Z at rest, and mount output_axis on a passive Z pivot. For a horizontal turntable, use wheel rotation_deg [-90,45,0] and driver [-90,0,0]. Use table for a fixed output.',
+    params: GENEVA_PARAMS,
+    generate: (p, id) => {
+      const { centreDistance, pinRadius, clearance, thickness } = p;
+      const { crankRadius, halfSlot, recessRadius } = genevaDimensions(centreDistance, pinRadius, clearance);
+      const hubRadius = centreDistance - crankRadius - pinRadius - clearance;
+      const geometry = [piece({ kind: 'cylinder', radius: hubRadius, height: thickness, axis: 'z' }, [0, 0, 0], '#52748b')];
+      const start = Math.asin(halfSlot / crankRadius);
+      const samples = 16;
+      const edges = Array.from({ length: samples + 1 }, (_, index) => {
+        const angle = start + index / samples * (Math.PI / 2 - 2 * start);
+        const x = Math.cos(angle);
+        const y = Math.sin(angle);
+        const alongRay = crankRadius * (x + y);
+        const discriminant = alongRay ** 2 - centreDistance ** 2 + recessRadius ** 2;
+        const outer = discriminant > 0 ? Math.min(crankRadius, alongRay - Math.sqrt(discriminant)) : crankRadius;
+        const inner = halfSlot / Math.min(x, y);
+        return { inner: [x * inner, y * inner] as Vec2, outer: [x * outer, y * outer] as Vec2 };
+      });
+      // Keep the slot channels and locking recesses physically open. Rapier takes a convex
+      // hull per piece, so each narrow material strip gets its own collider.
+      for (let quadrant = 0; quadrant < 4; quadrant++) {
+        const rotation = quatFromAxisAngle([0, 0, 1], quadrant * Math.PI / 2);
+        for (let index = 0; index < samples; index++) {
+          const a = edges[index];
+          const b = edges[index + 1];
+          const profile = [a.inner, a.outer, b.outer, b.inner].filter((point, i, points) =>
+            i === 0 || Math.hypot(point[0] - points[i - 1][0], point[1] - points[i - 1][1]) > 1e-8);
+          if (profile.length >= 3) geometry.push(piece({ kind: 'extrude', profile: ensureCCW(profile), depth: thickness, axis: 'z' }, [0, 0, 0], '#52748b', 'structure', rotation));
+        }
+      }
+      geometry.push(piece({ kind: 'cylinder', radius: hubRadius * 0.53, height: thickness * 0.32, axis: 'z' }, [0, 0, thickness * 0.66], COLORS.brass));
+      return finish({
+        id, kind: 'geneva_wheel', name: `Four-slot Geneva wheel ${mm(centreDistance)} mm spacing`, category: 'linkages',
+        description: 'Four physical slots accept the matching driver pin. Recesses between the slots receive its dwell sector.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [crankRadius * 2, crankRadius * 2, thickness * 1.32],
+        connectors: [
+          fx('output_axis', [0, 0, -thickness / 2], [0, 0, -1], 'revolute', 'Passive output shaft about Z'),
+          fx('table', [0, 0, thickness * 0.82], [0, 0, 1], 'fixed', 'Output tray or marker mount'),
+        ],
+        cost_usd: 8,
+      });
+    },
+  },
+  geneva_crank: {
+    kind: 'geneva_crank', name: 'Geneva pin crank', category: 'cranks',
+    description: 'Powered Geneva driver with one physical offset pin and a relieved dwell sector. At rest the pin points +X; place its centre to the right of the matching wheel and one thickness behind it along Z (one thickness below the wheel for horizontal mounting). Power only the drive pivot.',
+    params: GENEVA_PARAMS,
+    generate: (p, id) => {
+      const { centreDistance, pinRadius, clearance, thickness } = p;
+      const { crankRadius, lockRadius } = genevaDimensions(centreDistance, pinRadius, clearance);
+      const plateRadius = crankRadius + pinRadius * 1.5;
+      const relief = 40 * Math.PI / 180;
+      const geometry = [
+        piece({ kind: 'cylinder', radius: plateRadius, height: thickness * 0.7, axis: 'z' }, [0, 0, 0], '#354e64'),
+        piece({ kind: 'cylinder', radius: pinRadius, height: thickness * 1.25, axis: 'z' }, [crankRadius, 0, thickness * 0.9], COLORS.orange, 'contact'),
+      ];
+      // The dwell sector wraps more than 180 degrees. Split it into convex halves so the
+      // contact hulls preserve the relief around the pin through the indexing phase.
+      for (const [start, end] of [[relief, Math.PI], [Math.PI, 2 * Math.PI - relief]]) {
+        const profile: Profile = [[0, 0]];
+        for (let index = 0; index <= 24; index++) {
+          const angle = start + index / 24 * (end - start);
+          profile.push([lockRadius * Math.cos(angle), lockRadius * Math.sin(angle)]);
+        }
+        geometry.push(piece({ kind: 'extrude', profile, depth: thickness, axis: 'z' }, [0, 0, thickness], COLORS.brass, 'contact'));
+      }
+      geometry.push(piece({ kind: 'cylinder', radius: pinRadius * 1.2, height: thickness, axis: 'z' }, [0, 0, thickness * 0.7], '#354e64'));
+      return finish({
+        id, kind: 'geneva_crank', name: `Geneva pin crank ${mm(centreDistance)} mm spacing`, category: 'cranks',
+        description: 'The orange pin indexes the wheel through contact. The relieved bronze sector holds the wheel between steps.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [plateRadius * 2, plateRadius * 2, thickness * 1.875],
+        connectors: [fx('drive', [0, 0, -thickness * 0.35], [0, 0, -1], 'revolute', 'Powered input shaft about Z')],
+        cost_usd: 6,
+      });
+    },
+  },
   eccentric_disc: {
     kind: 'eccentric_disc', name: 'Eccentric drive disc', category: 'cranks',
     description: 'Round crank with a rear "shaft" bore, fixed front "hub" for a shaft extension, and an offset front "pin" to drive a connecting rod. Both pivots rotate about Z.',
