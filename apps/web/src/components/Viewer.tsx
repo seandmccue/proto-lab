@@ -65,35 +65,56 @@ function vec(p: Transform['position']) { return new THREE.Vector3(p[0], p[1], p[
 
 export function replayBounds(assembly: Assembly, test?: TestResult | null): THREE.Box3 {
   const bounds = new THREE.Box3();
-  const partBounds = new Map<string, THREE.Box3>();
-  const matrix = new THREE.Matrix4();
+  const scale = new THREE.Vector3(1, 1, 1);
+  const partBounds = new Map(assembly.parts.map((part) => {
+    const pieces = part.geometry.map(({ shape, offset }) => {
+      const half = vec(halfExtents(shape)).multiplyScalar(1.12);
+      const position = vec(offset.position);
+      return {
+        box: new THREE.Box3(half.clone().negate(), half),
+        matrix: new THREE.Matrix4().compose(position, quat(offset.rotation), scale),
+        radius: position.length() + half.length(),
+      };
+    });
+    return [part.id, pieces] as const;
+  }));
+  const fallback = [{ box: new THREE.Box3(new THREE.Vector3(-.02, -.02, -.02), new THREE.Vector3(.02, .02, .02)), matrix: new THREE.Matrix4(), radius: Math.sqrt(3) * .02 }];
+  const frames = test?.trace.frames ?? [];
+  const poseMatrix = new THREE.Matrix4();
+  const pieceMatrix = new THREE.Matrix4();
   const position = new THREE.Vector3();
   const rotation = new THREE.Quaternion();
-  const scale = new THREE.Vector3(1, 1, 1);
+  const previousRotation = new THREE.Quaternion();
+  const instanceBounds = new THREE.Box3();
   const box = new THREE.Box3();
-  for (const part of assembly.parts) {
-    const local = new THREE.Box3();
-    for (const { shape, offset } of part.geometry) {
-      // Include room for the diagnostic outline and poses between trace samples.
-      const half = vec(halfExtents(shape)).multiplyScalar(1.12);
-      matrix.compose(position.fromArray(offset.position), rotation.fromArray(offset.rotation), scale);
-      local.union(box.set(half.clone().negate(), half).applyMatrix4(matrix));
-    }
-    if (!local.isEmpty()) partBounds.set(part.id, local);
-  }
-  const frames = test?.trace.frames ?? [];
-  const fallback = new THREE.Box3(new THREE.Vector3(-.02, -.02, -.02), new THREE.Vector3(.02, .02, .02));
   for (const instance of assembly.instances) {
-    const local = partBounds.get(instance.partId) ?? fallback;
+    const part = partBounds.get(instance.partId);
+    const pieces = part?.length ? part : fallback;
+    const radius = Math.max(...pieces.map((piece) => piece.radius));
+    instanceBounds.makeEmpty();
     const addPose = (pose: Transform) => {
-      matrix.compose(position.fromArray(pose.position), rotation.fromArray(pose.rotation), scale);
-      bounds.union(box.copy(local).applyMatrix4(matrix));
+      poseMatrix.compose(position.fromArray(pose.position), rotation.fromArray(pose.rotation), scale);
+      // Project each padded piece once. Reboxing the entire compound before rotating it creates empty corners.
+      for (const piece of pieces) {
+        pieceMatrix.multiplyMatrices(poseMatrix, piece.matrix);
+        instanceBounds.union(box.copy(piece.box).applyMatrix4(pieceMatrix));
+      }
     };
-    addPose(instance.transform);
+    let previous = instance.transform;
+    let maximumAngle = 0;
+    addPose(previous);
     for (const frame of frames) {
-      const pose = frame.bodies[instance.id];
-      if (pose) addPose(pose);
+      const pose = frame.bodies[instance.id] ?? instance.transform;
+      const sameRotation = pose.rotation.every((value, index) => value === previous.rotation[index]);
+      if (sameRotation && pose.position.every((value, index) => value === previous.position[index])) continue;
+      addPose(pose);
+      if (!sameRotation) {
+        maximumAngle = Math.max(maximumAngle, previousRotation.fromArray(previous.rotation).angleTo(rotation));
+      }
+      previous = pose;
     }
+    // Lerp stays inside the endpoint bounds. A slerped point can bow outside its chord by at most r·angle²/8.
+    bounds.union(instanceBounds.expandByScalar(radius * maximumAngle ** 2 / 8));
   }
   return bounds;
 }
