@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type ServerResponse } from 'node:http';
 import { test } from 'node:test';
-import { assistantMessage, chat, modelConfigFromEnv, TransientModelError, type ChatMessage, type ModelConfig } from './llm.ts';
+import { assistantMessage, chat, modelConfigFromEnv, specialistConfigFromEnv, TransientModelError, type ChatMessage, type ModelConfig } from './llm.ts';
 import { parseResponses } from './responses.ts';
 
 test('Responses transport and reasoning effort require valid opt-in values', () => {
@@ -11,6 +11,21 @@ test('Responses transport and reasoning effort require valid opt-in values', () 
   const cfg = modelConfigFromEnv({ MODEL_API_KEY: 'test', MODEL_TRANSPORT: 'responses-encrypted', MODEL_RESPONSES_REASONING_EFFORT: 'medium' });
   assert.equal(cfg?.transport, 'responses-encrypted');
   assert.equal(cfg?.reasoningEffort, 'medium');
+});
+
+test('the specialist has separate reasoning effort and can fall back to Chat', () => {
+  const env = { MODEL_API_KEY: 'test', MODEL_TRANSPORT: 'responses-encrypted', MODEL_RESPONSES_REASONING_EFFORT: 'low' };
+  assert.equal(specialistConfigFromEnv(env)?.model.transport, 'responses-encrypted');
+  assert.equal(specialistConfigFromEnv(env)?.model.reasoningEffort, undefined);
+  assert.equal(specialistConfigFromEnv({ ...env, MODEL_SPECIALIST_REASONING_EFFORT: 'none' })?.model.reasoningEffort, undefined);
+
+  const configured = { ...env, MODEL_SPECIALIST_TRANSPORT: '', MODEL_SPECIALIST_REASONING_EFFORT: 'high' };
+  assert.equal(modelConfigFromEnv(configured)?.reasoningEffort, 'low');
+  assert.equal(specialistConfigFromEnv(configured)?.model.reasoningEffort, 'high');
+  assert.equal(specialistConfigFromEnv({ ...configured, MODEL_TRANSPORT: 'chat' })?.model.transport, undefined);
+  const wonderChat = { ...configured, MODEL_SPECIALIST_TRANSPORT: 'chat' };
+  assert.equal(specialistConfigFromEnv(wonderChat)?.model.transport, undefined);
+  assert.equal(modelConfigFromEnv(wonderChat)?.transport, 'responses-encrypted');
 });
 
 const tools = [{ name: 'echo', description: 'Echo', parameters: { type: 'object' } }];
@@ -70,13 +85,19 @@ async function toolTurn(cfg: ModelConfig, messages: ChatMessage[]) {
 
 test('encrypted replay survives a tool round and resets at a specialist handoff', async () => {
   await withResponsesServer(async (config, requests) => {
-    const spark = { ...config, transport: 'responses-encrypted' as const, reasoningEffort: 'medium' as const };
-    const wonder = { ...spark, model: 'muse-wonder-1.0' };
+    const env = {
+      MODEL_API_KEY: config.apiKey, MODEL_API_BASE: config.baseUrl, MODEL_TIMEOUT_MS: String(config.timeoutMs),
+      MODEL_MAX_TOKENS: String(config.maxTokens), MODEL_TRANSPORT: 'responses-encrypted',
+      MODEL_RESPONSES_REASONING_EFFORT: 'low', MODEL_SPECIALIST_REASONING_EFFORT: 'high',
+    };
+    const spark = modelConfigFromEnv(env);
+    const wonder = specialistConfigFromEnv(env)?.model;
+    assert.ok(spark && wonder);
     const messages = history();
     await toolTurn(spark, messages);
     await toolTurn(spark, messages);
     assert.equal(requests[0].store, false);
-    assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
+    assert.deepEqual(requests[0].reasoning, { effort: 'low' });
     assert.deepEqual(requests[0].include, ['reasoning.encrypted_content']);
     assert.equal((requests[0].tools as { name: string }[])[0]?.name, 'echo');
     assert.equal(requests[1].input.find((item) => item.type === 'reasoning')?.encrypted_content, 'opaque_1');
@@ -85,6 +106,7 @@ test('encrypted replay survives a tool round and resets at a specialist handoff'
     messages.push({ role: 'user', content: 'Specialist handoff' });
     await toolTurn(wonder, messages);
     assert.equal(requests[2].model, 'muse-wonder-1.0');
+    assert.deepEqual(requests[2].reasoning, { effort: 'high' });
     assert.equal(requests[2].previous_response_id, undefined);
     assert.equal(requests[2].input.some((item) => item.type === 'reasoning'), false);
     assert.deepEqual(requests[2].input.filter((item) => item.type === 'function_call_output').map((item) => item.call_id), ['call_1', 'call_2']);
@@ -92,6 +114,7 @@ test('encrypted replay survives a tool round and resets at a specialist handoff'
 
     messages.push({ role: 'user', content: 'Primary resumes' });
     await toolTurn(spark, messages);
+    assert.deepEqual(requests[3].reasoning, { effort: 'low' });
     assert.equal(requests[3].input.some((item) => item.type === 'reasoning'), false);
     assert.deepEqual(requests[3].input.filter((item) => item.type === 'function_call_output').map((item) => item.call_id), ['call_1', 'call_2', 'call_3']);
     await toolTurn(spark, messages);

@@ -13,15 +13,23 @@ export interface ModelConfig {
 export const DEFAULT_BASE_URL = 'https://api.meta.ai/v1';
 export const DEFAULT_MODEL = 'muse-spark-1.3';
 
+function responseTransport(value: string | undefined): ModelConfig['transport'] {
+  return value === 'responses-stored' || value === 'responses-encrypted' ? value : undefined;
+}
+
+function responseEffort(value: string | undefined): ModelConfig['reasoningEffort'] {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
 export function modelConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ModelConfig | null {
   const apiKey = (env.MODEL_API_KEY ?? env.LLM_API_KEY)?.trim();
   if (!apiKey) return null;
-  const transport = env.MODEL_TRANSPORT;
-  const reasoningEffort = env.MODEL_RESPONSES_REASONING_EFFORT;
+  const transport = responseTransport(env.MODEL_TRANSPORT);
+  const reasoningEffort = responseEffort(env.MODEL_RESPONSES_REASONING_EFFORT);
   return {
     apiKey,
-    ...(transport === 'responses-stored' || transport === 'responses-encrypted' ? { transport } : {}),
-    ...(reasoningEffort === 'low' || reasoningEffort === 'medium' || reasoningEffort === 'high' ? { reasoningEffort } : {}),
+    ...(transport ? { transport } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     baseUrl: ((env.MODEL_API_BASE ?? env.LLM_BASE_URL)?.trim() || DEFAULT_BASE_URL).replace(/\/$/, ''),
     model: (env.MODEL_ID ?? env.LLM_MODEL)?.trim() || DEFAULT_MODEL,
     maxTokens: Number(env.MODEL_MAX_TOKENS ?? 16384),
@@ -35,7 +43,10 @@ export function specialistConfigFromEnv(env: NodeJS.ProcessEnv = process.env): {
   if (!primary) return null;
   const id = env.MODEL_SPECIALIST_ID === undefined ? 'muse-wonder-1.0' : env.MODEL_SPECIALIST_ID.trim();
   if (!id || id === primary.model) return null;
-  return { model: { ...primary, model: id }, after: Math.max(1, Number(env.MODEL_SPECIALIST_AFTER ?? 3)) };
+  const transportOverride = env.MODEL_SPECIALIST_TRANSPORT?.trim();
+  const transport = transportOverride ? responseTransport(transportOverride) : primary.transport;
+  const reasoningEffort = responseEffort(env.MODEL_SPECIALIST_REASONING_EFFORT);
+  return { model: { ...primary, model: id, transport, reasoningEffort }, after: Math.max(1, Number(env.MODEL_SPECIALIST_AFTER ?? 3)) };
 }
 
 /** Human-readable model name for attribution, e.g. "muse-spark-1.3" → "Muse Spark 1.3". */

@@ -10,6 +10,11 @@ export class ProtoLabContainer extends Container {
   pingEndpoint = 'localhost/api/load';
   envVars = {
     MODEL_API_KEY: this.env.MODEL_API_KEY,
+    // Set MODEL_TRANSPORT=chat to restore Chat for both models, or override Wonder independently.
+    MODEL_TRANSPORT: this.env.MODEL_TRANSPORT ?? 'responses-encrypted',
+    MODEL_RESPONSES_REASONING_EFFORT: this.env.MODEL_RESPONSES_REASONING_EFFORT ?? 'low',
+    MODEL_SPECIALIST_TRANSPORT: this.env.MODEL_SPECIALIST_TRANSPORT ?? '',
+    MODEL_SPECIALIST_REASONING_EFFORT: this.env.MODEL_SPECIALIST_REASONING_EFFORT ?? 'high',
     PROTOLAB_CHECKPOINT_TOKEN: this.env.PROTOLAB_CHECKPOINT_TOKEN,
     PROTOLAB_CHECKPOINT_URL: this.env.PROTOLAB_CHECKPOINT_URL,
     JOB_CONCURRENCY: '2',
