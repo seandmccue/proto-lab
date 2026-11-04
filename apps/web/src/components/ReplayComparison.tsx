@@ -187,7 +187,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
   return <section className="workbench-comparison" aria-label="Side-by-side simulation comparison">
     <div className="workbench-comparison-panes" ref={frameRef}>
       {panes.map(({ replay, version, test, highlights, receiverTargets }) => <article key={replay.versionId} className="workbench-comparison-pane" aria-label={`${replay.label}, version ${version.iteration}`}>
-        <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
+        <header><strong>{replay.label} · v{version.iteration}</strong><span className={`workbench-badge ${test.passed ? 'workbench-pass' : 'bg-warn/15 text-warn'}`}>{test.passed ? 'Passed' : 'Failed'}</span></header>
         <p className="workbench-comparison-metric">{test.metrics.distance_m !== undefined ? `${fmt.cm(test.metrics.distance_m)} travelled` : keyMetric(test)}{test.metrics.maxTilt_deg !== undefined && ` · ${fmt.deg(test.metrics.maxTilt_deg)} peak tilt`}</p>
         <div className="workbench-comparison-canvas">
           <Viewer assembly={version.assembly} test={test} playing={false} playbackTime={time} cameraBounds={cameraBounds ?? undefined} explode={0} blueprint={false} follow={false} selectedId={null} diagnosticHighlights={highlights} pathInstanceId={(Array.isArray(receiverTargets) ? undefined : receiverTargets?.instance) ?? recordedPenPath(version.assembly, test)} />
@@ -198,7 +198,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
       <div className="workbench-control-group" role="group" aria-label="Synchronized replay controls">
         <button className="btn-secondary" type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
         <input type="range" min={0} max={duration} step={0.01} value={time} onChange={(event) => { setPlaying(false); setTime(Number(event.target.value)); }} className="workbench-timeline" aria-label="Scrub both simulations" />
-        <span className="mono whitespace-nowrap text-xs text-slate-600">{time.toFixed(2)} / {duration.toFixed(1)} s</span>
+        <span className="mono whitespace-nowrap text-xs text-muted">{time.toFixed(2)} / {duration.toFixed(1)} s</span>
         <button className="btn-ghost" type="button" onClick={() => setTime(0)}>Reset</button>
         <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
         {peakTime !== null && <button className="btn-ghost" type="button" onClick={() => { setPlaying(false); setTime(peakTime); }}>Jump to peak tilt</button>}
@@ -224,10 +224,10 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
     </div>
     <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />
     {travel.length > 0 && (
-      <div className="border-t border-slate-200 bg-white px-3 pb-3">
+      <div className="border-t border-line bg-surface2 px-3 pb-3">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="py-2 text-left text-sm font-semibold">Recorded linear travel</caption>
-          <thead className="border-b border-slate-200">
+          <thead className="border-b border-line">
             <tr>
               <th scope="col" className="w-2/5 pb-2 pr-2">Part and axis</th>
               <th scope="col" className="pb-2 pr-2">{before.label} · v{versions[0].iteration}</th>
@@ -236,12 +236,12 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
           </thead>
           <tbody>
             {travel.map(({ key, label, readings }) => (
-              <tr key={key} className="border-b border-slate-100">
+              <tr key={key} className="border-b border-line">
                 <th scope="row" className="break-words py-2 pr-2 font-medium">{label}</th>
                 {readings.map(({ value, minimum }, index) => (
                   <td key={panes[index].replay.versionId} className="py-2 pr-2 align-top">
                     {value === undefined ? 'Unmeasured' : <strong>{formatTravel(value)}</strong>}
-                    {minimum !== undefined && <span className="block text-slate-600">Minimum {formatTravel(minimum)}</span>}
+                    {minimum !== undefined && <span className="block text-muted">Minimum {formatTravel(minimum)}</span>}
                   </td>
                 ))}
               </tr>

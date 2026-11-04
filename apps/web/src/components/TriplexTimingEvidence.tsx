@@ -50,7 +50,7 @@ export default function TriplexTimingEvidence({ version, test, time }: {
             <dd>{fmt.deg(minGap)}–{fmt.deg(maxGap)} <small>{isMuse ? '110°–130° goal' : '120° design spacing'}</small></dd>
           </div>
         </dl>
-        {isMuse && <span className={`workbench-badge mt-2 inline-flex ${meetsTarget ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>Phase target {meetsTarget ? 'met' : 'missed'}</span>}
+        {isMuse && <span className={`workbench-badge mt-2 inline-flex ${meetsTarget ? 'workbench-pass' : 'bg-warn/15 text-warn'}`}>Phase target {meetsTarget ? 'met' : 'missed'}</span>}
       </div>
       <RecordedDisplacementChart trace={test.trace} tracks={tracks} axis="y" time={time} />
     </section>

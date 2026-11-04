@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import Header, { useModelInfo } from '../components/Header.tsx';
+import { Navigate } from 'react-router-dom';
+import { useModelInfo } from '../components/Header.tsx';
 import './HowItWorks.css';
 
 const steps = [
@@ -35,65 +35,62 @@ const steps = [
   },
 ];
 
-export default function HowItWorks() {
+/** The "How it works" content, rendered as a section of the home page (the old /how-it-works route redirects here). */
+export function HowItWorksSection() {
   const model = useModelInfo();
-
   return (
-    <div className="min-h-full">
-      <Header />
-      <main className="home-shell pipeline-page">
-        <header className="pipeline-intro">
-          <p className="lab-label lab-kicker"><span aria-hidden="true">✦</span> Inside the lab</p>
-          <h1>How it works<span aria-hidden="true">.</span></h1>
+    <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
+      <div className="lab-section-heading">
+        <div>
+          <span className="lab-label">Inside the lab</span>
+          <h2 id="lab-how-title">How it works</h2>
           <p>From an idea to a tested 3D prototype. Meta’s Muse models make design decisions through ProtoLab’s tools, and the Rapier physics simulator measures how each design moves.</p>
-        </header>
+        </div>
+        <a href="#parts" className="btn-secondary">Explore the parts <span aria-hidden="true">↓</span></a>
+      </div>
 
-        <section aria-labelledby="pipeline-models">
-          <h2 id="pipeline-models" className="lab-label pipeline-section-label">The Meta Muse team</h2>
-          <div className="pipeline-models">
-            <article className="pipeline-model pipeline-spark">
-              <p className="lab-label">01 / Default inventor</p>
-              <h3>Meta Muse Spark 1.3</h3>
-              <p>Leads the build. It turns the brief into design choices, calls tools to assemble parts, and revises from test measurements.</p>
-            </article>
-            <article className="pipeline-model pipeline-wonder">
-              <p className="lab-label">02 / Optional specialist</p>
-              <h3>Meta Muse Wonder 1.0</h3>
-              <p>Steps in after three consecutive failed tests by default. It reviews the evidence and attempts a targeted revision before Spark resumes. If Wonder is unavailable, the log says so and Spark continues — nothing is swapped silently.</p>
-            </article>
-          </div>
-          <p className="pipeline-note">
-            ProtoLab calls these models through the Meta Model API. Without an API key, a deterministic planner runs the build.
-          </p>
-          {model && <p className="pipeline-status">
-            <strong>This lab</strong> {model.label}{model.live ? ' · Tool-call check passed' : ''}
-          </p>}
-        </section>
+      <div aria-labelledby="pipeline-models">
+        <h3 id="pipeline-models" className="lab-label pipeline-section-label">The Meta Muse team</h3>
+        <div className="pipeline-models">
+          <article className="pipeline-model pipeline-spark">
+            <p className="lab-label">01 / Default inventor</p>
+            <h3>Meta Muse Spark 1.3</h3>
+            <p>Leads the build. It turns the brief into design choices, calls tools to assemble parts, and revises from test measurements.</p>
+          </article>
+          <article className="pipeline-model pipeline-wonder">
+            <p className="lab-label">02 / Optional specialist</p>
+            <h3>Meta Muse Wonder 1.0</h3>
+            <p>Steps in after three consecutive failed tests by default. It reviews the evidence and attempts a targeted revision before Spark resumes. If Wonder is unavailable, the log says so and Spark continues — nothing is swapped silently.</p>
+          </article>
+        </div>
+        <p className="pipeline-note">
+          ProtoLab calls these models through the Meta Model API. Without an API key, a deterministic planner runs the build.
+        </p>
+        {model && <p className="pipeline-status">
+          <strong>This lab</strong> {model.label}{model.live ? ' · Tool-call check passed' : ''}
+        </p>}
+      </div>
 
-        <section className="pipeline-flow" aria-labelledby="pipeline-steps">
-          <h2 id="pipeline-steps">The invention pipeline</h2>
-          <ol className="pipeline-steps">
-            {steps.map((step, i) => (
-              <li key={step.title}>
-                <span className="pipeline-number lab-label" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
-                <div>
-                  <p className="lab-label pipeline-step-label">{step.label}</p>
-                  <h3>{step.title}</h3>
-                  <p>{step.detail}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <footer className="pipeline-footer">
-          <p>Simulation measures the virtual prototype. Physical buildability and safety require separate validation.</p>
-          <div>
-            <Link className="btn-primary" to="/">Start an invention <span aria-hidden="true">↗</span></Link>
-            <Link className="btn-secondary" to="/gallery">Explore the gallery</Link>
-          </div>
-        </footer>
-      </main>
-    </div>
+      <div className="pipeline-flow" aria-labelledby="pipeline-steps">
+        <h3 id="pipeline-steps">The invention pipeline</h3>
+        <ol className="pipeline-steps">
+          {steps.map((step, i) => (
+            <li key={step.title}>
+              <span className="pipeline-number lab-label" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <p className="lab-label pipeline-step-label">{step.label}</p>
+                <h4>{step.title}</h4>
+                <p>{step.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <p className="pipeline-footer">Simulation measures the virtual prototype. Physical buildability and safety require separate validation.</p>
+    </section>
   );
+}
+
+export default function HowItWorks() {
+  return <Navigate to="/#how-it-works" replace />;
 }

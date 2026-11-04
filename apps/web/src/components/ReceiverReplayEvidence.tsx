@@ -38,7 +38,7 @@ export default function ReceiverReplayEvidence({ targets, test, time, compareTar
           </span>
           <span className="workbench-receiver-result">
             {finalHold === undefined ? 'Final hold unavailable' : <>
-              <span className={`workbench-badge ${passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>{resultLabel} {passed ? 'pass' : 'miss'}</span>
+              <span className={`workbench-badge ${passed ? 'workbench-pass' : 'bg-warn/15 text-warn'}`}>{resultLabel} {passed ? 'pass' : 'miss'}</span>
               {finalHold.toFixed(2)} s held / {check.minHold_s.toFixed(2)} s required
             </>}
           </span>

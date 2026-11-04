@@ -1,20 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Header, { useModelInfo } from '../components/Header.tsx';
-import { recordedTestSpec } from '../components/BuildProgress.tsx';
+import { keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import PartInventory from '../components/PartInventory.tsx';
+import { HowItWorksSection } from './HowItWorks.tsx';
 import Viewer from '../components/Viewer.tsx';
-import { api, fmt, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
+import { api, fmt, isRetired, RETIRED_EXAMPLE_IDS, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
 import type { TestSpec, VersionRecord } from '@protolab/schema';
 import { largeShowcases } from '../../../large-showcases.mts';
 
-const steps = [
-  { title: 'Describe your idea', detail: 'Tell Muse what you want to build and what it should do. Give it a target, like a crab that scuttles at least 25 cm.' },
-  { title: 'Watch Muse assemble it', detail: 'Muse selects parts, connects them in 3D, and sets up the motors and joints that make the prototype move.' },
-  { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
-  { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
-];
 const crabId = 'inv_633b4887ad7f4cdc';
 const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
@@ -50,6 +45,16 @@ export default function Home() {
   const [earlierHeroDefinition, setEarlierHeroDefinition] = useState<TestSpec>();
   const [showBefore, setShowBefore] = useState(false);
   const [heroPlaying, setHeroPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  // While the preview plays, alternate between the blueprint wireframe and the rendered model every few seconds.
+  const [heroBlueprint, setHeroBlueprint] = useState(false);
+  useEffect(() => {
+    if (!heroPlaying) return;
+    const timer = window.setInterval(() => setHeroBlueprint((on) => !on), 3200);
+    return () => window.clearInterval(timer);
+  }, [heroPlaying]);
+  // The card is a looping slideshow: the crab repair first, then other featured prototypes, each replaying its recorded test.
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [slideVersions, setSlideVersions] = useState<Map<string, VersionRecord>>(() => new Map());
   const [orrery, setOrrery] = useState<InventionPublic | null>(null);
   const [drawingRemix, setDrawingRemix] = useState<InventionPublic | null>(null);
   const [drawingBaseline, setDrawingBaseline] = useState<VersionRecord | null>(null);
@@ -101,14 +106,14 @@ export default function Home() {
           cursor = page.nextCursor;
         }
       } finally {
-        if (!cancelled) setFeatured([...items.values()]);
+        if (!cancelled) setFeatured([...items.values()].filter((item) => !isRetired(item)));
       }
     }
-    api.examples().then((r) => setExamples(r.examples)).catch(() => {});
+    api.examples().then((r) => setExamples(r.examples.filter((ex) => !RETIRED_EXAMPLE_IDS.has(ex.id)))).catch(() => {});
     void loadFeatured().catch(() => {});
-    api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
+    api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured && !isRetired(i)))).catch(() => {});
     api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
-    api.mine().then((r) => setMine(r.items)).catch(() => {});
+    api.mine().then((r) => setMine(r.items.filter((i) => !isRetired(i)))).catch(() => {});
     api.invention(crabId).then(setCrab).catch(() => {});
     api.invention('inv_adc081059ea44ab9').then(({ invention }) => {
       if (invention.visibility === 'public' && invention.status === 'passed') setOrrery(invention);
@@ -173,6 +178,34 @@ export default function Home() {
   const beforeDistance = before?.test.metrics.distance_m;
   const afterDistance = heroTest?.metrics.distance_m ?? hero?.latestWalk?.metrics.distance_m;
   const replayUrl = hero ? `/i/${hero.id}?replay=1&compare=1` : '/gallery';
+  const slideItems = [...largeBuilds.map((build) => build.item), ...featuredPrototypes]
+    .filter((item) => item.id !== hero?.id && item.visibility === 'public' && item.status === 'passed' && item.currentVersionId && item.latestTest?.passed)
+    .slice(0, 6);
+  const slides: Array<{ kind: 'crab' } | { kind: 'item'; item: InventionPublic }> = [...(hero ? [{ kind: 'crab' } as const] : []), ...slideItems.map((item) => ({ kind: 'item' as const, item }))];
+  const slideCount = slides.length;
+  const slide = slides[Math.min(slideIndex, Math.max(slideCount - 1, 0))];
+  useEffect(() => {
+    if (!heroPlaying || slideCount < 2) return;
+    const timer = window.setInterval(() => { setSlideIndex((i) => (i + 1) % slideCount); setHeroBlueprint(false); }, 9600);
+    return () => window.clearInterval(timer);
+  }, [heroPlaying, slideCount]);
+  useEffect(() => {
+    // Load the current and next slide's version with its trace, once each.
+    let cancelled = false;
+    const wanted = [slide, slides[(slideIndex + 1) % Math.max(slideCount, 1)]].flatMap((entry) => entry?.kind === 'item' && entry.item.currentVersionId && !slideVersions.has(entry.item.id) ? [entry.item] : []);
+    for (const item of wanted) {
+      api.version(item.id, item.currentVersionId!, true).then(({ version }) => {
+        if (!cancelled) setSlideVersions((current) => current.has(item.id) ? current : new Map(current).set(item.id, version));
+      }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [slideIndex, slideCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  const slideItem = slide?.kind === 'item' ? slide.item : null;
+  const slideVersion = slideItem ? slideVersions.get(slideItem.id) ?? null : null;
+  const slideTest = slideVersion ? slideVersion.tests.find((test) => test.testId === slideItem?.latestTest?.testId) ?? slideVersion.tests.at(-1) : undefined;
+  const slideMetric = keyMetric(slideItem?.latestTest);
+  const stageVersion = slideItem ? slideVersion : activeVersion;
+  const stageTest = slideItem ? slideTest : activeTest;
 
   const start = async (body: { prompt?: string; exampleId?: string }) => {
     setBusy(true); setError(null);
@@ -187,8 +220,10 @@ export default function Home() {
       <main className="home-shell">
         <section className="lab-hero" aria-labelledby="hero-title">
           <div className="lab-hero-copy">
-            <p className="lab-label lab-kicker"><span aria-hidden="true">✦</span> AI prototyping studio</p>
-            <h1 id="hero-title">Turn an idea into a <em>3D prototype.</em></h1>
+            <div className="lab-hero-title">
+              <img className="lab-hero-mascot" src="/muse-blueprint.png" alt="" width="512" height="512" decoding="async" />
+              <h1 id="hero-title">Turn an idea into a <em>3D prototype.</em></h1>
+            </div>
             <p className="lab-intro">Describe a mechanism. Meta Muse assembles it from parts, tests how it moves, and revises it from the results.</p>
             <form onSubmit={submit} className="lab-form">
               <label htmlFor="invention-prompt" className="lab-label">Describe your prototype</label>
@@ -200,7 +235,17 @@ export default function Home() {
               </div>
               <p id="invention-scope">Tell Muse what to build and how it should move.</p>
             </form>
-            {error && <p className="mt-2 text-sm text-rose-700" role="alert">{error}</p>}
+            {error && <p className="mt-2 text-sm text-fail" role="alert">{error}</p>}
+            {examples.length > 0 && <div className="lab-examples">
+              <span className="lab-label">Try a brief</span>
+              <div className="lab-chips">
+                {examples.map((ex) => (
+                  <button key={ex.id} onClick={() => { setPrompt(ex.prompt); document.getElementById('invention-prompt')?.focus(); }} disabled={busy} className="chip" title={ex.prompt}>
+                    {ex.title}
+                  </button>
+                ))}
+              </div>
+            </div>}
             <div className="lab-hero-links">
               <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
               <a href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>
@@ -208,41 +253,47 @@ export default function Home() {
           </div>
           <figure className="lab-art">
             <div className="lab-art-heading">
-              <div><span className="lab-label">Recorded physics test</span><h2>Mechanical crab</h2></div>
-              {activeTest && <button type="button" className="lab-art-toggle" onClick={() => setHeroPlaying(!heroPlaying)}>{heroPlaying ? 'Pause' : 'Play'} preview</button>}
+              <div>
+                <span className="lab-label">{slideItem ? 'Featured prototype' : 'Recorded physics test'}</span>
+                <h2>{slideItem ? slideItem.title : 'Mechanical crab'}</h2>
+              </div>
+              {(activeTest || slideItem) && <button type="button" className="lab-art-toggle" onClick={() => setHeroPlaying(!heroPlaying)}>{heroPlaying ? 'Pause' : 'Play'} preview</button>}
             </div>
-            {heroDefinition?.kind === 'walk' && (
+            {!slideItem && heroDefinition?.kind === 'walk' && (
               <p className="lab-art-target">Test goal <strong>≥ {fmt.cm(heroDefinition.minDistance_m)} in {heroDefinition.duration_s} s · ≤ {fmt.deg(heroDefinition.maxTilt_deg)} tilt</strong></p>
             )}
-            <div className="lab-art-results" role="group" aria-label="Compare saved crab tests">
+            {slideItem && (
+              <p className="lab-art-target">Tests passed{slideMetric && <strong>{slideMetric}</strong>}{slideItem.modelId?.startsWith('muse-') && <span className="lab-art-maker">built by Muse</span>}</p>
+            )}
+            {!slideItem && <div className="lab-art-results" role="group" aria-label="Compare saved crab tests">
               {beforeDistance !== undefined && <button type="button" aria-pressed={showBefore} onClick={() => setShowBefore(true)}><span>v{before?.version.iteration} · Failed</span><strong>{fmt.cm(beforeDistance)}</strong>{before?.test.metrics.maxTilt_deg !== undefined && <span>{fmt.deg(before.test.metrics.maxTilt_deg)} peak tilt</span>}</button>}
               {afterDistance !== undefined && <button type="button" aria-pressed={!showBefore} onClick={() => setShowBefore(false)}><span>{heroVersion ? `v${heroVersion.iteration}` : 'After'} · Passed</span><strong>{fmt.cm(afterDistance)}</strong>{hero?.latestWalk?.metrics.maxTilt_deg !== undefined && <span>{fmt.deg(hero.latestWalk.metrics.maxTilt_deg)} peak tilt</span>}</button>}
-            </div>
+            </div>}
             <div className="lab-art-stage">
-              {activeVersion ? (
+              {stageVersion ? (
                 <div className="lab-art-machine" aria-hidden="true">
-                  <Viewer assembly={activeVersion.assembly} test={activeTest} playing={heroPlaying} explode={0} blueprint={false} selectedId={null} mini />
+                  <Viewer key={stageVersion.id} assembly={stageVersion.assembly} test={stageTest} playing={heroPlaying} explode={0} blueprint={heroBlueprint} selectedId={null} mini stage="stage" autoRotate={heroPlaying} autoRotateSpeed={0.7} />
                 </div>
+              ) : slideItem ? (
+                <span className="lab-art-placeholder">Loading {slideItem.title}…</span>
               ) : hero?.previewUrl ? (
                 <img src={hero.previewUrl} alt="Mechanical crab assembly" width="500" height="414" />
               ) : <span className="lab-art-placeholder">Preparing the recorded prototype</span>}
+              {stageVersion && <span className="lab-art-mode" data-mode={heroBlueprint ? 'blueprint' : 'render'}>{heroBlueprint ? 'Blueprint' : 'Render'}</span>}
             </div>
             <figcaption>
-              {hero && <p>Muse moved the feet under the hips and retimed the gait.</p>}
-              <Link to={replayUrl} className="lab-art-link">{hero ? 'Compare both runs in 3D' : 'Explore working prototypes'} <span aria-hidden="true">↗</span></Link>
+              {slideItem
+                ? <p>{slideItem.description ? slideItem.description.slice(0, 110) + (slideItem.description.length > 110 ? '…' : '') : slideItem.prompt.slice(0, 110)}</p>
+                : hero && <p>Muse moved the feet under the hips and retimed the gait.</p>}
+              <div className="lab-art-foot">
+                <Link to={slideItem ? `/i/${slideItem.id}?replay=1` : replayUrl} className="lab-art-link">{slideItem ? 'Explore in 3D' : hero ? 'Compare both runs in 3D' : 'Explore working prototypes'} <span aria-hidden="true">↗</span></Link>
+                {slideCount > 1 && <div className="lab-art-dots" role="tablist" aria-label="Featured prototypes">
+                  {slides.map((entry, i) => <button key={entry.kind === 'item' ? entry.item.id : 'crab'} type="button" role="tab" aria-selected={i === slideIndex} aria-label={entry.kind === 'item' ? entry.item.title : 'Mechanical crab'} onClick={() => { setSlideIndex(i); setHeroBlueprint(false); }} />)}
+                </div>}
+              </div>
             </figcaption>
           </figure>
         </section>
-        {examples.length > 0 && <div className="lab-examples">
-          <span className="lab-label">Try a brief</span>
-          <div className="lab-chips">
-            {examples.map((ex) => (
-              <button key={ex.id} onClick={() => { setPrompt(ex.prompt); document.getElementById('invention-prompt')?.focus(); }} disabled={busy} className={`chip ${ex.id === 'muse' ? 'lab-chip-muse' : ''}`} title={ex.prompt}>
-                {ex.id === 'muse' && <span aria-hidden="true">✦</span>}{ex.title}
-              </button>
-            ))}
-          </div>
-        </div>}
         {largeBuilds.length > 0 && (
           <section className="lab-section" aria-labelledby="large-builds-title">
             <div className="lab-section-heading">
@@ -320,24 +371,8 @@ export default function Home() {
         <Section title="Prototype gallery" items={featuredPrototypes} previewCount={6} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery?view=featured', label: 'All featured inventions' }} />
         <Section title="Recent" items={recentPrototypes} previewCount={6} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
         {(!spotlightId || otherRemixes.length > 0) && <Section title="Remixes" items={otherRemixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />}
-        <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
-          <div className="lab-section-heading">
-            <div>
-              <span className="lab-label">From idea to prototype</span>
-              <h2 id="lab-how-title">How ProtoLab works</h2>
-              <p>A prompt becomes a 3D assembly you can inspect, simulate, and improve.</p>
-            </div>
-            <a href="#parts" className="btn-secondary">Explore the parts <span aria-hidden="true">↓</span></a>
-          </div>
-          <ol className="lab-how-steps">
-            {steps.map((step, index) => (
-              <li key={step.title}>
-                <span className="lab-label lab-how-number">0{index + 1}</span>
-                <h3>{step.title}</h3>
-                <p>{step.detail}</p>
-              </li>
-            ))}
-          </ol>
+        <HowItWorksSection />
+        <section className="lab-section" aria-label="Inside a saved simulation">
           {beforeDistance !== undefined && afterDistance !== undefined && (
             <div className="lab-test-example">
               <div>

@@ -649,9 +649,9 @@ export default function Workspace() {
       <div className="min-h-screen">
         <Header />
         <main className="mx-auto max-w-2xl px-4 py-20 text-center">
-          <p className="text-xs font-mono uppercase tracking-widest text-slate-500">Invention unavailable</p>
+          <p className="text-xs font-mono uppercase tracking-widest text-muted">Invention unavailable</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">This invention is private or doesn’t exist</h1>
-          <p className="mt-3 text-slate-600">Builds are private until their owner publishes them to the gallery. If someone sent you this link, ask them to publish it, or start your own.</p>
+          <p className="mt-3 text-muted">Builds are private until their owner publishes them to the gallery. If someone sent you this link, ask them to publish it, or start your own.</p>
           <div className="mt-8 flex justify-center gap-3">
             <Link to="/" className="btn-primary">Start a new invention</Link>
             <Link to="/gallery" className="btn-secondary">Browse the gallery</Link>
@@ -729,14 +729,14 @@ export default function Workspace() {
           <p className="workbench-label">Invention workbench</p>
           <div className="workbench-title">
             <h1>{inv?.title ?? 'Loading invention…'}</h1>
-            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : currentUntested || inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
+            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : currentUntested || inv.status === 'failed' ? 'bg-warn/15 text-warn' : inv.status === 'error' ? 'bg-fail/15 text-fail' : 'bg-accent/15 text-accent'}`}>{running ? 'building' : currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
             {inv?.visibility === 'public' && <span className="workbench-badge workbench-published">published</span>}
           </div>
           <p className="workbench-prompt workbench-heading-prompt">{prompt}</p>
         </div>
         <div className="workbench-heading-actions">{workbenchActions}</div>
       </div>
-      {error && !changeMode && <div role="alert" className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
+      {error && !changeMode && <div role="alert" className="bg-fail/15 px-4 py-2 text-sm text-fail">{error}</div>}
       {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} />}
       {stoppedBuild && <section className="workbench-build-outcome" aria-label="Build outcome">
         <div className="workbench-build-outcome-status" role="status">
@@ -753,7 +753,7 @@ export default function Workspace() {
 
       <div className="workbench-grid">
         <aside className="workbench-panel workbench-parts" data-active={mobilePane === 'tree'} aria-label="Assembly and parts">
-          {showLive && live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={liveHighlightIds} /> : version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
+          {showLive && live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={liveHighlightIds} /> : version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-dim">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
         </aside>
 
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
@@ -780,8 +780,8 @@ export default function Workspace() {
                 <Viewer assembly={live.assembly} visibleInstanceIds={visibleLiveIds} enteringInstanceIds={reducedMotion ? undefined : live.newIds} test={null} playing={false} speed={1} explode={explode} blueprint={activeBlueprint} follow={false} selectedId={selected} changedIds={liveHighlightIds} onSelect={setSelected} autoRotate={!reducedMotion && !introBlueprint} />
                 <div className="workbench-readout">
                   <span className="workbench-readout-model">{running ? 'Live assembly' : 'Assembly preview'} · v{live.iteration} · {visibleLiveIds ? `${visibleLiveIds.size} of ` : ''}{live.assembly.instances.length} parts placed</span>
-                  <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{running ? 'Assembly preview' : 'Showing the assembled parts before replay'}</span>
-                  {live.rationale && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale}</span>}
+                  <span className="rounded-md bg-accent/15 px-2 py-1 text-xs text-accent shadow-none">{running ? 'Assembly preview' : 'Showing the assembled parts before replay'}</span>
+                  {live.rationale && <span className="rounded-md bg-accent/15 px-2 py-1 text-xs text-accent shadow-none">{live.rationale}</span>}
                 </div>
               </>
             ) : version ? (
@@ -790,14 +790,14 @@ export default function Workspace() {
             ) : running ? (
               <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
             ) : (
-              <div className="p-6 text-sm text-slate-400">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
+              <div className="p-6 text-sm text-dim">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
             {(version || showLive) && <BuildStrip events={events} running={running} />}
             {version && !showLive && (
               <div className="workbench-readout">
                 <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!diagnosticHighlights && showChangeColors && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
-                {!version.tests.length && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">Assembly saved · No completed simulation</span>}
-                {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
+                {!version.tests.length && <span className="rounded-md bg-accent/15 px-2 py-1 text-xs text-accent shadow-none">Assembly saved · No completed simulation</span>}
+                {test && <span className={`rounded-md px-2 py-1 text-xs shadow-none ${test.passed ? 'bg-pass/15 text-pass' : 'bg-warn/15 text-warn'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
                 {diagnosticHighlights && <div className={`workbench-diagnostic${tiltHighlight ? ' is-failure' : ''}`}>
                   <strong>{tiltHighlight ? 'Tilt limit exceeded' : stepDecision ? 'Changed by Muse' : 'Changed in this revision'}</strong>
                   <span>{tiltHighlight
@@ -812,7 +812,7 @@ export default function Workspace() {
               <button className="btn-secondary" onClick={() => setPlaying((p) => !p)} disabled={!test} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
               <button className="btn-ghost" onClick={() => { setSeek(0); setTimeout(() => setSeek(null), 50); }} disabled={!test}>Reset</button>
               <input type="range" min={0} max={Math.max(0.01, time.d)} step={0.01} value={Math.min(time.t, time.d)} onChange={(e) => { setPlaying(false); setSeek(Number(e.target.value)); }} className="workbench-timeline" aria-label="Scrub time" disabled={!test} />
-              <span className="mono whitespace-nowrap text-xs text-slate-600">{time.t.toFixed(2)} / {time.d.toFixed(1)} s</span>
+              <span className="mono whitespace-nowrap text-xs text-muted">{time.t.toFixed(2)} / {time.d.toFixed(1)} s</span>
               <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed"><option value={0.25}>0.25×</option><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select>
               {version && version.tests.length > 1 && (
                 <select value={testId ?? ''} onChange={(e) => setTestId(e.target.value)} aria-label="Test to replay">{version.tests.map((t) => <option key={t.testId} value={t.testId}>{t.testId} {t.passed ? '✓' : '✗'}</option>)}</select>
@@ -859,18 +859,18 @@ export default function Workspace() {
           </div>
           <div className="workbench-agent-content">
             {tab === 'activity' && <ActivityPanel events={events} running={running} versions={detail?.versions ?? []} currentVersionId={versionId} onPickVersion={setVersionId} status={jobStatus} />}
-            {tab === 'spec' && <div className="overflow-auto p-3">{version ? <SpecPanel spec={version.spec} /> : <p className="text-xs text-slate-400">No spec yet.</p>}</div>}
+            {tab === 'spec' && <div className="overflow-auto p-3">{version ? <SpecPanel spec={version.spec} /> : <p className="text-xs text-dim">No spec yet.</p>}</div>}
             {tab === 'tests' && (
               <div className="overflow-auto p-3 space-y-3">
-                {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} {version?.tests[0]?.engine ? ` · engine: ${version.tests[0].engine}` : ''}</p>}
-                {version && !running && !finalVersion && <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">{renderExplanation(version)}</div>}
+                {vmeta && <p className="text-xs text-muted">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} {version?.tests[0]?.engine ? ` · engine: ${version.tests[0].engine}` : ''}</p>}
+                {version && !running && !finalVersion && <div className="rounded-md border border-line bg-surface2 p-2 text-xs">{renderExplanation(version)}</div>}
                 {detail && detail.versions.length > 1 && (
-                  <div className="rounded-md border border-slate-200 p-2 text-xs">
+                  <div className="rounded-md border border-line p-2 text-xs">
                     <div className="panel-title mb-1">Iterations</div>
                     <table className="w-full mono"><tbody>
                       {detail.versions.map((v) => { const t = v.tests[v.tests.length - 1]; const key = t ? (t.metrics.distance_m !== undefined ? ['distance', fmt.m2(t.metrics.distance_m)] : t.metrics.landingDistance_m !== undefined ? ['landing', fmt.m2(t.metrics.landingDistance_m)] : t.metrics.payloadDrop_m !== undefined ? ['payload drop', fmt.m2(t.metrics.payloadDrop_m)] : Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad')) ? ['amplitude', `${Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad'))![1].toFixed(2)} rad`] : ['tilt', fmt.deg(t.metrics.maxTilt_deg ?? 0)]) : ['', '']; return (
-                        <tr key={v.id} className={`${v.id === versionId ? 'bg-accent-soft' : ''} cursor-pointer hover:bg-slate-50`} onClick={() => setVersionId(v.id)}>
-                          <td className="px-1 py-0.5 text-slate-500">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-slate-500">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${!t ? 'text-slate-500' : v.status === 'passed' ? 'text-emerald-700' : 'text-rose-600'}`}>{!t ? 'Not tested' : v.status === 'passed' ? '✓' : '✗'}</td>
+                        <tr key={v.id} className={`${v.id === versionId ? 'bg-accent/15' : ''} cursor-pointer hover:bg-surface2`} onClick={() => setVersionId(v.id)}>
+                          <td className="px-1 py-0.5 text-muted">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-muted">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${!t ? 'text-muted' : v.status === 'passed' ? 'text-pass' : 'text-fail'}`}>{!t ? 'Not tested' : v.status === 'passed' ? '✓' : '✗'}</td>
                         </tr>); })}
                     </tbody></table>
                   </div>
@@ -884,33 +884,33 @@ export default function Workspace() {
                   const moved = changedIds.size - added.length - swapped.length;
                   if (!added.length && !removed.length && !swapped.length && !driveChanges.length && moved <= 0) return null;
                   return (
-                    <div className="rounded-md border border-orange-200 bg-orange-50 p-2 text-xs text-slate-800">
-                      <div className="panel-title mb-1 text-orange-700">Changed since v{prevVersion.iteration}</div>
-                      {swapped.length > 0 && <div><span className="text-slate-500">Part swaps:</span> {swapped.slice(0, 6).join('; ')}{swapped.length > 6 ? ` (+${swapped.length - 6})` : ''}</div>}
-                      {added.length > 0 && <div><span className="text-slate-500">Added:</span> {added.slice(0, 8).map((i) => i.label).join(', ')}{added.length > 8 ? ` (+${added.length - 8})` : ''}</div>}
-                      {removed.length > 0 && <div><span className="text-slate-500">Removed:</span> {removed.slice(0, 8).map((i) => i.label).join(', ')}{removed.length > 8 ? ` (+${removed.length - 8})` : ''}</div>}
-                      {moved > 0 && <div><span className="text-slate-500">Repositioned:</span> {moved} component{moved === 1 ? '' : 's'}</div>}
-                      {driveChanges.length > 0 && <div><span className="text-slate-500">Drives:</span> {driveChanges.slice(0, 6).join('; ')}{driveChanges.length > 6 ? ` (+${driveChanges.length - 6})` : ''}</div>}
+                    <div className="rounded-md border border-warn/30 bg-warn/15 p-2 text-xs text-ink">
+                      <div className="panel-title mb-1 text-warn">Changed since v{prevVersion.iteration}</div>
+                      {swapped.length > 0 && <div><span className="text-muted">Part swaps:</span> {swapped.slice(0, 6).join('; ')}{swapped.length > 6 ? ` (+${swapped.length - 6})` : ''}</div>}
+                      {added.length > 0 && <div><span className="text-muted">Added:</span> {added.slice(0, 8).map((i) => i.label).join(', ')}{added.length > 8 ? ` (+${added.length - 8})` : ''}</div>}
+                      {removed.length > 0 && <div><span className="text-muted">Removed:</span> {removed.slice(0, 8).map((i) => i.label).join(', ')}{removed.length > 8 ? ` (+${removed.length - 8})` : ''}</div>}
+                      {moved > 0 && <div><span className="text-muted">Repositioned:</span> {moved} component{moved === 1 ? '' : 's'}</div>}
+                      {driveChanges.length > 0 && <div><span className="text-muted">Drives:</span> {driveChanges.slice(0, 6).join('; ')}{driveChanges.length > 6 ? ` (+${driveChanges.length - 6})` : ''}</div>}
                     </div>
                   );
                 })()}
                 {version?.decisions.map((d, i) => (
-                  <div key={i} className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs">
-                    <div className="font-medium text-slate-800">{d.source === 'model' ? `Model decision${d.modelId ? ` · ${d.modelId}` : ''}` : 'Planner decision'}</div>
-                    <p className="text-slate-700">{d.summary}</p>
-                    {d.basedOn && <p className="mt-1 text-slate-500">Based on: {d.basedOn}</p>}
-                    {Object.keys(d.changes).length > 0 && <ul className="mt-1 mono text-slate-600">{Object.entries(d.changes).map(([k, c]) => <li key={k}>{k}: {c.from !== undefined ? `${c.from} → ` : ''}{c.to}</li>)}</ul>}
+                  <div key={i} className="rounded-md border border-accent/30 bg-accent/15 p-2 text-xs">
+                    <div className="font-medium text-ink">{d.source === 'model' ? `Model decision${d.modelId ? ` · ${d.modelId}` : ''}` : 'Planner decision'}</div>
+                    <p className="text-ink">{d.summary}</p>
+                    {d.basedOn && <p className="mt-1 text-muted">Based on: {d.basedOn}</p>}
+                    {Object.keys(d.changes).length > 0 && <ul className="mt-1 mono text-muted">{Object.entries(d.changes).map(([k, c]) => <li key={k}>{k}: {c.from !== undefined ? `${c.from} → ` : ''}{c.to}</li>)}</ul>}
                   </div>
                 ))}
                 {version?.tests.map((t) => (
-                  <div key={t.testId} className={`rounded-md border p-2 text-xs ${t.passed ? 'border-emerald-200' : 'border-amber-200'}`}>
-                    <div className="mb-1 flex items-center justify-between"><span className="font-medium">{t.testId}</span><span className={t.passed ? 'text-emerald-700' : 'text-amber-700'}>{t.passed ? 'passed' : 'did not pass'}</span></div>
+                  <div key={t.testId} className={`rounded-md border p-2 text-xs ${t.passed ? 'border-pass/30' : 'border-warn/30'}`}>
+                    <div className="mb-1 flex items-center justify-between"><span className="font-medium">{t.testId}</span><span className={t.passed ? 'text-pass' : 'text-warn'}>{t.passed ? 'passed' : 'did not pass'}</span></div>
                     <Metrics metrics={t.metrics} kind={t.kind} />
-                    {t.failureReasons.length > 0 && <ul className="mt-1 list-disc pl-4 text-amber-800">{t.failureReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-                    {t.notes?.length > 0 && <ul className="mt-1 list-disc pl-4 text-slate-500">{t.notes.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+                    {t.failureReasons.length > 0 && <ul className="mt-1 list-disc pl-4 text-warn">{t.failureReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+                    {t.notes?.length > 0 && <ul className="mt-1 list-disc pl-4 text-muted">{t.notes.map((r, i) => <li key={i}>{r}</li>)}</ul>}
                   </div>
                 ))}
-                {version && <p className="text-[11px] text-slate-400">Metrics are computed by the physics engine from this exact assembly and are reproducible. Rigid-body simulation is not engineering certification.</p>}
+                {version && <p className="text-[11px] text-dim">Metrics are computed by the physics engine from this exact assembly and are reproducible. Rigid-body simulation is not engineering certification.</p>}
               </div>
             )}
           </div>
@@ -929,27 +929,27 @@ export default function Workspace() {
         </details>
       </div>}
       {changeMode && inv && version && (
-        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
+        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
           <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); if (request.trim().length >= 2) void act(changeMode, request.trim()); }}>
             <h2 id="revision-title" className="text-lg font-semibold">Request a change</h2>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-muted">
               {changeMode === 'remix' ? `Muse will use version ${version.iteration} to build a private remix and keep credit to ${inv.ownerLabel}.` : `Muse will use version ${version.iteration} as the baseline and save a new version of your invention.`}
             </p>
-            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus value={request} onChange={(e) => setRequest(e.target.value)} placeholder={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
+            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus value={request} onChange={(e) => setRequest(e.target.value)} placeholder={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-line px-3 py-2" /></label>
             <div className="mt-2 flex flex-wrap gap-1">{suggestionsFor(version).map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={() => setRequest(s)}>{s}</button>)}</div>
-            {error && <p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
+            {error && <p role="alert" className="mt-2 text-sm text-fail">{error}</p>}
             <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" disabled={busy} onClick={() => setChangeMode(null)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>{busy ? 'Starting…' : changeMode === 'remix' ? 'Build my remix' : 'Build revision'}</button></div>
           </form>
         </div>
       )}
       {publishOpen && inv && (
-        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="publish-title">
+        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal aria-labelledby="publish-title">
           <form className="card w-full max-w-md p-5" onSubmit={async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); setBusy(true); try { await api.publish(id, { title: String(f.get('title') || inv.title), description: String(f.get('description') || inv.description) }); setPublishOpen(false); await refresh(); } catch (err) { setError((err as Error).message); } finally { setBusy(false); } }}>
             <h2 id="publish-title" className="text-lg font-semibold">Publish to the gallery</h2>
-            <p className="mt-1 text-sm text-slate-500">Anyone will be able to open the interactive 3D assembly, see its measured test results and remix it. Credit stays with you.</p>
-            <label className="mt-4 block text-sm">Title<input name="title" defaultValue={inv.title} maxLength={80} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <label className="mt-3 block text-sm">What it does<textarea name="description" defaultValue={inv.description.slice(0, 400)} maxLength={400} rows={3} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <p className="mt-3 text-xs text-slate-500">Status shown on the card: {currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : 'did not pass'} · model: {version?.modelId}</p>
+            <p className="mt-1 text-sm text-muted">Anyone will be able to open the interactive 3D assembly, see its measured test results and remix it. Credit stays with you.</p>
+            <label className="mt-4 block text-sm">Title<input name="title" defaultValue={inv.title} maxLength={80} className="mt-1 w-full rounded-md border border-line px-3 py-2" /></label>
+            <label className="mt-3 block text-sm">What it does<textarea name="description" defaultValue={inv.description.slice(0, 400)} maxLength={400} rows={3} className="mt-1 w-full rounded-md border border-line px-3 py-2" /></label>
+            <p className="mt-3 text-xs text-muted">Status shown on the card: {currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : 'did not pass'} · model: {version?.modelId}</p>
             <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setPublishOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>Publish</button></div>
           </form>
         </div>

@@ -31,7 +31,7 @@ export default function Header({ compact = false }: { compact?: boolean }) {
     }}>
       <div className="site-identity">
         <Link to="/" className="site-brand">
-          <img src="/protolab.svg" alt="" width="36" height="36" />
+          <img src="/protolab.png" alt="" width="40" height="40" />
           <span>Proto<span className="site-brand-accent">Lab</span></span>
         </Link>
         {model && (
@@ -51,9 +51,9 @@ export default function Header({ compact = false }: { compact?: boolean }) {
         </button>
       </div>
       <nav id={navId} className="site-nav" data-open={menuOpen} aria-label="Main navigation" onClick={() => setMenuOpen(false)}>
-        <NavLink to="/how-it-works" className="btn-ghost">How it works</NavLink>
+        <Link to="/#how-it-works" className="btn-ghost">How it works</Link>
         <NavLink to="/gallery" className="btn-ghost">Gallery</NavLink>
-        <Link to="/" className="btn-secondary site-new"><span aria-hidden="true">+</span> <span className="site-new-full">New invention</span><span className="site-new-short">Build</span></Link>
+        <a href="https://framesixty.com/about-us/" className="btn-ghost" target="_blank" rel="noopener noreferrer">About us <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
   );

@@ -15,7 +15,7 @@ import { JobRunner } from './jobs.ts';
 import { CloudCheckpoint } from './persistence.ts';
 import { originOf, rewriteOg } from './og.ts';
 import { buildApp } from './routes.ts';
-import { seedFeatured, requeueInterruptedSeeds } from './seed.ts';
+import { seedFeatured, requeueInterruptedSeeds, retireSeeds } from './seed.ts';
 import { seedReferenceShowcases } from './showcase.ts';
 import { curateLargeShowcases } from './curate.ts';
 
@@ -87,6 +87,7 @@ if (existsSync(resolve(webDist, 'index.html'))) {
   console.log(`[web] serving the built web app from ${webDist}`);
 }
 seedFeatured(db, runner);
+retireSeeds(db);
 await seedReferenceShowcases(db, store, persist);
 requeueInterruptedSeeds(db, runner);
 serve({ fetch: app.fetch, port: PORT }, () => console.log(`[api] ProtoLab API on http://localhost:${PORT} (data: ${DATA_DIR})`));
