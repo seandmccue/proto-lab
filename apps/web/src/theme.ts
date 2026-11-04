@@ -4,9 +4,11 @@ export type Theme = 'dark' | 'light';
 const KEY = 'protolab-theme';
 const listeners = new Set<() => void>();
 
+export const DEFAULT_THEME: Theme = 'light';
+
 function read(): Theme {
   const t = document.documentElement.dataset.theme;
-  return t === 'light' ? 'light' : 'dark';
+  return t === 'dark' ? 'dark' : 'light';
 }
 
 export function setTheme(theme: Theme) {
@@ -16,5 +18,5 @@ export function setTheme(theme: Theme) {
 }
 
 export function useTheme(): Theme {
-  return useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, read, () => 'dark');
+  return useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, read, () => DEFAULT_THEME);
 }
