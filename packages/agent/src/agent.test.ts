@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildGenevaIndexer, genevaIndexerTest } from '@protolab/simulator/geneva-indexer';
 import { createServer } from 'node:http';
 import { applyOps, emptyAssembly, generatePart, getPart, setDrives } from '@protolab/parts';
-import { VersionRecord, type ToolLogEntry } from '@protolab/schema';
+import { VersionRecord, type GeometryPiece, type ToolLogEntry } from '@protolab/schema';
 import { runAgent, type AgentEvent } from './index.ts';
 import { ToolRuntime, baseSpec } from './index.ts';
 
@@ -39,6 +39,52 @@ test('inspect_assembly reports selected connectors in the assembled world pose',
   assert.match(missing.error, /Unknown instance id "missing"/);
 });
 
+test('get_part reports exact saved and custom collider geometry and names missing IDs', async () => {
+  const savedBeam = generatePart('beam', { length: 0.071 }, 'beam-50');
+  const custom = generatePart('beam', { length: 0.083 }, 'custom-beam-7');
+  const piece: GeometryPiece = {
+    shape: { kind: 'extrude', profile: [[0, 0], [0.01, 0], [0, 0.01]], depth: 0.005, axis: 'z' },
+    offset: { position: [0.02, 0.01, 0], rotation: [0, 0.6, 0, 0.8] },
+    role: 'decor', collide: false, friction: 0.4, color: '#112233', material: 'rubber',
+  };
+  custom.geometry.push(piece);
+  const savedAssembly = { ...emptyAssembly(), parts: [savedBeam, custom] };
+  const rt = new ToolRuntime(baseSpec('Inspect saved chute'), {
+    onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {},
+  }, undefined, savedAssembly);
+
+  type InspectedPart = { id: string; geometry: {
+    shape: string; shapeSpec: GeometryPiece['shape']; offset: number[]; rotation: number[];
+    collide: boolean; friction?: number; color?: string; material?: string; pieceIndex?: number;
+  }[] };
+  const single = await rt.call('get_part', { part_id: custom.id }) as { part: InspectedPart };
+  const returned = single.part.geometry[1];
+  assert.equal(returned.shape, 'extrude');
+  assert.deepEqual(returned.shapeSpec, piece.shape);
+  assert.deepEqual(returned.offset, piece.offset.position);
+  assert.deepEqual(returned.rotation, piece.offset.rotation);
+  assert.equal(returned.collide, false);
+  assert.equal(returned.friction, 0.4);
+  assert.equal(returned.color, '#112233');
+  assert.equal(returned.material, 'rubber');
+
+  const selection = await rt.call('get_part', { part_id: custom.id, piece_indices: [1] }) as { part: InspectedPart };
+  assert.deepEqual(selection.part.geometry, [{ ...returned, pieceIndex: 1 }]);
+  const badSelection = await rt.call('get_part', { part_id: custom.id, piece_indices: [2] }) as { error: string };
+  assert.match(badSelection.error, /Unknown geometry piece 2/);
+
+  const batch = await rt.call('get_part', { part_ids: [savedBeam.id, 'missing', custom.id, savedBeam.id] }) as {
+    parts: InspectedPart[]; missing_part_ids: string[];
+  };
+  assert.deepEqual(batch.parts.map(({ id }) => id), [savedBeam.id, custom.id]);
+  assert.deepEqual(batch.parts[0].geometry[0].shapeSpec, savedBeam.geometry[0].shape);
+  assert.notDeepEqual(batch.parts[0].geometry[0].shapeSpec, getPart(savedBeam.id)?.geometry[0].shape);
+  assert.deepEqual(batch.parts[1], single.part);
+  assert.deepEqual(batch.missing_part_ids, ['missing']);
+  const missing = await rt.call('get_part', { part_id: 'missing' }) as { error: string };
+  assert.equal(missing.error, 'Unknown part id "missing"');
+});
+
 test('a live follow-up edits the saved assembly, reuses authored parts and records fresh evidence', async () => {
   const custom = generatePart('wheel', { radius: 0.04 }, 'custom-wheel-7');
   const base = applyOps(emptyAssembly(), [
@@ -59,14 +105,21 @@ test('a live follow-up edits the saved assembly, reuses authored parts and recor
     ['finalize_design', { status: 'passed', summary: 'The saved rotor still spins after raising the support.' }],
   ];
   let system = '';
+  let geometryReply = '';
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
-    system = JSON.parse(Buffer.concat(chunks).toString()).messages[0].content;
+    const { messages } = JSON.parse(Buffer.concat(chunks).toString());
+    system = messages[0].content;
+    const geometry = messages.find((message: { tool_call_id?: string }) => message.tool_call_id === 'inspect-geometry');
+    const round: [string, object][] = geometry ? calls : [
+      ['get_part', { part_ids: [custom.id, 'catch-cup-80x35', 'gravity-chute-160x54', 'geneva-wheel-4x60'] }],
+    ];
+    if (geometry) geometryReply = geometry.content;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ choices: [{
       finish_reason: 'tool_calls',
-      message: { content: null, tool_calls: calls.map(([name, args], index) => ({ id: `call-${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) },
+      message: { content: null, tool_calls: round.map(([name, args], index) => ({ id: geometry ? `call-${index}` : 'inspect-geometry', type: 'function', function: { name, arguments: JSON.stringify(args) } })) },
     }] }));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -83,6 +136,13 @@ test('a live follow-up edits the saved assembly, reuses authored parts and recor
     assert.match(system, /exact copy of saved assembly v4/);
     assert.deepEqual(events.filter((event) => event.type === 'tool' && !event.entry.ok), []);
     assert.equal(result.status, 'passed');
+    assert.ok(geometryReply.length > 5000, 'batch geometry reaches the model past the generic reply limit');
+    const details = JSON.parse(geometryReply);
+    assert.deepEqual(details.parts.map(({ id }: { id: string }) => id), [
+      custom.id, 'catch-cup-80x35', 'gravity-chute-160x54', 'geneva-wheel-4x60',
+    ]);
+    const wheel = getPart('geneva-wheel-4x60')!;
+    assert.deepEqual(details.parts[3].geometry.at(-1).shapeSpec, wheel.geometry.at(-1)!.shape);
     assert.equal(result.versions.length, 2);
     const [retest, edited] = result.versions;
     assert.equal(retest.parentVersionId, parent.id);

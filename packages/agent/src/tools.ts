@@ -6,7 +6,13 @@ import type { ToolDef } from './llm.ts';
 
 // ---------- argument schemas ----------
 const SearchArgs = z.object({ query: z.string().default(''), category: PartCategory.optional(), limit: z.number().int().min(1).max(40).optional() });
-const GetPartArgs = z.object({ part_id: z.string() });
+const GetPartArgs = z.object({
+  part_id: z.string().optional(),
+  part_ids: z.array(z.string().min(1)).min(1).max(4).optional(),
+  piece_indices: z.array(z.number().int().nonnegative()).min(1).max(4).optional(),
+}).refine(({ part_id, part_ids, piece_indices }) =>
+  part_id !== undefined ? part_ids === undefined : part_ids !== undefined && piece_indices === undefined,
+'Use part_id or part_ids. piece_indices is only available for one part.');
 const CreatePartArgs = z.object({ kind: z.string(), params: z.record(z.number()), name: z.string().max(60).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), rationale: z.string().optional() });
 const DesignPartArgs = z.object({
   name: z.string().min(2).max(60), category: PartCategory, description: z.string().max(300).default(''), material: z.string().max(40).default('PLA'), mass_kg: z.number().positive().max(20).optional(),
@@ -24,7 +30,18 @@ const FinalizeArgs = z.object({ summary: z.string().max(1200), status: z.enum(['
 export const TOOL_DEFS: ToolDef[] = [
   { name: 'write_plan', description: 'Step 1–3 and 7 of the engineering procedure: state the purpose, the recognisable physical features, the required motions, the sub-assemblies, measurable success criteria, and which behaviours the rigid-body physics cannot verify (e.g. aerodynamic lift). Include exact candidate_part_ids from the catalog index when already known so the user can see the proposed parts. Call once before building; call again only if the plan changes.', parameters: { type: 'object', properties: { purpose: { type: 'string' }, features: { type: 'array', items: { type: 'string' } }, motions: { type: 'array', items: { type: 'string' } }, subassemblies: { type: 'array', items: { type: 'string' } }, successCriteria: { type: 'array', items: { type: 'string' } }, unverified: { type: 'array', items: { type: 'string' } }, assumptions: { type: 'array', items: { type: 'string' } }, maxMass_kg: { type: 'number' }, candidate_part_ids: { type: 'array', maxItems: 12, items: { type: 'string' } } }, required: ['purpose', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified'] } },
   { name: 'search_catalog', description: 'Search the component library (100+ parts: beams, plates, chassis, towers, gears, shafts, bearings, wheels, spoked wheels, pulleys, hinges, sliders, linkages, cranks, eccentric cams, cam followers and guides, pistons, servos, gearmotors, springs, actuators, wings, propellers, gripper fingers, gondolas, tracks, payload balls/blocks/discs, trays, winged bodies with built-in flap hinges, left/right butterfly, bird and dragonfly wings…). Returns ids, parameters, mass, limits and connector ids with their kinds and axes.', parameters: { type: 'object', properties: { query: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, limit: { type: 'integer' } } } },
-  { name: 'get_part', description: 'Full details of a catalog or custom part: connectors (id, position, axis, kind), geometry pieces, limits.', parameters: { type: 'object', properties: { part_id: { type: 'string' } }, required: ['part_id'] } },
+  {
+    name: 'get_part',
+    description: 'Inspect exact part-local geometry and connectors of catalog, custom or saved parts. Use part_id for one part or part_ids for up to four (returns parts and missing_part_ids). Each geometry piece has shapeSpec with full dimensions/profile in metres, offset position in metres, rotation quaternion [x,y,z,w], and collide/friction. For a very large part use part_id with zero-based piece_indices to inspect just those pieces.',
+    parameters: {
+      type: 'object',
+      properties: {
+        part_id: { type: 'string' },
+        part_ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 4 },
+        piece_indices: { type: 'array', items: { type: 'integer', minimum: 0 }, minItems: 1, maxItems: 4 },
+      },
+    },
+  },
   { name: 'create_part', description: 'Create a parametric part from a generator when no preset fits (any generator kind with custom params, e.g. wing{span,chord,style}, body_frame{length,width,height,legPairs}, big_wheel{radius,spokes}, servo_motor{size,torque,speed}, beam, plate, curved_panel, gear, crank, eccentric_cam{coreRadius,lobeRadius,eccentricity,thickness}, cam_follower{shoeLength,shoeWidth,shoeThickness,stemSize,stemLength}, follower_guide{stemSize,reach}, link, gripper_finger, propeller…). Returns the new part id and its connectors.', parameters: { type: 'object', properties: { kind: { type: 'string' }, params: { type: 'object', additionalProperties: { type: 'number' } }, name: { type: 'string' }, color: { type: 'string', description: 'hex colour like #e63946' }, rationale: { type: 'string' } }, required: ['kind', 'params'] } },
   { name: 'design_part', description: 'Design a fully custom part from primitives when no generator fits. Example: {"name":"Butterfly thorax","category":"frames","material":"PLA","pieces":[{"shape":{"kind":"capsule","radius":0.012,"height":0.06,"axis":"x"},"offset":{"position":[0,0,0],"rotation":[0,0,0,1]},"color":"#333333","role":"structure"},{"shape":{"kind":"extrude","profile":[[0,0],[0.03,0.01],[0.03,-0.01]],"depth":0.002,"axis":"y"},"offset":{"position":[0.03,0,0],"rotation":[0,0,0,1]},"color":"#e63946","role":"shell"}],"connectors":[{"id":"wing_l","position":[0,0.01,0.012],"axis":[-1,0,0],"kind":"revolute"},{"id":"wing_r","position":[0,0.01,-0.012],"axis":[1,0,0],"kind":"revolute"},{"id":"base","position":[0,-0.012,0],"axis":[0,-1,0],"kind":"fixed"}]} (flap hinges run along the body axis: left −X, right +X, so wings mounted via "hinge" flap up/down). Shapes: box{size}, cylinder{radius,height,axis}, sphere{radius}, capsule{radius,height,axis}, ellipsoid{radii}, extrude{profile (2D polygon, CCW), depth, axis}, revolve{profile [(r,h)...], axis}. Metres, part-local frame, +Y up. Connector axes point OUT of the part. Mass defaults from volume × material density (shells/wings ×0.3). An optional piece friction coefficient overrides the simulator default for that collider.', parameters: { type: 'object', properties: { name: { type: 'string' }, category: { type: 'string', enum: PartCategory.options }, description: { type: 'string' }, material: { type: 'string', enum: ['PLA', 'aluminium', 'steel', 'carbon', 'rubber', 'acrylic', 'nylon', 'balsa', 'foam'] }, mass_kg: { type: 'number' }, pieces: { type: 'array', items: { type: 'object' } }, connectors: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string' } }, required: ['name', 'category', 'pieces'] } },
   { name: 'assemble', description: 'Apply structured assembly operations to the current design (atomic: all or nothing; on error the failing op index and reason are returned and nothing changes). Ops: {op:"place", id, part, position:[x,y,z], rotation_deg?:[x,y,z], anchored?, free?} · {op:"mount", id, part, onto:<instance>, connector:<parent connector>, via?:<child connector>, joint:"fixed"|"revolute"|"prismatic"|"free", spin_deg?, offset_m?, limits?:[min,max], contact?:true, motor?:{controlId, stiffness, damping}} (places the child so the two connectors coincide and face each other; joint axis = parent connector axis; contact:true enables collisions and keeps the joint, useful for a pin that drives a slotted wheel; joint:"free" sets a payload or projectile down with no joint) · {op:"connect", a, a_connector, b, b_connector, joint:"revolute"|"prismatic"|"fixed"|"spring", motor?, spring?} (connectors must already touch, ≤ 20 mm) · {op:"bridge", id, part, a, a_connector, via_a, b, b_connector, via_b} (fits a new rigid link between two already placed parts and adds two passive revolute joints; via_a/via_b are the new link’s pivots; endpoint spacing must match within 0.5 mm) · {op:"pattern", instances:[ids], kind:"mirror"|"polar"|"linear", plane?:"xy"|"yz"|"xz", axis?, center?, count?, step?} (copies instances, joints, drives) · {op:"remove", id} · {op:"move", id, position?, rotation_deg?, translate?} (moving an instance carries everything mounted on it). Ground is y = 0; +Y is up. Use anchored:true for bases fixed to the ground, free:true on place enables contact with other bodies. For a guided cam follower, place it with free:true, then connect its slide to the guide with a passive prismatic joint. Keep unrelated parts clear of the follower.', parameters: { type: 'object', properties: { ops: { type: 'array', items: { type: 'object' } }, rationale: { type: 'string', description: 'What this builds or changes and why, in one or two sentences for the user' }, based_on: { type: 'string', description: 'Test id and measurement this change responds to, if any' } }, required: ['ops', 'rationale'] } },
@@ -154,9 +171,26 @@ export class ToolRuntime {
     return { id: p.id, kind: p.kind, name: p.name, category: p.category, params: p.params, mass_kg: +p.mass_kg.toFixed(4), dimensions_m: p.dimensions_m.map((v) => +v.toFixed(4)), limits: p.limits, connectors: p.connectors.map((c) => `${c.id} (${c.kind}, at ${c.position.map((v) => +v.toFixed(3)).join(',')}, axis ${c.axis.map((v) => +v.toFixed(2)).join(',')})`) }; // positions in the search result: a round of get_part per part was the commonest detour in the v10 pass (22 calls)
   }
 
+  private describePart(part: PartDefinition, pieceIndices?: number[]) {
+    const pieces = pieceIndices ? [...new Set(pieceIndices)] : part.geometry.map((_, index) => index);
+    const geometry = pieces.map((index) => {
+      const piece = part.geometry[index];
+      if (!piece) throw new Error(`Unknown geometry piece ${index} for "${part.id}" (${part.geometry.length} pieces, indexed from 0)`);
+      return {
+        shape: piece.shape.kind, offset: piece.offset.position, role: piece.role, friction: piece.friction,
+        shapeSpec: piece.shape, rotation: piece.offset.rotation, collide: piece.collide, color: piece.color, material: piece.material,
+        ...(pieceIndices && { pieceIndex: index }),
+      };
+    });
+    return {
+      ...this.summarisePart(part), description: part.description, material: part.material, connectors: part.connectors,
+      geometryPieceCount: part.geometry.length, geometry,
+    };
+  }
+
   async call(name: string, rawArgs: unknown): Promise<unknown> {
     // Array fields sometimes arrive as JSON strings ("pieces": "[...]"); parse them before validation.
-    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
+    if (rawArgs && typeof rawArgs === 'object') for (const k of ['ops', 'drives', 'pieces', 'connectors', 'features', 'motions', 'subassemblies', 'successCriteria', 'unverified', 'values', 'candidate_part_ids', 'part_ids', 'piece_indices']) { const r = rawArgs as Record<string, unknown>; if (typeof r[k] === 'string' && /^\s*\[/.test(r[k] as string)) { try { r[k] = JSON.parse(r[k] as string); } catch { /* leave for the validator */ } } }
     this.calls++;
     const t = new Date().toISOString();
     const picked = (p: PartDefinition, withGeometry = false) => ({ id: p.id, name: p.name, category: p.category, mass_kg: p.mass_kg, custom: this.customParts.has(p.id), part: withGeometry ? p : undefined });
@@ -184,10 +218,23 @@ export class ToolRuntime {
           return { parts: [...custom, ...res].map((p) => this.summarisePart(p)), generators: a.query === '' ? generatorInfo().map((g) => `${g.kind}(${Object.keys(g.params).join(',')})`) : undefined };
         }
         case 'get_part': {
-          const a = GetPartArgs.parse(rawArgs); const p = this.resolve(a.part_id);
-          if (!p) throw new Error(`Unknown part id "${a.part_id}"`);
-          log(true, p.name, [picked(p)]);
-          return { part: { ...this.summarisePart(p), description: p.description, material: p.material, connectors: p.connectors, geometry: p.geometry.map((g) => ({ shape: g.shape.kind, role: g.role, offset: g.offset.position, friction: g.friction })) } };
+          const { part_id, part_ids, piece_indices } = GetPartArgs.parse(rawArgs);
+          if (part_id !== undefined) {
+            const part = this.resolve(part_id);
+            if (!part) throw new Error(`Unknown part id "${part_id}"`);
+            const description = this.describePart(part, piece_indices);
+            log(true, part.name, [picked(part)]);
+            return { part: description };
+          }
+          const parts: PartDefinition[] = [];
+          const missing_part_ids: string[] = [];
+          for (const id of new Set(part_ids)) {
+            const part = this.resolve(id);
+            if (part) parts.push(part);
+            else missing_part_ids.push(id);
+          }
+          log(true, `Inspected ${parts.length} parts${missing_part_ids.length ? ` · missing ${missing_part_ids.join(', ')}` : ''}`, parts.map((part) => picked(part)));
+          return { parts: parts.map((part) => this.describePart(part)), missing_part_ids };
         }
         case 'create_part': {
           const a = CreatePartArgs.parse(rawArgs);

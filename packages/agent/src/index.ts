@@ -139,7 +139,7 @@ Rules of thumb:
 - Honesty: if a requested behaviour cannot be verified (flight, aerodynamic lift, airflow, fluid motion), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
 - One behaviour at a time, and never re-run a passed test: when the brief asks for several behaviours (walk, then dance), get the first to pass, record it, then change drives for the next and test only that. Each passing test is a recorded version; a later drive set for another behaviour does not undo it. When every requested behaviour has a passing test, finalize with status "passed".
 - Closed linkages: mount the moving parts at a feasible starting pose, then use bridge to fit each passive rod between its two revolute endpoints. Use inspect_assembly with instance_ids to read world connector positions and axes if a span does not fit.
-- Be economical: search results already include connector ids/axes, so avoid get_part lookups unless you need geometry; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- Be economical: search results already include connector ids/axes, so use get_part only when you need exact geometry and use part_ids to inspect several known parts together; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
 
 Component library index (part id, size L×H×W in mm, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
@@ -231,7 +231,15 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
       const result = await rt.call(call.function.name, args);
-      messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 5000) });
+      const serialized = JSON.stringify(result);
+      // Geometry must reach the model intact. Large compound parts can be read in smaller selections.
+      let reply = serialized.slice(0, 5000);
+      if (call.function.name === 'get_part') {
+        reply = serialized.length <= 65_536 ? serialized : JSON.stringify({
+          error: 'Part geometry exceeds the tool reply limit. Request one part at a time or narrow with piece_indices.',
+        });
+      }
+      messages.push({ role: 'tool', tool_call_id: call.id, content: reply });
       if (rt.finalized) break;
     }
     if (specialistRoundsLeft > 0) {
