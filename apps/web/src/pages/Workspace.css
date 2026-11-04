@@ -135,10 +135,13 @@
 
 .workbench-stage {
   position: relative;
+  display: flex;
+  flex-direction: column;
   height: clamp(10rem, var(--stage-room, 53dvh), 32rem);
   flex: 0 0 auto;
   background: var(--viewport);
 }
+.workbench-drawing { position: relative; flex: 1; min-height: 0; }
 
 .workbench :is(.prototype-canvas, .prototype-canvas > div, .prototype-canvas canvas) { touch-action: pan-y !important; }
 .workbench-zoom {
@@ -198,7 +201,7 @@
   position: absolute;
   top: 0.65rem;
   left: 0.65rem;
-  right: 0.65rem;
+  right: 6.9rem; /* Reserve both 44px zoom targets and a gap, including touch screens. */
   display: flex;
   align-items: flex-start;
   flex-direction: column;
@@ -208,6 +211,7 @@
 }
 
 .workbench-readout-model {
+  max-width: 100%;
   border: 1px solid var(--bench-line);
   border-radius: var(--radius);
   padding: 0.25rem 0.5rem;
@@ -688,8 +692,8 @@ li[data-state='active'] .build-progress-dot { background: var(--violet, var(--ac
   .build-blueprint-drawing, .build-blueprint-inventory li, .build-progress-dot, .build-progress-spinner { animation: none; }
 }
 
-/* Build strip: compact progress over the 3D view once an assembly is on screen */
-.build-strip { position: absolute; left: 0.65rem; right: 0.65rem; bottom: 0.65rem; display: flex; flex-direction: column; gap: 0.4rem; pointer-events: none; }
+/* Reserve progress space so the camera fits the model above the strip. */
+.build-strip { flex: none; margin: 0.65rem; display: flex; flex-direction: column; gap: 0.4rem; pointer-events: none; }
 .build-strip-panel { display: flex; flex-direction: column; gap: 0.35rem; border: 1px solid var(--bench-line, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--bench-panel, var(--panel)) 92%, transparent); backdrop-filter: blur(6px); padding: 0.5rem 0.7rem; box-shadow: var(--shadow-panel); }
 .build-strip-stages { font-size: 0.62rem; gap: 0.25rem 0.7rem; }
 .build-strip-now { display: flex; align-items: center; gap: 0.55rem; }

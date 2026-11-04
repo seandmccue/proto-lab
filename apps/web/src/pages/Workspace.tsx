@@ -775,6 +775,7 @@ export default function Workspace() {
             {canonicalProof && <CrabProofPanel />}
           </> : <>
           <div className="workbench-stage" ref={stageRef}>
+            <div className="workbench-drawing">
             {showLive && live ? (
               <>
                 <Viewer assembly={live.assembly} visibleInstanceIds={visibleLiveIds} enteringInstanceIds={reducedMotion ? undefined : live.newIds} test={null} playing={false} speed={1} explode={explode} blueprint={activeBlueprint} follow={false} selectedId={selected} changedIds={liveHighlightIds} onSelect={setSelected} autoRotate={!reducedMotion && !introBlueprint} />
@@ -792,7 +793,6 @@ export default function Workspace() {
             ) : (
               <div className="p-6 text-sm text-dim">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
-            {(version || showLive) && <BuildStrip events={events} running={running} />}
             {version && !showLive && (
               <div className="workbench-readout">
                 <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!diagnosticHighlights && showChangeColors && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
@@ -806,6 +806,8 @@ export default function Workspace() {
                 </div>}
               </div>
             )}
+            </div>
+            {(version || showLive) && <BuildStrip events={events} running={running} />}
           </div>
           <div className="workbench-toolbar">
             {!showLive && <div className="workbench-control-group" role="group" aria-label="Replay controls">
