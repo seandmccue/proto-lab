@@ -202,8 +202,8 @@ Rules of thumb:
 - Honesty: if a requested behaviour cannot be verified (flight, aerodynamic lift, airflow, fluid motion), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
 - One behaviour at a time, and never re-run a passed test: when the brief asks for several behaviours (walk, then dance), get the first to pass, record it, then change drives for the next and test only that. Each passing test is a recorded version; a later drive set for another behaviour does not undo it. When every requested behaviour has a passing test, finalize with status "passed".
 - Closed linkages: mount the moving parts at a feasible starting pose, then use bridge to fit each passive rod between its two revolute endpoints. When editing a fit, add inspect_instance_ids to assemble to get the new world connector positions and axes in the same call. Use inspect_assembly with instance_ids for an existing pose without an edit.
-- Be economical: search results already include connector ids/axes, so use get_part only when you need exact geometry and use part_ids to inspect several known parts together; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
-- When the parts, joint IDs and test criteria are known, group assemble, set_drives, define_test and run_test in that order in one reply. If a setup call fails, correct it before retrying the skipped steps.
+- Be economical: search results already include connector ids/axes, so use get_part only when you need exact geometry and use part_ids to inspect several known parts together. Create missing parts essential to the requested dimensions, silhouette, or motion before mounting them. Build and test a coherent requested subassembly, then add the remaining mechanisms. Fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- When the parts, joint IDs and test criteria are known and the batch fits, group assemble, set_drives, define_test and run_test in that order in one reply. If a setup call fails, correct it before retrying the skipped steps.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
 
 Component library index (part id, size L×H×W in mm, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
@@ -229,6 +229,7 @@ Worked recipes (adapt, do not copy blindly):
 
 const setupTools = new Set(['write_plan', 'create_part', 'design_part', 'assemble', 'set_drives', 'define_test']);
 const dependentTools = new Set(['run_test', 'sweep_drive', 'finalize_design']);
+const nextPartOrAssembly = 'If a part essential to the requested size, shape, or motion is missing, use create_part or design_part next. Use the returned ID in a later mount. If the required parts are ready, assemble a coherent requested subassembly with its support and moving parts.';
 
 async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, savedParent: VersionRecord | null, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
   const savedAssembly = savedParent ? rt.assembly : null;
@@ -255,8 +256,10 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     const awaitingFirstEdit = savedAssembly ? rt.assembly === savedAssembly && !rt.tests.length : rt.assembly.instances.length === 0;
     if (!researchNudged && awaitingFirstEdit && (rt.calls >= 12 || (rt.calls > 0 && performance.now() - started >= 45_000))) {
       researchNudged = true;
-      emit({ type: 'status', message: savedAssembly ? 'Asking the model to revise and test the saved assembly.' : 'Enough research for a first build; asking the model to assemble now and refine from measurements.' });
-      messages.push({ role: 'user', content: savedAssembly ? 'Apply the requested edits to the saved assembly now, then define and run a test. For a test-only request, test the saved assembly directly.' : 'You have searched and designed enough for a first build. Assemble now with the parts you have (one assemble batch), set_drives, define_test and run_test; refine from the measured result rather than researching further.' });
+      emit({ type: 'status', message: savedAssembly ? 'Asking the model to revise and test the saved assembly.' : 'Asking the model to prepare the required parts and build the first testable mechanism.' });
+      messages.push({ role: 'user', content: savedAssembly
+        ? 'Apply the requested edit now. If it needs a missing part, create or design that part before mounting it. Define and run the requested test once the edit is in place. For a test-only request, test the saved assembly directly.'
+        : `Take the next construction step now. ${nextPartOrAssembly} Then set_drives, define_test, and run_test for that mechanism. Use the measurement to refine it and complete the remaining requested subassemblies.` });
     }
     const driver = specialistRoundsLeft > 0 && specialist ? specialist.model : model;
     setActive(driver.model);
@@ -284,8 +287,11 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 300)}` });
     if (!res.toolCalls.length) {
       if (res.finishReason === 'length') {
-        emit({ type: 'status', message: 'The model ran out of output budget before acting; asking it to answer with the tool call only.' });
-        messages.push({ role: 'user', content: savedAssembly ? 'Your previous reply was cut off. Reply with the tool calls to edit or test the saved assembly.' : 'Your previous reply was cut off before any tool call. Reply with the tool call(s) only and minimal deliberation: send the complete assemble/set_drives/define_test batch now.' });
+        emit({ type: 'status', message: 'The model ran out of output budget. Asking for one complete next tool call.' });
+        let nextStep = 'Continue with the next assembly, drive, or test operation.';
+        if (savedAssembly) nextStep = 'Create one missing part needed by the requested change, apply one coherent edit, or define or run the test for the saved assembly.';
+        else if (awaitingFirstEdit) nextStep = rt.spec.plan ? nextPartOrAssembly : 'Start with a concise write_plan.';
+        messages.push({ role: 'user', content: `Your previous reply was cut off. Reply with one small, complete tool call for the next step. ${nextStep} Keep the requested dimensions, component counts, and test targets as you continue in later replies.` });
         continue;
       }
       const nextTool = savedAssembly ? 'Reply with a tool call. Inspect or edit the saved assembly, then define and run the requested test.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.';
