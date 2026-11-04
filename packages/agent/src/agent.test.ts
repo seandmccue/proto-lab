@@ -532,3 +532,14 @@ test('assemble treats an op that names only an instance, or says delete, as remo
   const r2 = await rt.call('assemble', { rationale: 'and the tower', ops: [{ op: 'delete', id: 'tower' }] }) as { error?: string };
   assert.ok(!r2.error, r2.error); assert.equal(rt.assembly.instances.length, 0);
 });
+
+test('define_test lifts walk/launch thresholds nested under criteria; place without a position stands a tower on the ground, anchored', async () => {
+  const rt = new ToolRuntime(baseSpec('Catapult'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
+  const r = await rt.call('assemble', { rationale: 'tower with no position', ops: [{ op: 'place', id: 'tower', part: 'tower-500' }] }) as { error?: string };
+  assert.ok(!r.error, r.error);
+  const tower = rt.assembly.instances.find((i) => i.id === 'tower')!;
+  assert.ok(tower.anchored, 'tower anchored'); assert.ok(Math.abs(tower.transform.position[1] - 0.25) < 1e-6, `tower stands on the ground (${tower.transform.position[1]})`);
+  await rt.call('assemble', { rationale: 'projectile', ops: [{ op: 'place', id: 'pizza', part: 'foam-pizza-80', position: [0.1, 0.6, 0], free: true }] });
+  const t = await rt.call('define_test', { test: { kind: 'launch', id: 'throw', duration_s: 5, projectile: 'pizza', direction: 'x', criteria: { targetDistance_m: 0.5, tolerance_m: 0.2 } } }) as { error?: string };
+  assert.ok(!t.error, t.error);
+});
