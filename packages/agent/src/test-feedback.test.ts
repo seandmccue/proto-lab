@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { applyOps } from '@protolab/parts';
+import { TestSpec, type TestResult } from '@protolab/schema';
+import { buildMarbleElevator, marbleElevatorEndIn } from '@protolab/simulator/marble-elevator';
+import { baseSpec, ToolRuntime } from './index.ts';
+import { failedReceiverPaths } from './test-feedback.ts';
+
+test('failed transfer feedback contains observed paths for the missed receiver only', async () => {
+  const fixture = buildMarbleElevator();
+  const firstBallPart = fixture.instances.find(({ id }) => id === 'marble')!.partId;
+  const firstReceiverPart = fixture.instances.find(({ id }) => id === 'catcher')!.partId;
+  const { assembly } = applyOps(fixture, [
+    { op: 'place', id: 'missed_catcher', part: firstReceiverPart, position: [0.45, 0.15, 0], anchored: true },
+    { op: 'place', id: 'missed_marble', part: firstBallPart, position: [0.60, 0.18, 0], free: true },
+  ], (id) => fixture.parts.find((part) => part.id === id));
+  const spec = TestSpec.parse({
+    kind: 'motion', id: 'two_catches', duration_s: 9,
+    measure: { endIn: [marbleElevatorEndIn, { ...marbleElevatorEndIn, instance: 'missed_marble', receiver: 'missed_catcher' }] },
+    criteria: { torqueWithinRating: false },
+  });
+  let observed: TestResult | undefined;
+  const rt = new ToolRuntime(baseSpec('Catch both marbles'), {
+    onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: (result) => { observed = result; },
+  }, undefined, assembly);
+  await rt.call('define_test', { test: spec });
+  const reply = await rt.call('run_test', { test_id: spec.id }) as {
+    passed: boolean; payloadPaths: ReturnType<typeof failedReceiverPaths>;
+  };
+  assert.equal(reply.passed, false);
+  assert.ok(observed);
+  assert.ok(observed.metrics['endInHold_s.1'] >= 0.75);
+  assert.equal(observed.metrics['endInHold_s.2'], 0);
+  assert.equal(reply.payloadPaths.length, 1);
+  const path = reply.payloadPaths[0];
+  assert.equal(path.instance, 'missed_marble');
+  assert.equal(path.receiver, 'missed_catcher');
+  assert.ok(path.samples.length >= 7 && path.samples.length <= 9);
+  assert.equal(path.samples[0][0], observed.trace.frames[0].t);
+  assert.equal(path.samples.at(-1)![0], +observed.trace.frames.at(-1)!.t.toFixed(5));
+  for (const row of path.samples) {
+    const frame: TestResult['trace']['frames'][number] | undefined = observed.trace.frames.find(({ t }) => +t.toFixed(5) === row[0]);
+    assert.ok(frame);
+    assert.deepEqual(row.slice(1), frame.bodies.missed_marble.position.map((value) => +value.toFixed(5)));
+  }
+  // The missed marble falls long before the first uniform sample at 1.5 s.
+  assert.ok(path.samples.some((row) => row[0]! > 0 && row[0]! < 0.5));
+  assert.deepEqual(failedReceiverPaths(spec, { ...observed, passed: true }), []);
+});
+
+test('missing payload observations remain missing and a short trace is not duplicated', () => {
+  const spec = TestSpec.parse({ kind: 'motion', id: 'catch', duration_s: 1,
+    measure: { endIn: marbleElevatorEndIn }, criteria: {} });
+  const result: TestResult = {
+    testId: 'catch#1', kind: 'motion', passed: false, metrics: {}, failureReasons: [], notes: [], engine: 'fixture',
+    trace: { dt: 1, frames: [{ t: 0, bodies: {}, joints: {} }, { t: 1, bodies: {}, joints: {} }] },
+  };
+  const paths = failedReceiverPaths(spec, result);
+  assert.deepEqual(paths[0].samples, [[0, null, null, null], [1, null, null, null]]);
+  assert.deepEqual(failedReceiverPaths(spec, { ...result, trace: { dt: 1, frames: [] } }), []);
+});

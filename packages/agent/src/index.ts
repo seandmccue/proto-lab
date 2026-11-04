@@ -278,6 +278,9 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
         reply = serialized.length <= 65_536 ? serialized : JSON.stringify({
           error: 'Part geometry exceeds the tool reply limit. Request one part at a time or narrow with piece_indices.',
         });
+      } else if (name === 'run_test') {
+        // Preserve complete test evidence: cutting JSON can hide a failed target.
+        reply = serialized;
       } else if (name === 'assemble' && serialized.length > 5000
         && result && typeof result === 'object' && 'connectorPoses' in result) {
         reply = JSON.stringify({

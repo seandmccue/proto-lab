@@ -97,7 +97,31 @@ Spark resumes. The handoff is shown in the activity log and every version record
 its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_SPECIALIST_AFTER`.
 The build deadline (`AGENT_TIME_BUDGET_S`, default 20 min) cancels pending model calls and retry delays.
 Completed simulation traces remain available when a build stops before Muse finishes its review.
+Changed, unfinished assemblies are saved as **Not tested** on handled errors and time/round limits;
+they can be resumed without treating older test results as evidence for the new edit.
 New builds run up to `JOB_CONCURRENCY` at a time and accept up to `JOB_MAX_QUEUED` waiting builds.
+
+### Build performance experiments
+
+The default transport remains Chat Completions. For a local API experiment, set
+`MODEL_TRANSPORT=responses-encrypted` and `MODEL_RESPONSES_REASONING_EFFORT=medium` before starting
+the server. The Responses adapter carries encrypted reasoning between consecutive calls to the same
+model, keeps it out of saved transcripts, and resets that continuation at a model/credential handoff.
+`responses-stored` is also available; it uses provider response IDs and falls back to visible history
+on an explicit expired-ID error. Unset `MODEL_TRANSPORT` to return to the default. These settings are
+not currently forwarded by the Cloudflare production container.
+
+One controlled turbine pair reached a passing simulation in 51.87 s with the default settings and
+44.25 s with encrypted Responses at medium effort (total 53.53 s versus 46.19 s). Both passed the same
+six-second, two-turn, ground-clearance and motor-rating checks. Responses used more input tokens and
+more model rounds. This is one run per configuration and changes both transport and effort; it does
+not establish a general speedup. A harder sorter repair reached nine simulations in nine minutes,
+but all deliveries failed. The production default has therefore not changed.
+
+The shared tool loop reduces avoidable calls through batched part inspection, connector poses
+returned with assembly edits, and ordered assembly/drive/test batches. A rejected setup skips the
+dependent calls in that reply. Failed receiver checks also return a few actual payload positions,
+including the fastest observed fall, to help locate missed transfers without another simulation.
 
 ## Generalization benchmark
 
