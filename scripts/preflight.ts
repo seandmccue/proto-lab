@@ -248,6 +248,19 @@ if (judge) checks.push(
     }
     return 'six synchronized petals, one actuator, and all twelve rod pins aligned';
   }],
+  ['Geneva indexer reference', async () => {
+    const id = 'inv_geneva_indexer';
+    const { invention } = await publicBuild(id);
+    const replay = await version(id, invention.currentVersionId);
+    if (!invention.featured || replay.modelId !== 'deterministic-planner'
+      || replay.assembly.controller.drives.length !== 1
+      || replay.assembly.joints.filter(({ motor }) => motor).length !== 1
+      || !recorded(replay, (test) => test.passed && test.metrics.indexedConsecutiveSteps >= 2
+        && test.metrics['spin.revolutions'] >= 2 && test.metrics.groundContactViolation === 0)) {
+      throw new Error('Expected a featured reference with one drive and a saved indexing pass');
+    }
+    return 'two consecutive quarter turns with dwell while one motor kept turning';
+  }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
     if (!invention.featured) throw new Error('Expected the clock to be featured');

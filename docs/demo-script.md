@@ -25,6 +25,8 @@ For a short demonstration of passive motion, open the self-leveling tray and scr
 
 The mechanical lotus shows one actuator opening six passive petals. The first test barely moved. In the final revision, Muse refitted all six connecting rods and measured at least 70.1 mm of vertical travel per tip. The difference between the most and least displaced tips stayed within 0.02 mm at any instant in the test. Scrub the replay to watch the opening change from about 269 mm to 171 mm.
 
+The Geneva reference shows intermittent motion. Scrub across a flat section of the output trace while the input trace keeps rising, then advance to the next quarter turn. This is the catalog reference.
+
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
@@ -35,6 +37,7 @@ The mechanical lotus shows one actuator opening six passive petals. The first te
 - Orrery comparison · `/i/inv_adc081059ea44ab9?replay=1&compare=1`
 - Two-axis gimbal repair · `/i/inv_d3f76fcc393b49d6?replay=1&compare=1`
 - Mechanical lotus · `/i/inv_ba7b3c7716564397?replay=1&compare=1`
+- Geneva indexer reference · `/i/inv_geneva_indexer?replay=1`
 - Self-leveling tray · `/i/inv_f72fb06c611342eb?replay=1`
 - Gravity Clock · `/i/inv_a1f1665e649b41c2`
 - Cargo Crane · `/i/inv_0868f2ea889f4bcc`

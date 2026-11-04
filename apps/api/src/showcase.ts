@@ -7,6 +7,7 @@ import { buildDrawingAutomaton, measureDrawingAutomaton, drawingAutomatonTest } 
 import { buildScissorLift, scissorLiftTest } from '@protolab/simulator/scissor-lift';
 import { buildCamSemaphore, measureCamSemaphore, camSemaphoreTest } from '@protolab/simulator/cam-semaphore';
 import { buildTwoAxisGimbal, twoAxisGimbalTest } from '@protolab/simulator/two-axis-gimbal';
+import { buildGenevaIndexer, genevaIndexerTest } from '@protolab/simulator/geneva-indexer';
 import { DETERMINISTIC_MODEL_ID } from '@protolab/agent';
 import { now, versionSummary } from './jobs.ts';
 import type { ObjectStore } from './store.ts';
@@ -164,9 +165,30 @@ const twoAxisGimbal: Reference = {
   testSummary: 'Measure both signed sweeps and the tray tilt from upright',
 };
 
+const genevaIndexer: Reference = {
+  id: 'inv_geneva_indexer',
+  versionId: 'ver_geneva_indexer_1',
+  title: 'Jewel carousel · Geneva indexer reference',
+  description: 'A reference mechanism with one continuously turning motor. Its pin catches the slotted carousel, advances it a quarter turn, and holds it at the next station while the motor keeps turning.',
+  prompt: 'Build a jewel carousel that advances a quarter turn at a time from one continuously rotating motor.',
+  plan: {
+    purpose: 'Show how pin contact converts continuous rotation into discrete motion.',
+    features: ['One powered crank and physical pin', 'Four-slot passive wheel', 'Four colored stations'],
+    motions: ['The pin engages a slot to move the wheel. The locking sector holds the wheel between steps.'],
+    subassemblies: ['Powered input and locking sector', 'Passive indexed carousel'],
+    successCriteria: ['At least two input turns', 'Two consecutive 90° steps within 8°', 'At least 0.6 s of dwell with no more than 3° of drift'],
+    unverified: ['Manufacturing tolerances and wear'],
+  },
+  build: buildGenevaIndexer,
+  test: genevaIndexerTest,
+  verify: ({ metrics }) => metrics.indexedConsecutiveSteps >= 2 && metrics.groundContactViolation === 0,
+  decision: 'Use a physical pin to index the wheel and a relieved locking sector to hold it between steps.',
+  testSummary: 'Measure input turns, consecutive quarter turns, and dwell',
+};
+
 /** Save verified reference mechanisms once, with their real simulation traces. */
 export async function seedReferenceShowcases(db: DatabaseSync, store: ObjectStore, persist?: () => Promise<void>) {
-  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore, twoAxisGimbal]) {
+  for (const reference of [pump, drawbridge, drawing, scissorLift, semaphore, twoAxisGimbal, genevaIndexer]) {
     try {
       await saveReference(reference, db, store, persist);
     } catch (error) {
