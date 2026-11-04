@@ -29,6 +29,8 @@ The Geneva reference shows intermittent motion. Scrub across a flat section of t
 
 The separate Muse-built jewel carousel shows how an actual build improved. Compare v1 against v8, then scrub across the roughly 2.8-second pause between the two 90° steps. The motor kept turning throughout. In a separate control run, disabling the single drive pin stopped the carousel while the motor still completed more than two revolutions.
 
+The marble elevator reference makes the handoff easy to see. With the **Delivery path** on, scrub through the rise, the tip, and the roll into the blue catch bin. The loose marble rose 120 mm and stayed in the bin for the last four seconds of the test.
+
 ## Saved run routes
 
 - Walker · `/i/inv_bb9d5f8a170d4d95`
@@ -41,6 +43,7 @@ The separate Muse-built jewel carousel shows how an actual build improved. Compa
 - Mechanical lotus · `/i/inv_ba7b3c7716564397?replay=1&compare=1`
 - Muse jewel carousel · `/i/inv_b99f505fab294915?replay=1&compare=1`
 - Geneva indexer reference · `/i/inv_geneva_indexer?replay=1`
+- Marble elevator reference · `/i/inv_marble_elevator?replay=1`
 - Self-leveling tray · `/i/inv_f72fb06c611342eb?replay=1`
 - Gravity Clock · `/i/inv_a1f1665e649b41c2`
 - Cargo Crane · `/i/inv_0868f2ea889f4bcc`

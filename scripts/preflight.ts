@@ -295,6 +295,21 @@ if (judge) checks.push(
     }
     return 'the motor kept turning while the passive carousel advanced and held position';
   }],
+  ['Marble elevator reference', async () => {
+    const id = 'inv_marble_elevator';
+    const { invention } = await publicBuild(id);
+    const replay = await version(id, invention.currentVersionId);
+    const ball = replay.assembly.instances.find(({ id }) => id === 'marble');
+    if (!invention.featured || replay.modelId !== 'deterministic-planner' || !ball
+      || replay.assembly.joints.some(({ a, b }) => a.instanceId === ball.id || b.instanceId === ball.id)
+      || replay.assembly.controller.drives.length !== 2
+      || !recorded(replay, (test) => test.passed && test.metrics.payloadLift_m >= 0.10
+        && test.metrics['marble.travel_x_m'] >= 0.12 && test.metrics.endInHold_s >= 0.75
+        && test.metrics.endInFinalMargin_m > 0 && test.metrics.groundContactViolation === 0)) {
+      throw new Error('Expected a featured replay with a free marble that lifts, transfers, and stays in the receiver');
+    }
+    return 'the loose marble rose 120 mm and remained in the catch bin for the final four seconds';
+  }],
   ['Gravity Clock', async () => {
     const { invention } = await publicBuild('inv_a1f1665e649b41c2');
     if (!invention.featured) throw new Error('Expected the clock to be featured');
