@@ -21,11 +21,11 @@ export default function AssemblyTree({ assembly, selectedId, onSelect, changedId
       <div className="min-h-0 flex-1 overflow-auto px-2">
         {groups.map(([g, items]) => (
           <div key={g} className="mb-2">
-            <div className="px-1 text-xs font-medium text-slate-500">{label(g)}</div>
+            <div className="px-1 text-xs font-medium text-muted">{label(g)}</div>
             <ul>
               {items.map((i) => (
                 <li key={i.id}>
-                  <button aria-pressed={selectedId === i.id} onClick={() => onSelect(i.id === selectedId ? null : i.id)} className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 ${selectedId === i.id ? 'bg-accent-soft text-accent-dark' : ''}`}>
+                  <button aria-pressed={selectedId === i.id} onClick={() => onSelect(i.id === selectedId ? null : i.id)} className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-surface2 ${selectedId === i.id ? 'bg-accent/15 text-accent' : ''}`}>
                     <span className="truncate">{i.label}</span>
                     {changedIds?.has(i.id) && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title="Changed in this iteration" />}
                   </button>
@@ -36,26 +36,26 @@ export default function AssemblyTree({ assembly, selectedId, onSelect, changedId
         ))}
       </div>
       {sel && selPart && (
-        <div className="border-t border-slate-100 p-3 text-xs">
-          <div className="font-medium text-slate-900">{selPart.name}</div>
-          <div className="text-slate-500">{selPart.description}</div>
-          <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 mono text-slate-700">
-            <dt className="text-slate-500">Mass</dt><dd>{fmt.kg(selPart.mass_kg)}</dd>
-            <dt className="text-slate-500">Size</dt><dd>{selPart.dimensions_m.map((d) => (d * 1000).toFixed(0)).join('×')} mm</dd>
-            <dt className="text-slate-500">Material</dt><dd>{selPart.material}</dd>
-            {selPart.limits.maxTorque_Nm && <><dt className="text-slate-500">Torque</dt><dd>{fmt.nm(selPart.limits.maxTorque_Nm)}</dd></>}
-            <dt className="text-slate-500">Source</dt><dd>{selPart.source.kind === 'designed' ? 'designed by Muse' : selPart.source.kind === 'external' ? `${selPart.source.creator} (${selPart.source.license})` : `parametric (${selPart.source.license})`}</dd>
-            <dt className="text-slate-500">Position</dt><dd>{sel.transform.position.map((v) => (v * 1000).toFixed(0)).join(', ')} mm</dd>
+        <div className="border-t border-line p-3 text-xs">
+          <div className="font-medium text-ink">{selPart.name}</div>
+          <div className="text-muted">{selPart.description}</div>
+          <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 mono text-ink">
+            <dt className="text-muted">Mass</dt><dd>{fmt.kg(selPart.mass_kg)}</dd>
+            <dt className="text-muted">Size</dt><dd>{selPart.dimensions_m.map((d) => (d * 1000).toFixed(0)).join('×')} mm</dd>
+            <dt className="text-muted">Material</dt><dd>{selPart.material}</dd>
+            {selPart.limits.maxTorque_Nm && <><dt className="text-muted">Torque</dt><dd>{fmt.nm(selPart.limits.maxTorque_Nm)}</dd></>}
+            <dt className="text-muted">Source</dt><dd>{selPart.source.kind === 'designed' ? 'designed by Muse' : selPart.source.kind === 'external' ? `${selPart.source.creator} (${selPart.source.license})` : `parametric (${selPart.source.license})`}</dd>
+            <dt className="text-muted">Position</dt><dd>{sel.transform.position.map((v) => (v * 1000).toFixed(0)).join(', ')} mm</dd>
           </dl>
         </div>
       )}
-      <div className="border-t border-slate-100 p-3">
+      <div className="border-t border-line p-3">
         <div className="panel-title mb-1">Bill of materials · {fmt.kg(totalMass(assembly))}</div>
         <ul className="text-xs mono">
           {bom.map((l) => (
             <li key={l.partId} className="flex justify-between gap-2 py-0.5" title={l.source ? `${l.source.kind} · ${l.source.license} · ${l.source.creator}${l.source.attribution ? ' · ' + l.source.attribution : ''}` : ''}>
-              <span className="truncate text-slate-700">{l.qty}× {l.name}{l.source?.kind === 'designed' && <span className="ml-1 rounded bg-indigo-100 px-1 text-[9px] font-medium text-indigo-700">designed by Muse</span>}{l.source?.kind === 'external' && <span className="ml-1 rounded bg-emerald-100 px-1 text-[9px] font-medium text-emerald-700">{l.source.license}</span>}{l.partId.startsWith('custom-') && <span className="ml-1 rounded bg-sky-100 px-1 text-[9px] font-medium text-sky-700">custom</span>}</span>
-              <span className="text-slate-500">{fmt.kg(l.mass_kg)}</span>
+              <span className="truncate text-ink">{l.qty}× {l.name}{l.source?.kind === 'designed' && <span className="ml-1 rounded bg-accent/15 px-1 text-[9px] font-medium text-accent">designed by Muse</span>}{l.source?.kind === 'external' && <span className="ml-1 rounded bg-pass/15 px-1 text-[9px] font-medium text-pass">{l.source.license}</span>}{l.partId.startsWith('custom-') && <span className="ml-1 rounded bg-accent/15 px-1 text-[9px] font-medium text-accent">custom</span>}</span>
+              <span className="whitespace-nowrap text-muted">{fmt.kg(l.mass_kg)}</span>
             </li>
           ))}
         </ul>

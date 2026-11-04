@@ -1,10 +1,11 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, Html, Line } from '@react-three/drei';
+import { OrbitControls, Grid, Html, Line, Environment, Lightformer, ContactShadows } from '@react-three/drei';
 import { Component, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { linearTravelMetricKey, type Assembly, type Axis, type Instance, type Shape, type TestResult, type TestSpec, type Transform } from '@protolab/schema';
 import { ensureCCW, shapeHalfExtents as halfExtents } from './shapeMath.ts';
 import IsoPreview from './IsoPreview.tsx';
+import { useTheme } from '../theme.ts';
 import { diagnosticColors, type DiagnosticTone } from './diagnosticColors.ts';
 
 export interface ViewerProps {
@@ -28,7 +29,9 @@ export interface ViewerProps {
   onTime?: (t: number, duration: number) => void;
   seekTo?: number | null;
   autoRotate?: boolean;
+  autoRotateSpeed?: number;  // OrbitControls units; 2 ≈ one turn per 30 s at 60 fps
   mini?: boolean;
+  stage?: 'dark' | 'light' | 'stage';  // 'stage' = the themed stage plate (dark on the dark theme, graphite on the light theme)
   zoom?: number;
   strokeTargets?: NonNullable<Extract<TestSpec, { kind: 'motion' }>['measure']['linearTravel']>;
   pathInstanceId?: string;
@@ -40,7 +43,7 @@ const diagnosticOutlines = {
   change: new THREE.MeshBasicMaterial({ color: diagnosticColors.change.outline, side: THREE.BackSide }),
 };
 const ignoreRaycast = () => {};
-const strokeColors = ['#6526d6', '#0e766e', '#a13453', '#1d58b8'];
+const strokeColors = ['#5c97ff', '#2dd4bf', '#fb7185', '#f5a524'];
 
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 function material(color: string, role: string, blueprint: boolean, selected: boolean, changed: boolean, diagnostic?: DiagnosticTone) {
@@ -51,7 +54,7 @@ function material(color: string, role: string, blueprint: boolean, selected: boo
       const { surface } = diagnosticColors[diagnostic];
       m = new THREE.MeshStandardMaterial({ color: surface, emissive: surface, emissiveIntensity: selected ? 0.65 : 0.32, roughness: 0.5, wireframe: blueprint });
     } else if (blueprint) m = new THREE.MeshStandardMaterial({ color: selected ? '#f28c1d' : changed ? '#f28c1d' : '#4a90e2', wireframe: true, transparent: true, opacity: selected ? 1 : 0.55 });
-    else m = new THREE.MeshStandardMaterial({ color: changed ? '#f28c1d' : color, metalness: role === 'motor' ? 0.2 : role === 'contact' ? 0 : 0.55, roughness: role === 'contact' ? 0.9 : role === 'shell' ? 0.6 : 0.35, emissive: selected ? new THREE.Color('#1d6ff2') : new THREE.Color('#000'), emissiveIntensity: selected ? 0.5 : 0 });
+    else m = new THREE.MeshStandardMaterial({ color: changed ? '#f28c1d' : color, metalness: role === 'motor' ? 0.35 : role === 'contact' ? 0 : 0.7, roughness: role === 'contact' ? 0.85 : role === 'shell' ? 0.45 : 0.28, envMapIntensity: role === 'contact' ? 0.4 : 1.1, emissive: selected ? new THREE.Color('#2f7cff') : new THREE.Color('#000'), emissiveIntensity: selected ? 0.45 : 0 });
     materialCache.set(key, m);
   }
   return m;
@@ -301,18 +304,38 @@ function Scene(props: ViewerProps) {
     }
   });
 
+  const siteTheme = useTheme();
+  const look = props.stage === 'stage' ? (siteTheme === 'light' ? 'graphite' : 'dark') : (props.stage ?? siteTheme);
+  const light = look === 'light';
+  const stage = look === 'light'
+    ? { bg: '#e9edf3', sky: '#ffffff', ground: '#c9d2dd', cell: '#d3dae3', section: '#bcc6d3' }
+    : look === 'graphite'
+      ? { bg: '#1a1530', sky: '#ece7ff', ground: '#0f0b1f', cell: '#4a3f8f', section: '#7466c4' }
+      : { bg: '#0d1016', sky: '#dfe7f3', ground: '#0b0d12', cell: '#1b222c', section: '#2c3745' };
   const chassis = assembly.parts.find((p) => p.kind === 'body_frame');
   const body = assembly.instances.find((i) => i.id === 'body');
   const upper = assembly.parts.find((p) => p.kind === 'leg_segment');
 
   return (
     <>
-      <color attach="background" args={[blueprint || mini ? '#15112c' : '#eee9fa']} />
-      <hemisphereLight args={['#ffffff', '#b9c4d1', 0.9]} />
-      <directionalLight position={[0.6, 1.2, 0.8]} intensity={1.6} castShadow shadow-mapSize={[1024, 1024]} shadow-camera-near={0.1} shadow-camera-far={5} shadow-camera-left={-1} shadow-camera-right={1} shadow-camera-top={1} shadow-camera-bottom={-1} />
-      <directionalLight position={[-0.8, 0.5, -0.6]} intensity={0.5} />
-      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={0.6} cellColor={blueprint ? '#1e3a5f' : mini ? '#352953' : '#cfc3e7'} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={1} sectionColor={blueprint ? '#2d5c99' : mini ? '#675384' : '#a293c6'} fadeDistance={2.5} infiniteGrid />
-      {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={0.25} /></mesh>}
+      <color attach="background" args={[blueprint ? '#0b1f36' : stage.bg]} />
+      {!blueprint && <fog attach="fog" args={[stage.bg, radius * 6, radius * 14]} />}
+      <hemisphereLight args={[stage.sky, stage.ground, light ? 0.9 : 0.55]} />
+      <directionalLight position={[0.6, 1.2, 0.8]} intensity={2.2} color="#fff4e6" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-camera-near={0.1} shadow-camera-far={5} shadow-camera-left={-1} shadow-camera-right={1} shadow-camera-top={1} shadow-camera-bottom={-1} />
+      <directionalLight position={[-0.9, 0.6, -0.7]} intensity={0.8} color="#9cc4ff" />
+      <directionalLight position={[0, 0.3, -1.2]} intensity={0.6} color="#2f7cff" />
+      {!blueprint && (
+        <Environment resolution={256} frames={1}>
+          {/* Procedural studio: a soft key strip, a cool rim and a dim floor bounce; no HDR download. */}
+          <Lightformer form="rect" intensity={3} color="#ffffff" position={[0, 3, -2]} scale={[6, 1.5, 1]} target={[0, 0, 0]} />
+          <Lightformer form="rect" intensity={1.4} color="#bcd4ff" position={[-4, 1, 2]} rotation-y={Math.PI / 2} scale={[4, 2, 1]} />
+          <Lightformer form="rect" intensity={1.2} color="#ffe6c9" position={[4, 1.5, 1]} rotation-y={-Math.PI / 2} scale={[4, 2, 1]} />
+          <Lightformer form="circle" intensity={0.5} color="#2f7cff" position={[0, -2, 0]} rotation-x={Math.PI / 2} scale={6} />
+        </Environment>
+      )}
+      <Grid position={[0, -0.0005, 0]} args={[4, 4]} cellSize={radius > 0.35 ? 0.1 : 0.05} cellThickness={look === 'graphite' ? 0.9 : 0.5} cellColor={blueprint ? '#1e3a5f' : stage.cell} sectionSize={radius > 0.35 ? 0.5 : 0.25} sectionThickness={look === 'graphite' ? 1.5 : 1} sectionColor={blueprint ? '#2d5c99' : stage.section} fadeDistance={radius * 8} fadeStrength={1.2} infiniteGrid />
+      {!blueprint && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow><planeGeometry args={[6, 6]} /><shadowMaterial opacity={light ? 0.22 : 0.5} color="#000000" /></mesh>}
+      {!blueprint && !mini && <ContactShadows position={[0, 0, 0]} opacity={light ? 0.35 : 0.55} scale={radius * 6} blur={2.2} far={radius * 2} resolution={512} color="#000000" />}
       <group onPointerMissed={() => onSelect?.(null)}>
         {assembly.instances.map((inst: Instance) => {
           const part = partById.get(inst.partId);
@@ -341,7 +364,7 @@ function Scene(props: ViewerProps) {
             <meshBasicMaterial color={stroke.color} depthTest={false} />
           </mesh>
           <Html position={stroke.label} center style={{ pointerEvents: 'none' }}>
-            <span className="grid h-4 w-4 place-items-center rounded-full text-[10px] font-bold text-white shadow-sm" style={{ background: stroke.color }} aria-hidden="true">
+            <span className="grid h-4 w-4 place-items-center rounded-full text-[10px] font-bold text-white shadow-none" style={{ background: stroke.color }} aria-hidden="true">
               {stroke.number}
             </span>
           </Html>
@@ -361,10 +384,10 @@ function Scene(props: ViewerProps) {
           <Dim from={[body.transform.position[0] - chassis.params.length / 2, body.transform.position[1] + chassis.params.height / 2 + 0.03, body.transform.position[2] + chassis.params.width / 2 + 0.02]} to={[body.transform.position[0] + chassis.params.length / 2, body.transform.position[1] + chassis.params.height / 2 + 0.03, body.transform.position[2] + chassis.params.width / 2 + 0.02]} label={`${(chassis.params.length * 1000).toFixed(0)} mm`} />
           <Dim from={[body.transform.position[0] + chassis.params.length / 2 + 0.03, body.transform.position[1] + chassis.params.height / 2 + 0.03, body.transform.position[2] - chassis.params.width / 2]} to={[body.transform.position[0] + chassis.params.length / 2 + 0.03, body.transform.position[1] + chassis.params.height / 2 + 0.03, body.transform.position[2] + chassis.params.width / 2]} label={`${(chassis.params.width * 1000).toFixed(0)} mm`} />
           <Dim from={[body.transform.position[0] - chassis.params.length / 2 - 0.03, 0, body.transform.position[2] + chassis.params.width / 2 + 0.02]} to={[body.transform.position[0] - chassis.params.length / 2 - 0.03, body.transform.position[1] + chassis.params.height / 2, body.transform.position[2] + chassis.params.width / 2 + 0.02]} label={`${((body.transform.position[1] + chassis.params.height / 2) * 1000).toFixed(0)} mm`} />
-          {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-sky-300">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
+          {upper && <Html position={[body.transform.position[0], -0.02, body.transform.position[2] + chassis.params.width / 2 + 0.08]} center className="pointer-events-none whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-accent">leg bars {(upper.params.length * 1000).toFixed(0)} mm</Html>}
         </group>
       )}
-      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={1.2} enablePan={!mini} enableZoom={false} />
+      <OrbitControls ref={controls as never} makeDefault enabled={!cameraBounds} enableDamping dampingFactor={0.12} minDistance={radius * 0.4} maxDistance={radius * Math.max(10, 4 / (aspect || 1))} autoRotate={autoRotate} autoRotateSpeed={props.autoRotateSpeed ?? 1.2} enablePan={!mini} enableZoom={false} />
     </>
   );
 }
@@ -374,7 +397,7 @@ function Dim({ from, to, label }: { from: [number, number, number]; to: [number,
   return (
     <group>
       <Line points={[from, to]} color="#60a5fa" lineWidth={1} />
-      <Html position={mid} center className="pointer-events-none whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] text-sky-300 mono">{label}</Html>
+      <Html position={mid} center className="pointer-events-none whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-accent mono">{label}</Html>
     </group>
   );
 }
@@ -395,7 +418,7 @@ export default function Viewer(props: ViewerProps) {
     const timers = [120, 600].map((ms) => setTimeout(() => window.dispatchEvent(new Event('resize')), ms));
     return () => timers.forEach(clearTimeout);
   }, []);
-  if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-slate-100"} />;
+  if (!ready) return <div className={props.mini ? "h-full w-full" : "h-full w-full bg-surface2"} />;
   const measuredStrokes = props.explode ? [] : props.strokeTargets?.flatMap((check, index) => {
     const { instance, axis, relativeTo, minTravel_m } = check;
     const travel = props.test?.metrics[linearTravelMetricKey(check)];
@@ -417,13 +440,13 @@ export default function Viewer(props: ViewerProps) {
   );
   return (
     <ViewerBoundary fallback={fallback}>
-      <Canvas className="prototype-canvas" shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
+      <Canvas className="prototype-canvas" shadows dpr={[1, 1.5]} camera={{ position: [0.42, 0.28, 0.46], fov: 35, near: 0.01, far: 20 }} gl={{ preserveDrawingBuffer: true, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} frameloop={props.mini && !props.playing && !props.autoRotate ? 'demand' : 'always'}>
         <Scene {...props} zoom={zoom} />
       </Canvas>
       {measuredStrokes.length > 0 && (
         <ul className="pointer-events-none absolute bottom-3 left-3 right-3 flex flex-wrap gap-1.5" aria-label="Recorded stroke distances">
           {measuredStrokes.map(({ number, part, travel, target, color }) => (
-            <li key={number} className="flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-800"
+            <li key={number} className="flex items-center gap-1 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] font-semibold text-ink"
               aria-label={`${part}, ${Math.round(travel * 1000)} millimeters, minimum ${Math.round(target * 1000)} millimeters`}>
               <span className="grid h-4 w-4 place-items-center rounded-full text-white" style={{ background: color }} aria-hidden="true">{number}</span>
               {part} · {Math.round(travel * 1000)} mm

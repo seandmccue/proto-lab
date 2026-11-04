@@ -1,6 +1,6 @@
 .crab-proof {
   border: 1px solid var(--bench-line);
-  border-radius: 0.8rem;
+  border-radius: var(--radius);
   background: var(--bench-panel);
 }
 
@@ -40,7 +40,7 @@
 .crab-proof-run {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--bench-line);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   background: var(--bench-paper);
 }
 
@@ -65,16 +65,16 @@
 
 .crab-proof-verdict {
   padding: 0.1rem 0.45rem;
-  border-radius: 999px;
-  background: #fff1d7;
-  color: #854208;
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
   font-size: 0.72rem;
   font-weight: 750;
 }
 
 .crab-proof-verdict[data-passed='true'] {
-  background: #e3f6ea;
-  color: #185d37;
+  background: var(--pass-soft);
+  color: var(--pass);
 }
 
 .crab-proof-run dl {

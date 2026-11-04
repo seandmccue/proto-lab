@@ -93,8 +93,8 @@ export default function BuildProgress({ events, running, jobStatus, load, brief 
       <PartsBin parts={parts} plan={plan?.plan} brief={brief} />
       <div className="build-progress-now">
         <div className="min-w-0">
-          <div className="truncate text-sm text-slate-700" title={line}>{line}</div>
-          <div className="mono text-[11px] text-slate-500">{elapsed ? `${elapsed} elapsed · ` : ''}{queued ? load ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : 'Queued' : thinking ? `Waiting for the next update · ${since} s since last event` : STAGE_BLURB[stage]}</div>
+          <div className="truncate text-sm text-ink" title={line}>{line}</div>
+          <div className="mono text-[11px] text-muted">{elapsed ? `${elapsed} elapsed · ` : ''}{queued ? load ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : 'Queued' : thinking ? `Waiting for the next update · ${since} s since last event` : STAGE_BLURB[stage]}</div>
         </div>
       </div>
     </div>
@@ -272,8 +272,8 @@ export function BuildStrip({ events, running }: { events: JobEvent[]; running: b
         <div className="build-strip-now">
           <span className={`build-progress-spinner build-strip-spinner${thinking ? ' is-thinking' : ''}`} aria-hidden="true" />
           <div className="min-w-0">
-            <div className="truncate text-xs text-slate-700" title={line}>{line}</div>
-            <div className="mono text-[10px] text-slate-500">{elapsed && <span>{elapsed} elapsed</span>}{tools > 0 && <span> · {tools} tool calls</span>}{parts > 0 && <span> · {parts} parts</span>}{thinking && <span className="text-accent"> · Last update {since} s ago</span>}</div>
+            <div className="truncate text-xs text-ink" title={line}>{line}</div>
+            <div className="mono text-[10px] text-muted">{elapsed && <span>{elapsed} elapsed</span>}{tools > 0 && <span> · {tools} tool calls</span>}{parts > 0 && <span> · {parts} parts</span>}{thinking && <span className="text-accent"> · Last update {since} s ago</span>}</div>
           </div>
         </div>
       </div>

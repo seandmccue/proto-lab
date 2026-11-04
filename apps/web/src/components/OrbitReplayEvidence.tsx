@@ -60,7 +60,7 @@ function OrbitPlot({ orbit, time, title, frame, tone, target }: {
         <strong>{turns} net {Math.abs(Number(turns)) === 1 ? 'turn' : 'turns'}</strong>
         <span>{radius} mm radius</span>
         {target && <span>Goal ≥ {target.minTurns} {target.direction ? `${target.direction} ` : ''}{target.minTurns === 1 ? 'turn' : 'turns'}</span>}
-        {target && <span className={`workbench-badge mt-1 justify-self-center ${met ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>Turn goal {met ? 'met' : 'missed'}</span>}
+        {target && <span className={`workbench-badge mt-1 justify-self-center ${met ? 'workbench-pass' : 'bg-warn/15 text-warn'}`}>Turn goal {met ? 'met' : 'missed'}</span>}
       </p>
     </figure>
   );

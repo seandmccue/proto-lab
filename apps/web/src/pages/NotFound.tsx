@@ -10,12 +10,12 @@ export default function NotFound() {
     <div className="min-h-screen">
       <Header />
       <main className="mx-auto max-w-2xl px-4 py-20 text-center">
-        <p className="text-xs font-mono uppercase tracking-widest text-slate-500">{notFound ? '404' : 'Error'}</p>
+        <p className="text-xs font-mono uppercase tracking-widest text-muted">{notFound ? '404' : 'Error'}</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">{notFound ? 'Nothing to invent here' : 'The workshop hit a snag'}</h1>
-        <p className="mt-3 text-slate-600">{message}</p>
+        <p className="mt-3 text-muted">{message}</p>
         <div className="mt-8 flex justify-center gap-3">
-          <Link to="/" className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700">Start a new invention</Link>
-          <Link to="/gallery" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Browse the gallery</Link>
+          <Link to="/" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent">Start a new invention</Link>
+          <Link to="/gallery" className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink hover:bg-surface2">Browse the gallery</Link>
         </div>
       </main>
     </div>
