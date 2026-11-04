@@ -197,7 +197,7 @@ hr { border-color: var(--line); }
 .lab-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.16fr) minmax(0, 1fr);
-  align-items: start;   /* headline top sits level with the top of the preview card */
+  align-items: stretch;   /* both columns share one height: the headline top sits level with the card top and the card grows to the copy's height */
   gap: clamp(1.5rem, 5vw, 5rem);
   padding-block: clamp(1.25rem, 4vw, 3.6rem) clamp(1rem, 2vw, 1.75rem);
 }
@@ -250,6 +250,8 @@ hr { border-color: var(--line); }
 }
 .lab-hero-proof:hover, .lab-art-link:hover { text-decoration: underline; }
 .lab-art {
+  display: flex;
+  flex-direction: column;
   color: var(--ink);
   overflow: hidden;
   border: 1px solid var(--line);
@@ -261,7 +263,7 @@ hr { border-color: var(--line); }
 .lab-art-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .85rem 1rem .55rem; }
 .lab-art-heading .lab-label { color: var(--muted); }
 .lab-art-heading h2 { font-size: clamp(1.08rem, 2.25vw, 1.45rem); font-weight: 760; letter-spacing: -.035em; }
-.lab-art-stage { position: relative; display: grid; place-items: center; height: clamp(12rem, 24vw, 20rem); isolation: isolate; }
+.lab-art-stage { position: relative; display: grid; flex: 1 1 auto; place-items: center; min-height: clamp(12rem, 24vw, 20rem); isolation: isolate; }
 .lab-art img, .lab-art-machine { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .lab-art-machine { pointer-events: none; }
 .lab-art-mode { position: absolute; right: .75rem; top: .6rem; padding: .22rem .5rem; border: 1px solid var(--line-strong); border-radius: 4px; background: rgba(0, 0, 0, .25); color: var(--ink-2); font: 600 .62rem/1.2 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; transition: color .3s, border-color .3s; }
