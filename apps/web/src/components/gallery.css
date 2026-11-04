@@ -102,7 +102,8 @@
 @media (56.25rem <= width < 75rem) {
   .invention-grid--showcase:has(> :nth-child(5)) { --showcase-tracks: 6; }
   .invention-grid--showcase:has(> :nth-child(5):last-child) > :nth-child(4),
-  .invention-grid--showcase:has(> :nth-child(7):last-child) > :is(:nth-child(4), :nth-child(6)) { grid-column: 2 / span 2; }
+  .invention-grid--showcase:has(> :nth-child(7):last-child) > :is(:nth-child(4), :nth-child(6)),
+  .invention-grid--showcase:has(> :nth-child(8):last-child) > :nth-child(7) { grid-column: 2 / span 2; }
 }
 @media (width >= 75rem) {
   .invention-grid--showcase:has(> :nth-child(4)) { --showcase-tracks: 8; }
