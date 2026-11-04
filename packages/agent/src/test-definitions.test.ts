@@ -62,18 +62,21 @@ async function mockBuild(rounds: Call[][], input: Partial<AgentInput> = {}) {
 test('a tested version and a later untested checkpoint keep exact definitions for a fresh follow-up', async () => {
   const initial = await mockBuild([
     [
+      ['create_part', { kind: 'beam', params: { length: 0.051 }, name: 'Catch cup post' }],
       ['assemble', { rationale: 'Build a catch-cup test fixture', ops: [
-        { op: 'place', id: 'cup_L', part: 'catch-cup-80x35', position: [0, 0.05, 0.06], anchored: true },
-        { op: 'place', id: 'cup_R', part: 'catch-cup-80x35', position: [0, 0.05, -0.06], anchored: true },
+        { op: 'place', id: 'stand_L', part: 'custom-beam-1', position: [0, 0.0255, 0.06], rotation_deg: [0, 0, 90], anchored: true },
+        { op: 'place', id: 'stand_R', part: 'custom-beam-1', position: [0, 0.0255, -0.06], rotation_deg: [0, 0, 90], anchored: true },
+        { op: 'mount', id: 'cup_L', part: 'catch-cup-80x35', onto: 'stand_L', connector: 'end_b', via: 'mount', joint: 'fixed', offset_m: -0.001 },
+        { op: 'mount', id: 'cup_R', part: 'catch-cup-80x35', onto: 'stand_R', connector: 'end_b', via: 'mount', joint: 'fixed', offset_m: -0.001 },
         { op: 'place', id: 'marble_red', part: 'wood-marble-24', position: [0, 0.066, 0.06], free: true },
         { op: 'place', id: 'marble_blue', part: 'wood-marble-24', position: [0, 0.066, -0.06], free: true },
-        { op: 'place', id: 'support', part: 'beam-50', position: [0.12, 0.02, 0], anchored: true },
+        { op: 'place', id: 'support', part: 'beam-50', position: [0.12, 0.005, 0], anchored: true },
       ] }],
       ['define_test', { test: strictTest }],
       ['run_test', { test_id: strictTest.id }],
     ],
     [
-      ['assemble', { rationale: 'Raise the separate support', ops: [{ op: 'move', id: 'support', translate: [0, 0.01, 0] }] }],
+      ['assemble', { rationale: 'Slide the separate support along the floor', ops: [{ op: 'move', id: 'support', translate: [0.01, 0, 0] }] }],
       ['finalize_design', { status: 'failed', summary: 'Stopped before retesting the edit.' }],
     ],
   ]);
@@ -90,7 +93,7 @@ test('a tested version and a later untested checkpoint keep exact definitions fo
   // A follow-up can checkpoint again without defining any tests yet.
   const restored = VersionRecord.parse(JSON.parse(JSON.stringify(checkpoint)));
   const interrupted = await mockBuild([[
-    ['assemble', { rationale: 'Move the same support', ops: [{ op: 'move', id: 'support', translate: [0, 0.01, 0] }] }],
+    ['assemble', { rationale: 'Slide the same support again', ops: [{ op: 'move', id: 'support', translate: [0.01, 0, 0] }] }],
     ['finalize_design', { status: 'failed', summary: 'Stopped before defining a test.' }],
   ]], { parent: restored, startIteration: checkpoint.iteration, changeRequest: 'Adjust the support.' });
   assert.ok(interrupted.prompts[0].includes(JSON.stringify([strictTest])));
@@ -121,7 +124,7 @@ test('a legacy version can recover definitions from successful local tool entrie
     id: 'legacy-v1', inventionId: 'sorter', parentVersionId: 'no-storage-lookup', iteration: 1, prompt: 'Legacy fixture',
     spec: baseSpec('Legacy fixture'),
     assembly: applyOps(emptyAssembly(), [
-      { op: 'place', id: 'support', part: 'beam-50', position: [0, 0.03, 0], anchored: true },
+      { op: 'place', id: 'support', part: 'beam-50', position: [0, 0.005, 0], anchored: true },
     ], getPart).assembly,
     tests: [], decisions: [], modelId: 'muse-spark-1.3', status: 'failed', createdAt: '2026-01-01T00:00:00Z',
     toolLog: [
