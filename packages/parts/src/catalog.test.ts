@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { catalog, searchCatalog, generatePart, buildWalker, DEFAULT_WALKER, ParamError, applyOps, emptyAssembly, getPart, mateTransform, transformPoint, summarize } from './index.ts';
+import { catalog, searchCatalog, generatePart, buildWalker, DEFAULT_WALKER, ParamError, AssemblyOp, applyOps, emptyAssembly, getPart, mateTransform, transformPoint, summarize } from './index.ts';
 import { Assembly, billOfMaterials } from '@protolab/schema';
 
 test('catalog has 80+ valid parts across categories', () => {
@@ -110,6 +110,18 @@ test('pillow blocks and adjustable linkage plates mount shafts and selectable pa
   assert.deepEqual(nearJoint.axis, [0, 0, 1]);
   assert.deepEqual(farJoint.axis, [0, 0, 1]);
   assert.ok(Math.abs(farJoint.anchor![0] - nearJoint.anchor![0] - 0.015) < 1e-9, 'selecting a new pin changes the lever arm');
+});
+
+test('contact-enabled mounts keep their passive joint', () => {
+  const assembly = applyOps(emptyAssembly(), [
+    AssemblyOp.parse({ op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true }),
+    AssemblyOp.parse({ op: 'mount', id: 'wheel', part: 'spoked-wheel-200', onto: 'tower',
+      connector: 'axle', via: 'hub', joint: 'revolute', contact: true }),
+  ], getPart).assembly;
+  assert.equal(assembly.instances.find(({ id }) => id === 'wheel')?.free, true);
+  assert.equal(assembly.joints.length, 1);
+  assert.equal(assembly.joints[0].type, 'revolute');
+  assert.equal(assembly.joints[0].motor, undefined);
 });
 
 test('mount places the child so connectors coincide and face each other', () => {

@@ -25,6 +25,7 @@ export const MountOp = z.object({
   limits: z.tuple([z.number(), z.number()]).optional(),   // rad or m
   motor: z.object({ controlId: z.string(), stiffness: z.number().positive().default(5), damping: z.number().nonnegative().default(0.2) }).optional(),
   anchored: z.boolean().optional(),
+  contact: z.boolean().optional(), // keep the joint while enabling collisions with other bodies
 });
 export const ConnectOp = z.object({
   op: z.literal('connect'), a: z.string(), a_connector: z.string(), b: z.string(), b_connector: z.string(),
@@ -229,7 +230,7 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
         if (op.joint === 'revolute' && pc.kind !== 'revolute' && pc.kind !== 'any' && cc.kind !== 'revolute' && cc.kind !== 'any') throw new AssemblyError(`Neither connector ${op.onto}.${pc.id} nor ${op.part}.${cc.id} is revolute`, i);
         if (op.joint === 'prismatic' && pc.kind !== 'prismatic' && pc.kind !== 'any' && cc.kind !== 'prismatic' && cc.kind !== 'any') throw new AssemblyError(`Neither connector is prismatic`, i);
         const T = mateTransform(parent.transform, pc, p, cc, (op.spin_deg * Math.PI) / 180, op.offset_m);
-        a.instances.push(Instance.parse({ id: op.id, partId: p.id, label: op.label ?? p.name, group: op.group ?? parent.group, transform: T, anchored: !!op.anchored, free: false }));
+        a.instances.push(Instance.parse({ id: op.id, partId: p.id, label: op.label ?? p.name, group: op.group ?? parent.group, transform: T, anchored: !!op.anchored, free: op.contact ?? false }));
         const axis = norm(transformDir(parent.transform, pc.axis));
         const anchor = transformPoint(parent.transform, pc.position);
         const motor: Motor | undefined = op.motor ? { controlId: op.motor.controlId, stiffness: op.motor.stiffness, damping: op.motor.damping, maxTorque_Nm: op.joint === 'revolute' ? (pp.limits.maxTorque_Nm ?? p.limits.maxTorque_Nm) : undefined, maxForce_N: op.joint === 'prismatic' ? (pp.limits.maxForce_N ?? p.limits.maxForce_N) : undefined } : undefined;

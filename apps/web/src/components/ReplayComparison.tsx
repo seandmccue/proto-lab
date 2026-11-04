@@ -2,6 +2,7 @@ import TriplexTimingEvidence from './TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence from './OrbitReplayEvidence.tsx';
 import TrayTiltEvidence from './TrayTiltEvidence.tsx';
 import LotusReplayEvidence from './LotusReplayEvidence.tsx';
+import IndexedMotionEvidence from './IndexedMotionEvidence.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { tiltDeg } from '@protolab/parts';
 import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
@@ -156,6 +157,8 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
           definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
         <TrayTiltEvidence version={version} iteration={version.iteration} time={time} test={test} />
         <LotusReplayEvidence version={version} iteration={version.iteration} time={time} test={test} />
+        <IndexedMotionEvidence iteration={version.iteration} time={time} test={test}
+          definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
       </article>)}
     </div>
     <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />

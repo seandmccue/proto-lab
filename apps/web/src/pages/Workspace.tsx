@@ -12,6 +12,7 @@ import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
 import TrayTiltEvidence from '../components/TrayTiltEvidence.tsx';
 import LotusReplayEvidence from '../components/LotusReplayEvidence.tsx';
+import IndexedMotionEvidence from '../components/IndexedMotionEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -728,6 +729,7 @@ export default function Workspace() {
           {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}
           {!showLive && version && test && <TrayTiltEvidence version={version} time={time.t} test={test} />}
           {!showLive && version && test && <LotusReplayEvidence version={version} time={time.t} test={test} />}
+          {!showLive && test && <IndexedMotionEvidence time={time.t} test={test} definition={testDefinition} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
           {running && <SimulationStatus events={events} running replay={replayStatus} />}

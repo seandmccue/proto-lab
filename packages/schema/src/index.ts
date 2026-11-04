@@ -227,6 +227,17 @@ export const TestSpec = z.discriminatedUnion('kind', [
         minTravel_m: z.number().positive(),
         maxSpread_m: z.number().positive(),
       }).optional(),
+      indexedMotion: z.object({
+        input: z.string().min(1),
+        body: z.string().min(1),
+        center: z.string().min(1),
+        plane: z.enum(['xy', 'xz', 'yz']),
+        minSteps: z.number().int().min(2).max(20),
+        step_deg: z.number().positive().max(180),
+        stepTolerance_deg: z.number().positive().max(30),
+        minDwell_s: z.number().min(0.1).max(15),
+        maxDwellDrift_deg: z.number().positive().max(20),
+      }).optional(),
       orbits: z.array(z.object({
         body: z.string().min(1),
         center: z.string().min(1),

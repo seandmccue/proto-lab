@@ -110,6 +110,7 @@ export function keyMetric(t: { metrics: Record<string, number> } | null | undefi
   if (m.payloadLift_m !== undefined) return `${fmt.cm(m.payloadLift_m)} lift`;
   if (m.maxInstanceTilt_deg !== undefined) return `${fmt.deg(m.maxInstanceTilt_deg)} peak part tilt`;
   if (m.payloadDrop_m !== undefined) return `drop ${fmt.m2(m.payloadDrop_m)}`;
+  if (m.indexedConsecutiveSteps !== undefined) return `${m.indexedConsecutiveSteps} indexed ${m.indexedConsecutiveSteps === 1 ? 'step' : 'steps'}`;
   if (m.synchronizedMinTravel_m !== undefined) return `${(m.synchronizedMinTravel_m * 1000).toFixed(1)} mm shortest stroke`;
   const rev = Object.entries(m).find(([k]) => k.endsWith('revolutions'));
   if (rev && rev[1] >= 0.5) return `${rev[1].toFixed(1)} rev`; // a rotor's "swing" is thousands of degrees; revolutions is the number
@@ -165,6 +166,8 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
         items.push({ label: `${label} swing`, value: `${degrees(low)} to ${degrees(high)}`, target: `Reach ±${degrees(minEachWay_rad)}` });
       }
     }
+    const indexed = definition.measure.indexedMotion;
+    if (indexed) add('Consecutive steps with dwell', metrics.indexedConsecutiveSteps, String, indexed.minSteps, true);
     const sync = definition.measure.synchronizedTravel;
     if (sync) {
       add('Shortest synchronized stroke', metrics.synchronizedMinTravel_m, (value) => `${(value * 1000).toFixed(1)} mm`, sync.minTravel_m, true);

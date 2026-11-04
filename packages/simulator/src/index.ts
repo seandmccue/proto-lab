@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { measureFollowerTiming } from './follower-timing.ts';
 import { measurePlanarOrbit } from './planar-orbit.ts';
+import { measureIndexedMotion } from './indexed-motion.ts';
 import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
 
@@ -200,6 +201,15 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (new Set(instances).size !== instances.length) failureReasons.push('Synchronized travel needs different instances');
       for (const id of instances) if (!instById.has(id)) failureReasons.push(`Synchronized travel instance "${id}" not found`);
     }
+    const indexed = measure.indexedMotion;
+    if (indexed) {
+      if (ctlJoints.get(indexed.input)?.joint.type !== 'revolute') failureReasons.push(`Indexed motion input "${indexed.input}" must be a motorized revolute joint`);
+      if (indexed.body === indexed.center) failureReasons.push('Indexed motion marker and center must be different instances');
+      for (const id of [indexed.body, indexed.center]) if (!instById.has(id)) failureReasons.push(`Indexed motion instance "${id}" not found`);
+      if (indexed.stepTolerance_deg >= indexed.step_deg / 2 || indexed.maxDwellDrift_deg >= indexed.step_deg / 2) {
+        failureReasons.push('Indexed motion step tolerance and dwell drift must be less than half a step');
+      }
+    }
     if (measure.followerTiming) {
       const { shaft, followers, minPhaseGap_deg, maxPhaseGap_deg } = measure.followerTiming;
       if (!sims.some(({ joint }) => joint.type === 'revolute' && joint.motor?.controlId === shaft)) {
@@ -236,7 +246,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !synchronizedTravel && !orbits.length && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !synchronizedTravel && !orbits.length && !indexed && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -424,6 +434,18 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
         }
         if (orbit.maxRadius_m !== undefined && maxRadius_m > orbit.maxRadius_m) {
           failureReasons.push(`${body} orbit radius reached ${maxRadius_m.toFixed(3)} m, maximum ${orbit.maxRadius_m} m`);
+        }
+      }
+      const indexed = test.measure.indexedMotion;
+      if (indexed) {
+        const result = measureIndexedMotion({ frames, dt: 1 / TRACE_HZ }, indexed);
+        if (!result) {
+          failureReasons.push('Indexed motion could not be measured from the recorded input and marker');
+        } else {
+          metrics.indexedConsecutiveSteps = result.consecutiveSteps;
+          if (result.consecutiveSteps < indexed.minSteps) {
+            failureReasons.push(`Measured ${result.consecutiveSteps} consecutive ${indexed.step_deg}° steps with dwell, target ${indexed.minSteps}`);
+          }
         }
       }
       const timing = test.measure.followerTiming;
