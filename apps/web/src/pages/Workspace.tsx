@@ -216,7 +216,8 @@ export default function Workspace() {
   const [playing, setPlaying] = useState(!reducedMotion);
   const [explode, setExplode] = useState(0);
   const [blueprint, setBlueprint] = useState(false);
-  const [showStrokeGuides, setShowStrokeGuides] = useState(id !== 'inv_drawing_automaton');
+  const [showStrokeGuides, setShowStrokeGuides] = useState(() =>
+    largeShowcases.find((entry) => entry.inventionId === id)?.showStrokeGuidesInitially ?? id !== 'inv_drawing_automaton');
   const [showMotionPath, setShowMotionPath] = useState(true);
   const [follow, setFollow] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);

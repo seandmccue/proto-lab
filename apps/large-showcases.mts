@@ -5,10 +5,20 @@ export interface LargeShowcase {
   baseline?: { versionId: string; testId: string };
   componentCount: number;
   detail: string;
+  showStrokeGuidesInitially?: boolean;
 }
 
 // Add an entry after reviewing the exact saved Muse assembly and recorded tests.
 export const largeShowcases: readonly LargeShowcase[] = [
+  {
+    inventionId: 'inv_5b8d9bc9fa68496b',
+    versionId: 'ver_d6b56c3fa6a34853',
+    testIds: ['octo_final#1', 'octo_clearance#1'],
+    baseline: { versionId: 'ver_32b5f85f6bb0457d', testId: 'octo_wave#1' },
+    componentCount: 54,
+    detail: 'Eight ribbed arms curl through 24 powered joints. Every arm travels over 24 cm while clearing the camera and its neighbours.',
+    showStrokeGuidesInitially: false,
+  },
   {
     inventionId: 'inv_6780a73a8a094f4d',
     versionId: 'ver_b928a3e12bff40ac',
