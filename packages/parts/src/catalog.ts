@@ -73,6 +73,9 @@ const PRESETS: Preset[] = [
   { id: 'orrery-earth-44', kind: 'orrery_globe', params: { radius: 0.022, style: 1 } },
   { id: 'orrery-moon-20', kind: 'orrery_globe', params: { radius: 0.01, style: 2 } },
   { id: 'foam-ball-60', kind: 'ball', params: { radius: 0.03, density: 40 } }, { id: 'wood-ball-40', kind: 'ball', params: { radius: 0.02, density: 600 } }, { id: 'block-40', kind: 'block', params: { length: 0.04, width: 0.04, height: 0.04, density: 600 } }, { id: 'foam-pizza-80', kind: 'disc', params: { radius: 0.04, thickness: 0.008, density: 60 } },
+  { id: 'wood-marble-24', kind: 'ball', params: { radius: 0.012, density: 800 } },
+  { id: 'gravity-chute-160x54', kind: 'gravity_chute', params: {} },
+  { id: 'catch-cup-80x35', kind: 'tray', params: { radius: 0.04, depth: 0.035 } },
   { id: 'counterweight-40g', kind: 'counterweight', params: { mass: 0.04 } },
   { id: 'tray-45', kind: 'tray', params: { radius: 0.045, depth: 0.012 } }, { id: 'counterweight-500g', kind: 'counterweight', params: { mass: 0.5 } }, { id: 'counterweight-2kg', kind: 'counterweight', params: { mass: 2 } },
 ];

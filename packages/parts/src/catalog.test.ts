@@ -16,6 +16,29 @@ test('search finds servos by query and category', () => {
   assert.ok(r.length >= 4 && r.every((p) => p.kind === 'servo_motor'));
 });
 
+test('gravity feed presets provide a free marble, clear railed path and deep receiver', () => {
+  const marble = getPart('wood-marble-24')!;
+  const chute = getPart('gravity-chute-160x54')!;
+  const receiver = getPart('catch-cup-80x35')!;
+  assert.deepEqual(marble.geometry[0].shape, { kind: 'sphere', radius: 0.012 });
+  assert.ok(chute.params.width > marble.dimensions_m[2]);
+  assert.ok(chute.params.railHeight >= marble.params.radius);
+  assert.deepEqual(chute.geometry.map(({ shape, collide }) => [shape.kind, collide]),
+    [['box', true], ['box', true], ['box', true]]);
+  const [floor, leftRail, rightRail] = chute.geometry;
+  assert.ok(floor.shape.kind === 'box' && leftRail.shape.kind === 'box' && rightRail.shape.kind === 'box');
+  assert.equal(floor.shape.size[0], chute.params.length);
+  assert.ok(Math.abs(rightRail.offset.position[2] - leftRail.offset.position[2] - rightRail.shape.size[2] - chute.params.width) < 1e-10);
+  assert.deepEqual(chute.connectors.map(({ id, position, axis }) => [id, position, axis]), [
+    ['mount', [0, -0.002, 0], [0, -1, 0]],
+    ['entry', [-0.08, 0.002, 0], [-1, 0, 0]],
+    ['exit', [0.08, 0.002, 0], [1, 0, 0]],
+  ]);
+  assert.ok(receiver.params.depth > marble.dimensions_m[1]);
+  assert.ok(receiver.geometry.every(({ collide }) => collide));
+  assert.ok(receiver.connectors.some(({ id }) => id === 'mount'));
+});
+
 test('generatePart rejects out-of-range params', () => {
   assert.throws(() => generatePart('beam', { length: 5 }), ParamError);
   assert.throws(() => generatePart('beam', { bogus: 1 }), ParamError);

@@ -735,6 +735,38 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.length, p.height, p.width] }, [0, 0, 0], COLORS.wood, 'payload')]; return finish({ id, kind: 'block', name: `Block ${mm(p.length)}×${mm(p.width)}×${mm(p.height)} mm`, category: 'payloads', description: 'Payload block.', params: p, mass_kg: vol(g) * p.density, dimensions_m: [p.length, p.height, p.width], material: 'wood', geometry: g, connectors: [fx('top', [0, p.height / 2, 0], [0, 1, 0]), fx('bottom', [0, -p.height / 2, 0], [0, -1, 0])], cost_usd: 1 }); } },
   disc: { kind: 'disc', name: 'Disc / pizza', category: 'payloads', description: 'Flat disc payload (e.g. a foam pizza) with a mount underneath.', params: { radius: { min: 0.01, max: 0.2, default: 0.04, unit: 'm', description: 'Radius' }, thickness: { min: 0.002, max: 0.03, default: 0.008, unit: 'm', description: 'Thickness' }, density: { min: 20, max: 1200, default: 60, unit: 'kg/m³', description: 'Density' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.thickness, axis: 'y' }, [0, 0, 0], '#f4a261', 'payload'), piece({ kind: 'cylinder', radius: p.radius * 0.8, height: p.thickness * 1.02, axis: 'y' }, [0, 0, 0], '#e63946', 'decor', QUAT_ID, { collide: false })]; return finish({ id, kind: 'disc', name: `Disc Ø${mm(p.radius * 2)} mm`, category: 'payloads', description: 'Foam disc payload.', params: p, mass_kg: Math.PI * p.radius ** 2 * p.thickness * p.density, dimensions_m: [p.radius * 2, p.thickness, p.radius * 2], material: 'foam', geometry: g, connectors: [fx('bottom', [0, -p.thickness / 2, 0], [0, -1, 0]), fx('top', [0, p.thickness / 2, 0], [0, 1, 0])], cost_usd: 1 }); } },
+  gravity_chute: {
+    kind: 'gravity_chute', name: 'Gravity chute', category: 'misc',
+    description: 'Open-ended gravity ramp with two solid side rails. Angle it downhill toward +X for marbles or other loose parts.',
+    params: {
+      length: { min: 0.04, max: 0.6, default: 0.16, unit: 'm', description: 'Length along X' },
+      width: { min: 0.014, max: 0.2, default: 0.054, unit: 'm', description: 'Clear width between the rails' },
+      railHeight: { min: 0.004, max: 0.1, default: 0.016, unit: 'm', description: 'Side rail height above the floor' },
+      thickness: { min: 0.001, max: 0.012, default: 0.004, unit: 'm', description: 'Floor and rail thickness' },
+    },
+    generate: (p, id) => {
+      const { length, width, railHeight, thickness } = p;
+      const outerWidth = width + 2 * thickness;
+      const railOffset = (width + thickness) / 2;
+      const floorTop = thickness / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [length, thickness, outerWidth] }, [0, 0, 0], COLORS.orange),
+        ...[-railOffset, railOffset].map((z) =>
+          piece({ kind: 'box', size: [length, railHeight, thickness] }, [0, floorTop + railHeight / 2, z], COLORS.blue)),
+      ];
+      return finish({
+        id, kind: 'gravity_chute', name: `Gravity chute ${mm(length)} × ${mm(width)} mm`, category: 'misc',
+        description: 'Open ramp with a solid floor and two side rails. Mount it on an incline to guide loose marbles or parts.',
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [length, thickness + railHeight, outerWidth],
+        material: 'aluminium', geometry, cost_usd: 4,
+        connectors: [
+          fx('mount', [0, -floorTop, 0], [0, -1, 0], 'fixed', 'Underside support'),
+          fx('entry', [-length / 2, floorTop, 0], [-1, 0, 0], 'fixed', 'Open upstream floor edge'),
+          fx('exit', [length / 2, floorTop, 0], [1, 0, 0], 'fixed', 'Open downstream floor edge'),
+        ],
+      });
+    },
+  },
   tray: { kind: 'tray', name: 'Launch tray', category: 'misc', description: 'Shallow cup/tray that holds a projectile (floor + rim wall segments, so a ball stays in it until flung); "mount" underneath, "payload" on the floor.', params: { radius: { min: 0.01, max: 0.2, default: 0.045, unit: 'm', description: 'Inner radius' }, depth: { min: 0.003, max: 0.05, default: 0.012, unit: 'm', description: 'Rim height' } },
     generate: (p, id) => { const g: GeometryPiece[] = [piece({ kind: 'cylinder', radius: p.radius + 0.003, height: 0.003, axis: 'y' }, [0, 0.0015, 0], COLORS.aluminium)]; const n = 10; const segLen = 2 * Math.PI * (p.radius + 0.0015) / n;
       for (let i = 0; i < n; i++) { const a = (2 * Math.PI * i) / n; g.push(piece({ kind: 'box', size: [0.003, p.depth, segLen * 1.05] }, [Math.cos(a) * (p.radius + 0.0015), 0.003 + p.depth / 2, Math.sin(a) * (p.radius + 0.0015)], COLORS.aluminium, 'structure', quatFromAxisAngle([0, 1, 0], -a))); }
