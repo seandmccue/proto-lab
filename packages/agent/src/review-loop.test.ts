@@ -121,6 +121,26 @@ test('native success waits for review, caches a veto and finalizes a repaired an
   assert.equal(events.at(-1)?.type, 'done');
 });
 
+test('an identical position retest reuses a definitive veto while a changed drive gets fresh review', async () => {
+  const drive = (value: number): Call => ['position-drive', 'set_drives', { drives: [
+    { controlId: 'spin', mode: 'position', rampIn_s: 0.2, profile: { kind: 'constant', value } },
+  ] }];
+  const { result, requests, events } = await scriptedBuild([
+    [setup[0], drive(0.3), ['define', 'define_test', { test: definition }], runSpin('original'), finish('first-review')],
+    [runSpin('identical-retest'), finish('repeat-review')],
+    [drive(-0.3), runSpin('changed-retest'), finish('changed-review')],
+  ], [JSON.stringify(rejected), JSON.stringify(approved)]);
+  assert.equal(result.status, 'passed', result.summary);
+  assert.deepEqual(requests.order, ['build', 'review', 'build', 'build', 'review']);
+  const reviews = events.flatMap((event) => event.type === 'tool' && event.entry.tool === 'review_design' ? [event.entry] : []);
+  assert.deepEqual(reviews.map(({ args }) => (args as { cached: boolean }).cached), [false, true, false]);
+  const evidence = requests.reviewers.map(({ messages }) => JSON.parse(messages[1].content!));
+  assert.equal(evidence[0].motionObservations.reports[0].testId, 'spin_check#1');
+  assert.equal(evidence[1].motionObservations.reports[0].testId, 'spin_check#3');
+  assert.deepEqual(evidence[0].motionObservations.reports[0].positionJoints[0].commandRange, [0, 0.3]);
+  assert.deepEqual(evidence[1].motionObservations.reports[0].positionJoints[0].commandRange, [-0.3, 0]);
+});
+
 test('a native pass with an omitted wheel-to-brace collision reaches the independent review as measured evidence', async () => {
   const collision = { passed: false, summary: 'The extra brace intersects the spinning wheel.', issues: [{
     message: 'The complete-machine observation reports wheel-to-brace penetration that the rotation-only test omitted.',

@@ -17,7 +17,9 @@ export type { SampledRotorClearance, SampledRotorClearanceIssue } from './sample
 export type { SampledClearance, SampledClearanceIssue } from './sampled-clearance.ts';
 
 export const ENGINE = 'rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace';
-const DT = 1 / 240;
+export const SIMULATION_STEP_S = 1 / 240;
+export const MOTION_SETTLE_S = 0.25;
+const DT = SIMULATION_STEP_S;
 const TRACE_HZ = 30;
 
 let ready: Promise<void> | null = null;
@@ -325,7 +327,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const projStart = projRb ? rootT(projRb) : null; const payStart = payRb ? rootT(payRb) : null; const holderStart = test.kind === 'grip' ? rootT(bodyOf.get(test.holder)!) : null;
   const frames: Trace['frames'] = []; const steps = Math.round(test.duration_s / DT); const traceEvery = Math.round(1 / (TRACE_HZ * DT));
   let maxTilt = 0, minHeight = start.position[1], fell = false, fellAt = -1, energy = 0;
-  const settle = 0.25;
+  const settle = MOTION_SETTLE_S;
   let payloadGrounded = false;
   const instancePose = (id: string) => compose(rootT(bodyOf.get(id)!), localOffset.get(id)!);
   const syncCoordinate = synchronizedTravel?.axis === 'x' ? 0 : synchronizedTravel?.axis === 'y' ? 1 : 2;
