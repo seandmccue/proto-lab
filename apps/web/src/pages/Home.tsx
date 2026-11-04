@@ -188,9 +188,8 @@ export default function Home() {
   const beforeDistance = before?.test.metrics.distance_m;
   const afterDistance = heroTest?.metrics.distance_m ?? hero?.latestWalk?.metrics.distance_m;
   const replayUrl = hero ? `/i/${hero.id}?replay=1&compare=1` : '/gallery';
-  // The featured flag is the slideshow's source of truth; the crab has its own first slide.
-  const slideItems = featured.filter((item) => item.featured && item.id !== crabId &&
-    item.visibility === 'public' && item.status === 'passed' && item.currentVersionId && item.latestTest?.passed);
+  // Match the homepage's featured showcase cards; the crab has its own first slide.
+  const slideItems = largeBuilds.map(({ item }) => item).filter((item) => item.id !== crabId);
   const slides: Array<{ kind: 'crab' } | { kind: 'item'; item: InventionPublic }> = [...(hero ? [{ kind: 'crab' } as const] : []), ...slideItems.map((item) => ({ kind: 'item' as const, item }))];
   const slideCount = slides.length;
   const slide = slides[Math.min(slideIndex, Math.max(slideCount - 1, 0))];
