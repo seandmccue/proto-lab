@@ -137,6 +137,8 @@
   inset: 0;
 }
 
+.invention-card__preview--showcase:has(> img) { background: #eee9fa; }
+
 .invention-card__placeholder {
   color: #795f9e;
 }

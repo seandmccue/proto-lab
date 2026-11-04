@@ -21,8 +21,8 @@ export default function GalleryCard({ item, replay = false, showcase }: { item: 
   const createdAt = new Date(item.createdAt);
   return (
     <Link to={`/i/${item.id}${replayQuery}`} className="invention-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)} aria-label={showReplay ? `Replay ${item.title}` : `Explore ${item.title} in 3D`} aria-describedby={summaryId}>
-      <div className="invention-card__preview">
-        <GalleryPreview key={item.currentVersionId ?? item.id} item={item} hover={hover} testId={lastTest?.testId} />
+      <div className={`invention-card__preview${showcase ? ' invention-card__preview--showcase' : ''}`}>
+        <GalleryPreview key={item.currentVersionId ?? item.id} item={item} hover={hover} testId={lastTest?.testId} preferSavedImage={!!showcase} />
         <div className="invention-card__tags">
           {item.visibility === 'private' && <span>Private</span>}
           {item.featured && <span>Featured</span>}
@@ -49,15 +49,16 @@ export default function GalleryCard({ item, replay = false, showcase }: { item: 
   );
 }
 
-function GalleryPreview({ item, hover, testId }: { item: InventionPublic; hover: boolean; testId?: string }) {
+function GalleryPreview({ item, hover, testId, preferSavedImage }: { item: InventionPublic; hover: boolean; testId?: string; preferSavedImage: boolean }) {
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [failedImage, setFailedImage] = useState<string | null>(null);
   const [privateImage, setPrivateImage] = useState<{ url: string; src: string } | null>(null);
   const [traced, setTraced] = useState(false);
   const { id, currentVersionId, previewUrl } = item;
+  const savedImage = preferSavedImage && item.visibility === 'public' && previewUrl !== failedImage ? previewUrl : null;
   const [checkedVersion, setCheckedVersion] = useState(!currentVersionId);
   const hasAssembly = Boolean(version?.assembly.instances.length);
-  const animate = hover && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const animate = !preferSavedImage && hover && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   useEffect(() => {
     if (!checkedVersion || hasAssembly || item.visibility !== 'private' || !item.isOwner || previewUrl !== `/api/inventions/${id}/preview`) return;
     const controller = new AbortController();
@@ -75,7 +76,7 @@ function GalleryPreview({ item, hover, testId }: { item: InventionPublic; hover:
     };
   }, [checkedVersion, hasAssembly, id, item.visibility, item.isOwner, previewUrl]);
   useEffect(() => {
-    if (!currentVersionId) return;
+    if (!currentVersionId || savedImage) return;
     let cancelled = false;
     api.version(id, currentVersionId, false).then(({ version }) => {
       if (!cancelled) setVersion((current) => current ?? version);
@@ -83,7 +84,7 @@ function GalleryPreview({ item, hover, testId }: { item: InventionPublic; hover:
       if (!cancelled) setCheckedVersion(true);
     });
     return () => { cancelled = true; };
-  }, [id, currentVersionId]);
+  }, [id, currentVersionId, savedImage]);
   useEffect(() => {
     if (!animate || traced || !currentVersionId) return;
     let cancelled = false;
@@ -95,6 +96,9 @@ function GalleryPreview({ item, hover, testId }: { item: InventionPublic; hover:
     return () => { cancelled = true; };
   }, [animate, traced, id, currentVersionId]);
 
+  if (savedImage) {
+    return <img src={savedImage} alt="" className="h-full w-full object-contain" decoding="async" onError={() => setFailedImage(savedImage)} />;
+  }
   if (version?.assembly.instances.length) {
     const test = version.tests.find((test) => test.testId === testId) ?? version.tests.at(-1);
     return <IsoPreview assembly={version.assembly} trace={traced ? test?.trace : null} playing={animate && traced} className="h-full w-full" />;
