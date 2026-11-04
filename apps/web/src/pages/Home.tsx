@@ -188,9 +188,9 @@ export default function Home() {
   const beforeDistance = before?.test.metrics.distance_m;
   const afterDistance = heroTest?.metrics.distance_m ?? hero?.latestWalk?.metrics.distance_m;
   const replayUrl = hero ? `/i/${hero.id}?replay=1&compare=1` : '/gallery';
-  const slideItems = [...largeBuilds.map((build) => build.item), ...featuredPrototypes]
-    .filter((item) => item.id !== hero?.id && item.visibility === 'public' && item.status === 'passed' && item.currentVersionId && item.latestTest?.passed)
-    .slice(0, 6);
+  // The featured flag is the slideshow's source of truth; the crab has its own first slide.
+  const slideItems = featured.filter((item) => item.featured && item.id !== crabId &&
+    item.visibility === 'public' && item.status === 'passed' && item.currentVersionId && item.latestTest?.passed);
   const slides: Array<{ kind: 'crab' } | { kind: 'item'; item: InventionPublic }> = [...(hero ? [{ kind: 'crab' } as const] : []), ...slideItems.map((item) => ({ kind: 'item' as const, item }))];
   const slideCount = slides.length;
   const slide = slides[Math.min(slideIndex, Math.max(slideCount - 1, 0))];
