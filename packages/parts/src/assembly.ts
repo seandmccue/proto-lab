@@ -327,6 +327,12 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
             if (na === j.a.instanceId && nb === j.b.instanceId) continue;
             const ctl = j.motor && op.controlSuffix ? `${j.motor.controlId}${suffix}` : j.motor?.controlId;
             let axis = j.axis;
+            if (!axis && (j.type === 'revolute' || j.type === 'prismatic')) {
+              // Freeze the legacy fallback before an antiparallel connector can change its sign.
+              const parent = inst(j.a.instanceId, i);
+              const connector = connectorOf(partById.get(parent.partId)!, j.a.connectorId);
+              axis = norm(transformDir(parent.transform, connector.axis));
+            }
             const xfDir = (d: Vec3): Vec3 => {
               if (mirrorMode) { const plane = op.plane ?? 'xy'; const n: Vec3 = plane === 'xy' ? [0, 0, 1] : plane === 'yz' ? [1, 0, 0] : [0, 1, 0]; return sub(d, scale(n, 2 * dot(d, n))); }
               if (op.kind === 'polar') { const ax: Vec3 = op.axis === 'x' ? [1, 0, 0] : op.axis === 'z' ? [0, 0, 1] : [0, 1, 0]; return rotate(quatFromAxisAngle(ax, (2 * Math.PI * k) / (op.count ?? 2)), d); }
@@ -334,7 +340,27 @@ export function applyOps(input: Assembly, inputOps: AssemblyOp[], resolve: PartR
             };
             if (axis) axis = xfDir(axis);
             const anchor = j.anchor ? xf({ position: j.anchor, rotation: QUAT_ID }).position : undefined;
-            a.joints.push({ ...structuredClone(j), id: `${j.id}${suffix}`, a: { ...j.a, instanceId: na }, b: { ...j.b, instanceId: nb }, axis, anchor, motor: j.motor ? { ...j.motor, controlId: ctl! } : undefined });
+            const copiedEndpoint = (endpoint: Joint['a'], instanceId: string): Joint['a'] => {
+              const unchanged = { ...endpoint, instanceId };
+              if (map.has(endpoint.instanceId) || (j.type !== 'revolute' && j.type !== 'prismatic')) return unchanged;
+              const external = inst(endpoint.instanceId, i), part = partById.get(external.partId)!;
+              const original = connectorOf(part, endpoint.connectorId);
+              const point = transformPoint(external.transform, original.position);
+              const direction = norm(transformDir(external.transform, original.axis));
+              const targetPoint = xf({ position: point, rotation: QUAT_ID }).position;
+              const targetAxis = norm(xfDir(direction));
+              // Match the articulated-mate preflight tolerances. Axial spacing remains valid.
+              const aligned = (candidateAxis: Vec3) => Math.abs(dot(norm(candidateAxis), targetAxis)) >= Math.cos(Math.PI / 180) - 1e-10;
+              const offset = sub(targetPoint, point);
+              if (aligned(direction) && len(sub(offset, scale(targetAxis, dot(offset, targetAxis)))) <= .001 + 1e-8) return unchanged;
+              // Explicit mount/connect permits fixed or any connectors as bearing endpoints too.
+              // Only an unambiguous existing physical connector can replace a stale declaration.
+              const matches = part.connectors.filter(connector =>
+                len(sub(transformPoint(external.transform, connector.position), targetPoint)) <= .001 + 1e-8
+                && aligned(transformDir(external.transform, connector.axis)));
+              return matches.length === 1 ? { instanceId, connectorId: matches[0].id } : unchanged;
+            };
+            a.joints.push({ ...structuredClone(j), id: `${j.id}${suffix}`, a: copiedEndpoint(j.a, na), b: copiedEndpoint(j.b, nb), axis, anchor, motor: j.motor ? { ...j.motor, controlId: ctl! } : undefined });
             if (j.motor && ctl && drivesByCtl.has(j.motor.controlId) && !drivesByCtl.has(ctl)) {
               const d = structuredClone(drivesByCtl.get(j.motor.controlId)!); d.controlId = ctl;
               if (mirrorMode && d.profile.kind !== 'constant' && d.profile.kind !== 'step' && d.profile.kind !== 'ramp' && 'amplitude' in d.profile) {

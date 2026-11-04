@@ -91,10 +91,17 @@ test('an articulated unanchored walker does not need a fixed base', async () => 
 
 test('an articulated island needs an anchor or floor contact somewhere in its mechanism', async () => {
   const block = solid('block');
+  // These neighbouring cubes meet at a real X-axis hinge, not their unrelated top/bottom faces.
+  block.connectors = structuredClone(block.connectors);
+  block.connectors.push(
+    { id: 'hinge_out', position: [.05, 0, 0], axis: [1, 0, 0], kind: 'revolute' },
+    { id: 'hinge_in', position: [-.05, 0, 0], axis: [-1, 0, 0], kind: 'revolute' },
+  );
   const base = instance(block, 'base', [0, .05, 0], { anchored: true });
   const motor = instance(block, 'motor', [.3, .25, 0]);
   const rotor = instance(block, 'rotor', [.4, .25, 0], { free: true });
-  const pivot: Joint = { ...fixed(motor.id, rotor.id), type: 'revolute' };
+  const pivot: Joint = { id: 'island_hinge', type: 'revolute',
+    a: { instanceId: motor.id, connectorId: 'hinge_out' }, b: { instanceId: rotor.id, connectorId: 'hinge_in' } };
   const issues = await auditAssemblyIntegrity(fixture([block], [base, motor, rotor], [pivot]));
   assert.deepEqual(issues.map(({ kind, instanceIds }) => [kind, instanceIds]), [
     ['detached_part', [motor.id, rotor.id]],
