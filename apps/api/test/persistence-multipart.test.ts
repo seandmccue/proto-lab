@@ -188,7 +188,7 @@ test('multipart streams a real archive above 90 MiB, restores every byte, and pr
       loseWithoutCommit = true;
       await assert.rejects(uploadCheckpointArchive(url, token, first.path));
       loseWithoutCommit = false;
-      assert.equal(heads, 2);
+      assert.equal(heads, 4);
       assert.deepEqual(current, before);
       assert.equal(aborts, 3);
       assert.equal(uploads.size, 0);

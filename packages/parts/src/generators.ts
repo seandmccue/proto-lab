@@ -622,6 +622,39 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
   // ---------- actuation ----------
   servo_motor: { kind: 'servo_motor', name: 'Servo motor', category: 'motors', description: 'Hobby servo: case with mounts ("mount" back face −Z, "side", "bottom"); output "horn" is a revolute joint about +Z. Positions are driven by a position drive.', params: { size: { min: 0.012, max: 0.08, default: 0.023, unit: 'm', description: 'Case length' }, torque: { min: 0.1, max: 12, default: 1.5, unit: 'N·m', description: 'Stall torque' }, speed: { min: 1, max: 30, default: 8, unit: 'rad/s', description: 'No-load speed' } },
     generate: (p, id) => { const L = p.size, H = p.size * 0.9, D = p.size * 0.55; const mass = 0.009 + p.torque * 0.02; const g = [piece({ kind: 'box', size: [L, H, D] }, [0, 0, 0], COLORS.motor, 'motor'), piece({ kind: 'cylinder', radius: L * 0.16, height: D * 0.4, axis: 'z' }, [0, 0, D / 2 + D * 0.2], COLORS.brass, 'motor')]; return finish({ id, kind: 'servo_motor', name: `Servo ${p.torque.toFixed(1)} N·m`, category: 'motors', description: `${p.torque.toFixed(1)} N·m, ${p.speed.toFixed(0)} rad/s hobby servo.`, params: p, mass_kg: mass, dimensions_m: [L, H, D], material: 'nylon case, metal gears', geometry: g, connectors: [fx('mount', [0, 0, -D / 2], [0, 0, -1]), fx('horn', [0, 0, D / 2 + D * 0.4], [0, 0, 1], 'revolute', 'output horn, spins about +Z'), fx('bottom', [0, -H / 2, 0], [0, -1, 0]), fx('side', [L / 2, 0, 0], [1, 0, 0]), fx('top', [0, H / 2, 0], [0, 1, 0])], limits: { maxTorque_Nm: p.torque, maxSpeed_rad_s: p.speed }, cost_usd: 4 + p.torque * 6 }); } },
+  geared_rotary_actuator: {
+    kind: 'geared_rotary_actuator', name: 'Geared rotary actuator', category: 'actuators',
+    description: 'High-torque, low-speed position actuator for loaded pivots. Fixed "mount" (back −Z), "bottom", "side" and "top"; revolute output "horn" (+Z). Housing and mass grow with simulated torque rating.',
+    params: {
+      torque: { min: 12, max: 50, default: 20, unit: 'N·m', description: 'Output torque limit used in simulation' },
+      speed: { min: 0.25, max: 2.5, default: 1.5, unit: 'rad/s', description: 'Nominal speed for sizing position ramps' },
+    },
+    generate: (p, id) => {
+      const scale = Math.cbrt(p.torque / 20);
+      const length = .1 * scale, height = .08 * scale, depth = .065 * scale;
+      const flangeDepth = .014 * scale, hornDepth = .016 * scale;
+      const front = depth / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [length, height, depth] }, [0, 0, 0], COLORS.motor, 'motor'),
+        piece({ kind: 'cylinder', radius: .031 * scale, height: flangeDepth, axis: 'z' }, [0, 0, front + flangeDepth / 2], COLORS.steel, 'motor'),
+        piece({ kind: 'cylinder', radius: .018 * scale, height: hornDepth, axis: 'z' }, [0, 0, front + flangeDepth + hornDepth / 2], COLORS.brass, 'motor'),
+      ];
+      return finish({
+        id, kind: 'geared_rotary_actuator', name: `Geared rotary actuator ${p.torque} N·m`, category: 'actuators',
+        description: `Position actuator with a ${p.torque} N·m simulation torque limit and a nominal ${p.speed} rad/s output.`,
+        params: p, mass_kg: .028 * p.torque, dimensions_m: [length, height, depth + flangeDepth + hornDepth],
+        material: 'aluminium housing, steel gearbox', geometry,
+        connectors: [
+          fx('mount', [0, 0, -front], [0, 0, -1]),
+          fx('bottom', [0, -height / 2, 0], [0, -1, 0]),
+          fx('side', [length / 2, 0, 0], [1, 0, 0]),
+          fx('top', [0, height / 2, 0], [0, 1, 0]),
+          fx('horn', [0, 0, front + flangeDepth + hornDepth], [0, 0, 1], 'revolute', 'Position-controlled output axis'),
+        ],
+        limits: { maxTorque_Nm: p.torque, maxSpeed_rad_s: p.speed }, cost_usd: 22 + 3 * p.torque,
+      });
+    },
+  },
   dc_motor: { kind: 'dc_motor', name: 'DC gearmotor', category: 'motors', description: 'Cylindrical gearmotor; "mount" (−X back), "flange" (−Y) fixed; "shaft" revolute about +X. Drive with a velocity drive for continuous rotation.', params: { diameter: { min: 0.01, max: 0.08, default: 0.025, unit: 'm', description: 'Can diameter' }, length: { min: 0.02, max: 0.15, default: 0.05, unit: 'm', description: 'Length' }, torque: { min: 0.05, max: 10, default: 0.5, unit: 'N·m', description: 'Rated torque' }, speed: { min: 1, max: 100, default: 20, unit: 'rad/s', description: 'Rated speed' } },
     generate: (p, id) => { const r = p.diameter / 2; const g = [piece({ kind: 'cylinder', radius: r, height: p.length, axis: 'x' }, [0, 0, 0], COLORS.motor, 'motor'), piece({ kind: 'cylinder', radius: r * 0.2, height: p.length * 0.25, axis: 'x' }, [p.length / 2 + p.length * 0.125, 0, 0], COLORS.brass, 'motor')]; return finish({ id, kind: 'dc_motor', name: `Gearmotor ${p.torque.toFixed(1)} N·m`, category: 'motors', description: `${p.torque.toFixed(1)} N·m at ${p.speed.toFixed(0)} rad/s.`, params: p, mass_kg: 0.03 + p.torque * 0.08, dimensions_m: [p.length * 1.25, p.diameter, p.diameter], material: 'steel can', geometry: g, connectors: [fx('mount', [-p.length / 2, 0, 0], [-1, 0, 0]), fx('flange', [0, -r, 0], [0, -1, 0]), fx('shaft', [p.length / 2 + p.length * 0.25, 0, 0], [1, 0, 0], 'revolute', 'output shaft, spins about +X')], limits: { maxTorque_Nm: p.torque, maxSpeed_rad_s: p.speed }, cost_usd: 6 + p.torque * 10 }); } },
   spring: { kind: 'spring', name: 'Compression spring', category: 'springs', description: 'Helical spring along Y; connect end_a/end_b with joint "spring" to add a spring force between two parts.', params: { length: { min: 0.01, max: 0.3, default: 0.04, unit: 'm', description: 'Free length' }, radius: { min: 0.002, max: 0.03, default: 0.006, unit: 'm', description: 'Coil radius' }, stiffness: { min: 20, max: 20000, default: 500, unit: 'N/m', description: 'Spring rate' } },
