@@ -354,6 +354,7 @@ export const VersionRecord = z.object({
   spec: Spec,
   assembly: Assembly,
   tests: z.array(TestResult),
+  testDefinitions: z.array(TestSpec).optional(),
   decisions: z.array(Decision),
   toolLog: z.array(ToolLogEntry),
   modelId: z.string(),

@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { Assembly, Decision, Spec, TestResult, TestSpec, ToolLogEntry, VersionRecord } from '@protolab/schema';
+import { TestSpec, type Assembly, type Decision, type Spec, type TestResult, type ToolLogEntry, type VersionRecord } from '@protolab/schema';
 import { assistantMessage, chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
@@ -43,6 +43,19 @@ export interface AgentInput {
 export interface AgentOutput { versions: VersionRecord[]; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string; spec: Spec }
 export const DETERMINISTIC_MODEL_ID = 'deterministic-planner';
 
+function savedTestDefinitions(parent?: VersionRecord | null): TestSpec[] {
+  if (parent?.testDefinitions !== undefined) return parent.testDefinitions;
+
+  // Older versions recorded definitions only in the local tool log.
+  const definitions = new Map<string, TestSpec>();
+  for (const { tool, ok, args } of parent?.toolLog ?? []) {
+    if (tool !== 'define_test' || !ok || !args || typeof args !== 'object' || !('test' in args)) continue;
+    const parsed = TestSpec.safeParse(args.test);
+    if (parsed.success) definitions.set(parsed.data.id, parsed.data);
+  }
+  return [...definitions.values()];
+}
+
 export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void): Promise<AgentOutput> {
   const model = input.model === undefined ? modelConfigFromEnv() : input.model;
   const specialist = model ? (input.specialist === undefined ? specialistConfigFromEnv() : input.specialist) : null;
@@ -62,10 +75,19 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   let pending: PendingVersion | null = null;
   let currentLog: ToolLogEntry[] = [];
   let parentId: string | null = input.parent?.id ?? null;
+  const inheritedDefinitions = savedTestDefinitions(input.parent);
+  const snapshotTestDefinitions = () => {
+    // Keep inherited targets as reference metadata through an untested checkpoint.
+    // Only explicitly defined tests enter ToolRuntime and its pending checks.
+    const definitions = new Map(inheritedDefinitions.map((test) => [test.id, test]));
+    for (const [id, test] of rt.testSpecs) definitions.set(id, test);
+    return [...definitions.values()];
+  };
   const recordVersion = (draft: PendingVersion, tests: TestResult[], status: VersionRecord['status'], versionSpec: Spec) => {
     const version: VersionRecord = {
       id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId,
       iteration, prompt: fullPrompt, spec: versionSpec, assembly: draft.assembly, tests,
+      testDefinitions: snapshotTestDefinitions(),
       decisions: [draft.decision], toolLog: [...draft.log, ...currentLog],
       modelId: draft.decision.modelId ?? modelId, status, createdAt: new Date().toISOString(),
     };
@@ -121,7 +143,17 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       emit({ type: 'test', iteration, result });
       if (!pending) return;
       const existing = versions.length && versions[versions.length - 1].iteration === iteration ? versions[versions.length - 1] : null;
-      if (existing) { existing.tests = [...existing.tests, result]; existing.assembly = rt.assembly; existing.spec = spec; existing.toolLog = [...existing.toolLog, ...currentLog]; existing.status = existing.tests.every((t) => t.passed) ? 'passed' : 'failed'; currentLog = []; emit({ type: 'version', version: existing }); return; }
+      if (existing) {
+        existing.tests = [...existing.tests, result];
+        existing.testDefinitions = snapshotTestDefinitions();
+        existing.assembly = rt.assembly;
+        existing.spec = spec;
+        existing.toolLog = [...existing.toolLog, ...currentLog];
+        existing.status = existing.tests.every((t) => t.passed) ? 'passed' : 'failed';
+        currentLog = [];
+        emit({ type: 'version', version: existing });
+        return;
+      }
       recordVersion(pending, [result], result.passed ? 'passed' : 'failed', spec);
     },
   }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 }, savedParent?.assembly);
@@ -145,13 +177,16 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
 }
 
 function systemPrompt(parent?: VersionRecord | null): string {
+  const definitions = savedTestDefinitions(parent);
   return `You are the ProtoLab engineering agent: an autonomous mechanical designer. The user describes an invention; you turn it into a working, recognisable, interactive mechanical prototype using real components, structured assembly operations and a rigid-body physics simulator. You act only through tools. Every decision is yours and must come from catalog data or measured test results; never claim a result you did not measure.
 ${parent ? `
 This follow-up or remix starts with an exact copy of saved assembly v${parent.iteration}, including its instance IDs, poses, connections, drive settings and part definitions. Start with inspect_assembly, then adapt the procedure below to edit the relevant instances and drives in place. Keep all unaffected components. Existing custom part IDs are available to get_part and assemble without re-creation. Do not replay earlier assembly operations. Define and run fresh tests for the requested behavior, even if the saved design previously passed.
 Saved instances [instance id, part id]: ${JSON.stringify(parent.assembly.instances.map((instance) => [instance.id, instance.partId]))}
 Saved moving joints [joint id, type, endpoints, motor control id]: ${JSON.stringify(parent.assembly.joints.filter((joint) => joint.type !== 'fixed').map((joint) => [joint.id, joint.type, `${joint.a.instanceId}.${joint.a.connectorId}`, `${joint.b.instanceId}.${joint.b.connectorId}`, joint.motor?.controlId])).slice(0, 3000)}
 Saved drives: ${JSON.stringify(parent.assembly.controller.drives).slice(0, 2000)}
-Saved tests (historical context only): ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics, failureReasons: t.failureReasons }))).slice(0, 5000)}` : ''}
+Saved tests (historical context only): ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics, failureReasons: t.failureReasons }))).slice(0, 5000)}${definitions.length ? `
+Saved test definitions (reference targets, not evidence of a pass): ${JSON.stringify(definitions)}
+For a comparable repair, call define_test with the saved definition unchanged, including its duration, measured instances and thresholds, then run_test. For new or changed behavior, define the tests relevant to this request.` : ''}` : ''}
 
 Procedure (follow it, briefly narrating each step in one sentence for the user):
 1. Understand the invention and its purpose. 2. Identify its recognisable physical features and required motions. 3. Break it into sub-assemblies and components → write_plan (include a few exact candidate_part_ids from the catalog index if you already know them, plus honest "unverified" items such as aerodynamic lift, fluid flow, or anything this simulator cannot measure).
