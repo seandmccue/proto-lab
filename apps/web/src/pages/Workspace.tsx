@@ -241,6 +241,7 @@ export default function Workspace() {
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
   const running = jobStatus === 'queued' || jobStatus === 'running';
+  const saving = jobStatus === 'running' && jobStep === 'Saving your build to the cloud';
   const latestAssemblyEvent = useMemo(() => [...events].reverse().find((event) => event.type === 'assembly' || event.type === 'version'), [events]);
   const newerAssembly = latestAssemblyEvent?.type === 'assembly' && !!live && live.at >= latestAssemblyEvent.t;
   const showLive = hasLiveAssembly && (running
@@ -737,7 +738,7 @@ export default function Workspace() {
         <div className="workbench-heading-actions">{workbenchActions}</div>
       </div>
       {error && !changeMode && <div role="alert" className="bg-fail/15 px-4 py-2 text-sm text-fail">{error}</div>}
-      {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} />}
+      {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} saving={saving} />}
       {stoppedBuild && <section className="workbench-build-outcome" aria-label="Build outcome">
         <div className="workbench-build-outcome-status" role="status">
           <strong>Build stopped</strong>
@@ -789,7 +790,7 @@ export default function Workspace() {
               <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={!diagnosticHighlights && showChangeColors ? (changedIds.size ? changedIds : driveChangedIds) : undefined} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef}
                 strokeTargets={showStrokeGuides ? strokeTargets : undefined} pathInstanceId={showMotionPath ? motionPath : undefined} />
             ) : running ? (
-              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
+              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} saving={saving} />
             ) : (
               <div className="p-6 text-sm text-dim">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
@@ -807,7 +808,7 @@ export default function Workspace() {
               </div>
             )}
             </div>
-            {(version || showLive) && <BuildStrip events={events} running={running} />}
+            {(version || showLive) && <BuildStrip events={events} running={running} saving={saving} />}
           </div>
           <div className="workbench-toolbar">
             {!showLive && <div className="workbench-control-group" role="group" aria-label="Replay controls">
@@ -837,7 +838,7 @@ export default function Workspace() {
           {!showLive && test && <IndexedMotionEvidence versionId={version?.id} time={time.t} test={test} definition={testDefinition} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
-          {running && <SimulationStatus events={events} running replay={replayStatus} />}
+          {running && <SimulationStatus events={events} running={!saving} replay={replayStatus} />}
           {!running && replayStatus && <SimulationStatus events={events} running={false} replay={replayStatus} />}
           </>}
           {finalVersion && (

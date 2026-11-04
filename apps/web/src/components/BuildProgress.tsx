@@ -27,12 +27,13 @@ function formatBuildTime(seconds: number) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export function LiveBuildHeartbeat({ events, jobStatus, reconnecting, load, startedAt }: {
+export function LiveBuildHeartbeat({ events, jobStatus, reconnecting, load, startedAt, saving = false }: {
   events: JobEvent[];
   jobStatus: string | null;
   reconnecting: boolean;
   load: { active: number; queued: number; maxConcurrent: number } | null;
   startedAt?: string;
+  saving?: boolean;
 }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -44,15 +45,17 @@ export function LiveBuildHeartbeat({ events, jobStatus, reconnecting, load, star
   const lastTime = Date.parse(lastEvent?.t ?? '');
   const elapsed = Number.isFinite(startTime) ? Math.max(0, Math.floor((now - startTime) / 1000)) : null;
   const since = Number.isFinite(lastTime) ? Math.max(0, Math.floor((now - lastTime) / 1000)) : null;
-  const state = reconnecting ? 'reconnecting' : jobStatus === 'queued' ? 'queued' : (since ?? elapsed ?? 0) >= 12 ? 'waiting' : 'running';
+  const state = reconnecting ? 'reconnecting' : saving ? 'saving' : jobStatus === 'queued' ? 'queued' : (since ?? elapsed ?? 0) >= 12 ? 'waiting' : 'running';
   const stage = stageOf(events);
   const phase = stage === 3 && latestPhysicsEvent(events)?.type === 'test' ? 'Test results recorded' : ACTIVE_PHASES[stage];
   const latest = [...events].reverse().find((event) => event.type === 'status' || event.type === 'tool');
   const lastActivity = latest?.type === 'status' ? latest.message : latest?.summary;
   const title = state === 'reconnecting' ? 'Reconnecting to the build'
+    : state === 'saving' ? 'Saving your build'
     : state === 'queued' ? 'Build queued'
     : 'Build in progress';
   const detail = state === 'reconnecting' ? 'Trying to restore live updates.'
+    : state === 'saving' ? 'Saving your versions and simulation replays to the cloud.'
     : state === 'queued' ? (load && load.active >= load.maxConcurrent ? 'All build workers are busy. Your build will start when one is free.' : 'Waiting for a build worker to pick up your design.')
     : state === 'waiting' ? `${phase} · waiting for the next update`
     : phase;
@@ -66,35 +69,35 @@ export function LiveBuildHeartbeat({ events, jobStatus, reconnecting, load, star
         </div>
         <div className="build-heartbeat-meta">
           {elapsed !== null && <span>{formatBuildTime(elapsed)} elapsed</span>}
-          {since !== null && <span>Last update {since < 2 ? 'just now' : `${formatBuildTime(since)} ago`}</span>}
+          {!saving && since !== null && <span>Last update {since < 2 ? 'just now' : `${formatBuildTime(since)} ago`}</span>}
         </div>
       </div>
       <div className="build-heartbeat-track" aria-hidden="true" />
-      {state !== 'queued' && typeof lastActivity === 'string' && lastActivity.trim() && (
+      {!saving && state !== 'queued' && typeof lastActivity === 'string' && lastActivity.trim() && (
         <p className="build-heartbeat-event" title={lastActivity}>{lastActivity}</p>
       )}
     </section>
   );
 }
 
-export default function BuildProgress({ events, running, jobStatus, load, brief }: { brief?: string; events: JobEvent[]; running: boolean; jobStatus: string | null; load: { active: number; queued: number; maxConcurrent: number } | null }) {
-  const stage = stageOf(events); const elapsed = useElapsed(events, running); const since = useSinceLast(events, running);
+export default function BuildProgress({ events, running, jobStatus, load, brief, saving = false }: { brief?: string; saving?: boolean; events: JobEvent[]; running: boolean; jobStatus: string | null; load: { active: number; queued: number; maxConcurrent: number } | null }) {
+  const stage = saving ? STAGES.length - 1 : stageOf(events); const elapsed = useElapsed(events, running); const since = useSinceLast(events, running);
   const last = [...events].reverse().find((e) => e.type === 'status' || e.type === 'tool');
   const queued = jobStatus === 'queued';
-  const line = queued ? 'Waiting for a build worker…' : last ? String(last.type === 'status' ? last.message : last.summary) : 'Starting the engineering agent…';
+  const line = saving ? 'Saving your build to the cloud' : queued ? 'Waiting for a build worker…' : last ? String(last.type === 'status' ? last.message : last.summary) : 'Starting the engineering agent…';
   const parts = useMemo(() => pickedParts(events), [events]);
   const plan = [...events].reverse().find((e) => e.type === 'spec' && (e.spec as Spec | undefined)?.plan)?.spec as Spec | undefined;
   const thinking = running && since >= 8;
   return (
     <div className="build-progress">
       <ol className="build-progress-stages" aria-label="Build stages">
-        {STAGES.map((name, i) => <li key={name} data-state={i < stage ? 'done' : i === stage && running ? 'active' : 'todo'}><span className="build-progress-dot" />{name}</li>)}
+        {STAGES.map((name, i) => <li key={name} data-state={i < stage ? 'done' : i === stage && running ? 'active' : 'todo'}><span className="build-progress-dot" />{saving && i === STAGES.length - 1 ? 'Save' : name}</li>)}
       </ol>
       <PartsBin parts={parts} plan={plan?.plan} brief={brief} />
       <div className="build-progress-now">
         <div className="min-w-0">
           <div className="truncate text-sm text-ink" title={line}>{line}</div>
-          <div className="mono text-[11px] text-muted">{elapsed ? `${elapsed} elapsed · ` : ''}{queued ? load ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : 'Queued' : thinking ? `Waiting for the next update · ${since} s since last event` : STAGE_BLURB[stage]}</div>
+          <div className="mono text-[11px] text-muted">{elapsed ? `${elapsed} elapsed · ` : ''}{saving ? 'Preserving versions and replays' : queued ? load ? `Queued · ${load.active} of ${load.maxConcurrent} workers busy` : 'Queued' : thinking ? `Waiting for the next update · ${since} s since last event` : STAGE_BLURB[stage]}</div>
         </div>
       </div>
     </div>
@@ -256,18 +259,18 @@ export function SimulationStatus({ events, running, replay }: {
 }
 
 /** Build activity and elapsed time below the assembly. */
-export function BuildStrip({ events, running }: { events: JobEvent[]; running: boolean }) {
-  const stage = stageOf(events); const elapsed = useElapsed(events, running); const since = useSinceLast(events, running);
+export function BuildStrip({ events, running, saving = false }: { events: JobEvent[]; running: boolean; saving?: boolean }) {
+  const stage = saving ? STAGES.length - 1 : stageOf(events); const elapsed = useElapsed(events, running); const since = useSinceLast(events, running);
   const last = [...events].reverse().find((e) => e.type === 'status' || e.type === 'tool');
-  const line = last ? String(last.type === 'status' ? last.message : last.summary) : '';
+  const line = saving ? 'Saving your build to the cloud' : last ? String(last.type === 'status' ? last.message : last.summary) : '';
   const tools = events.filter((e) => e.type === 'tool').length; const parts = pickedParts(events).length;
-  const thinking = running && since >= 8;
+  const thinking = running && !saving && since >= 8;
   if (!running) return null;
   return (
     <div className="build-strip">
       <div className="build-strip-panel">
         <ol className="build-progress-stages build-strip-stages" aria-label="Build stages">
-          {STAGES.map((name, i) => <li key={name} data-state={i < stage ? 'done' : i === stage ? 'active' : 'todo'}><span className="build-progress-dot" />{name}</li>)}
+          {STAGES.map((name, i) => <li key={name} data-state={i < stage ? 'done' : i === stage ? 'active' : 'todo'}><span className="build-progress-dot" />{saving && i === STAGES.length - 1 ? 'Save' : name}</li>)}
         </ol>
         <div className="build-strip-now">
           <span className={`build-progress-spinner build-strip-spinner${thinking ? ' is-thinking' : ''}`} aria-hidden="true" />

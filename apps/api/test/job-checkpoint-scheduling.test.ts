@@ -180,7 +180,19 @@ async function fixture() {
   };
 }
 
-test('live events drain during an upload, full captures coalesce, and terminal GET waits for all saved history', { timeout: 20_000 }, async () => {
+async function readSaving(f: Awaited<ReturnType<typeof fixture>>, jobId: string, since = 0) {
+  const response = await bounded(f.app.request(`/api/jobs/${jobId}?since=${since}`, { headers: f.headers }), 'responsive saving status');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
+  const saving = await response.json() as { status: string; step: string; versionId: string; errorCode: string | null; events: PublicEvent[]; eventCount: number };
+  assert.equal(saving.status, 'running');
+  assert.equal(saving.step, 'Saving your build to the cloud');
+  assert.equal(saving.errorCode, null);
+  assert.ok(!saving.events.some(({ type }) => type === 'done'));
+  return saving;
+}
+
+test('live events drain during an upload and responsive saving polls hold completion until the coalesced checkpoint', { timeout: 20_000 }, async () => {
   const f = await fixture();
   try {
     const { inventionId, jobId } = await f.start();
@@ -198,23 +210,24 @@ test('live events drain during an upload, full captures coalesce, and terminal G
 
     f.allowFinal.resolve();
     await bounded(f.finalRequested.promise, 'final local state staged for capture');
-    let acknowledged = false;
-    const terminal = f.app.request(`/api/jobs/${jobId}`, { headers: f.headers }).then((response) => { acknowledged = true; return response; });
+    const saving = await readSaving(f, jobId, running.eventCount);
+    assert.equal(saving.versionId, running.versionId);
     const blockedFollowUp = await f.app.request(`/api/inventions/${inventionId}/follow-up`, { method: 'POST', headers: f.headers, body: JSON.stringify({ changeRequest: 'Add another display foot.' }) });
     assert.equal(blockedFollowUp.status, 409, 'staged terminal status must not allow a competing same-invention job');
-    assert.equal(acknowledged, false);
-    assert.ok(!f.runner.events(jobId)!.some(({ type }) => type === 'done'));
     first.reply();
     const final = await f.waitForUpload(1);
     assert.strictEqual(f.runner.waitForCheckpoint(jobId), gate, 'an earlier save must not delete the newer terminal wait');
-    assert.equal(acknowledged, false);
+    const stillSaving = await readSaving(f, jobId, saving.eventCount);
+    assert.equal(stillSaving.eventCount, saving.eventCount);
+    assert.deepEqual(stillSaving.events, []);
     final.reply();
-    const response = await bounded(terminal, 'durable final GET');
+    await bounded(gate, 'durable final checkpoint');
+    const response = await f.app.request(`/api/jobs/${jobId}?since=${saving.eventCount}`, { headers: f.headers });
     assert.equal(response.status, 200);
     const done = await response.json();
     assert.equal(done.status, 'done');
-    assert.equal(done.events.filter((event: PublicEvent) => event.type === 'done').length, 1);
-    await gate;
+    assert.deepEqual(done.events.map(({ type }: PublicEvent) => type), ['done']);
+    assert.equal(done.eventCount, saving.eventCount + 1);
     assert.equal(f.runner.waitForCheckpoint(jobId), undefined);
     assert.equal(f.uploads.length, 2, 'several version events plus completion need one coalesced later capture');
     assert.ok(f.persistCalls >= 6);
@@ -231,21 +244,23 @@ for (const failedCapture of ['earlier', 'final'] as const) test(`${failedCapture
     await bounded(f.localUpdates.promise, 'complete local history');
     f.allowFinal.resolve();
     await bounded(f.finalRequested.promise, 'terminal capture request');
-    let settled = false;
-    const terminal = f.app.request(`/api/jobs/${jobId}`, { headers: f.headers }).then((response) => { settled = true; return response; });
+    await readSaving(f, jobId);
     first.reply(failedCapture === 'earlier' ? 400 : 204);
     const final = await f.waitForUpload(1);
-    assert.equal(settled, false);
+    await readSaving(f, jobId);
     final.reply(failedCapture === 'final' ? 400 : 204);
     const errorCheckpoint = await f.waitForUpload(2);
-    assert.equal(settled, false, 'the failure state must also finish its persistence attempt before releasing the gate');
-    assert.ok(!f.runner.events(jobId)!.some(({ type }) => type === 'done'));
+    await readSaving(f, jobId);
     errorCheckpoint.reply();
-    assert.equal((await bounded(terminal, 'failed storage response')).status, 503);
-    await assert.rejects(f.runner.waitForCheckpoint(jobId)!, /HTTP 400/);
+    await assert.rejects(bounded(f.runner.waitForCheckpoint(jobId)!, 'failed final checkpoint'), /HTTP 400/);
     assert.equal(f.runner.isAwaitingCheckpoint(jobId), false);
     assert.equal((f.db.prepare('SELECT status FROM jobs WHERE id=?').get(jobId) as { status: string }).status, 'error');
-    assert.equal((await f.app.request(`/api/jobs/${jobId}`, { headers: f.headers })).status, 503);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await f.app.request(`/api/jobs/${jobId}`, { headers: f.headers });
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
+      assert.deepEqual(await response.json(), { error: 'Build storage is temporarily unavailable' });
+    }
     assert.equal(f.maxUploads, 1);
     await f.assertRestored('error');
   } finally { await f.close(); }

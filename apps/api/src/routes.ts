@@ -96,17 +96,25 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     if (!job) return c.json({ error: 'Not found' }, 404);
     const inv = getInvention(job.invention_id);
     if (!inv || !canSee(inv, session(c.req))) return c.json({ error: 'Not found' }, 404);
+    c.header('Cache-Control', 'private, no-store');
+    let saving = false;
     while (job.status === 'done' || job.status === 'error') {
+      // The terminal row is staged in the checkpoint. Keep polling responsive
+      // while the runner withholds its completion event until the upload settles.
+      if (runner.isAwaitingCheckpoint(id)) { saving = true; break; }
       const checkpoint = runner.waitForCheckpoint(id);
       if (!checkpoint) break;
       try { await checkpoint; } catch { return c.json({ error: 'Build storage is temporarily unavailable' }, 503); }
       job = select.get(id) as JobRow | undefined;
       if (!job) return c.json({ error: 'Not found' }, 404);
     }
-    c.header('Cache-Control', 'private, no-store');
     const since = Number(c.req.query('since') ?? 0);
     const events = runner.events(job.id) ?? (JSON.parse(job.progress_json) as PublicEvent[]);
-    return c.json({ id: job.id, inventionId: job.invention_id, status: job.status, step: job.step, versionId: job.version_id, errorCode: job.error_code, events: events.slice(since), eventCount: events.length, updatedAt: job.updated_at, timing: buildTiming(job, events) });
+    return c.json({ id: job.id, inventionId: job.invention_id,
+      status: saving ? 'running' : job.status, step: saving ? 'Saving your build to the cloud' : job.step,
+      versionId: job.version_id, errorCode: saving ? null : job.error_code,
+      events: events.slice(since), eventCount: events.length, updatedAt: job.updated_at, timing: buildTiming(job, events),
+    });
   });
 
   /** Latest in-progress assembly of a running job (before its first recorded version), so the workbench can show the build taking shape. */
