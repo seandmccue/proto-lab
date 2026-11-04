@@ -92,7 +92,8 @@ function RouteLayout() {
       return;
     }
 
-    const target = positions.current.get(samePageFilter ? previous.key : location.key) ?? 0;
+    const targetKey = navigationType === 'POP' ? location.key : previous.key;
+    const target = positions.current.get(targetKey) ?? 0;
     const reachable = () => document.documentElement.scrollHeight - window.innerHeight >= target - 1;
     if (reachable()) {
       window.scrollTo(0, target);
