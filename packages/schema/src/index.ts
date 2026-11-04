@@ -228,6 +228,13 @@ export const TestSpec = z.discriminatedUnion('kind', [
         minTravel_m: z.number().positive(),
         maxSpread_m: z.number().positive(),
       }).optional(),
+      endIn: z.object({
+        instance: z.string().min(1),
+        receiver: z.string().min(1),
+        centerOffset_m: Vec3.optional(),
+        halfExtents_m: z.tuple([z.number().positive(), z.number().positive(), z.number().positive()]),
+        minHold_s: z.number().positive().max(5),
+      }).optional(),
       indexedMotion: z.object({
         input: z.string().min(1),
         body: z.string().min(1),

@@ -166,6 +166,8 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
         items.push({ label: `${label} swing`, value: `${degrees(low)} to ${degrees(high)}`, target: `Reach ±${degrees(minEachWay_rad)}` });
       }
     }
+    const endIn = definition.measure.endIn;
+    if (endIn) add('Time inside receiver at end', metrics.endInHold_s, (seconds) => `${seconds.toFixed(2)} s`, endIn.minHold_s, true);
     const indexed = definition.measure.indexedMotion;
     if (indexed) add('Consecutive steps with dwell', metrics.indexedConsecutiveSteps, String, indexed.minSteps, true);
     const sync = definition.measure.synchronizedTravel;

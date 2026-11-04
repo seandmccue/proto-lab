@@ -2,6 +2,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { measureFollowerTiming } from './follower-timing.ts';
 import { measurePlanarOrbit } from './planar-orbit.ts';
 import { measureIndexedMotion } from './indexed-motion.ts';
+import { measureEndIn } from './end-in.ts';
 import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
 
@@ -201,6 +202,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (new Set(instances).size !== instances.length) failureReasons.push('Synchronized travel needs different instances');
       for (const id of instances) if (!instById.has(id)) failureReasons.push(`Synchronized travel instance "${id}" not found`);
     }
+    const endIn = measure.endIn;
+    if (endIn) {
+      if (endIn.instance === endIn.receiver) failureReasons.push('End-in target and receiver must be different instances');
+      for (const id of [endIn.instance, endIn.receiver]) if (!instById.has(id)) failureReasons.push(`End-in instance "${id}" not found`);
+    }
     const indexed = measure.indexedMotion;
     if (indexed) {
       if (ctlJoints.get(indexed.input)?.joint.type !== 'revolute') failureReasons.push(`Indexed motion input "${indexed.input}" must be a motorized revolute joint`);
@@ -246,7 +252,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !synchronizedTravel && !orbits.length && !indexed && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !synchronizedTravel && !orbits.length && !indexed && !endIn && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -434,6 +440,19 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
         }
         if (orbit.maxRadius_m !== undefined && maxRadius_m > orbit.maxRadius_m) {
           failureReasons.push(`${body} orbit radius reached ${maxRadius_m.toFixed(3)} m, maximum ${orbit.maxRadius_m} m`);
+        }
+      }
+      const endIn = test.measure.endIn;
+      if (endIn) {
+        const result = measureEndIn({ frames, dt: 1 / TRACE_HZ }, endIn);
+        if (!result) {
+          failureReasons.push('Final receiver occupancy could not be measured from the trace');
+        } else {
+          metrics.endInHold_s = +result.hold_s.toFixed(4);
+          metrics.endInFinalMargin_m = +result.finalMargin_m.toFixed(5);
+          if (result.hold_s + 1e-8 < endIn.minHold_s) {
+            failureReasons.push(`${endIn.instance} ended inside ${endIn.receiver} for ${result.hold_s.toFixed(2)} s, target ${endIn.minHold_s} s`);
+          }
         }
       }
       const indexed = test.measure.indexedMotion;
