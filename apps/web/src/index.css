@@ -210,7 +210,7 @@ hr { border-color: var(--line); }
 .lab-hero { --hero-size: clamp(2.1rem, 4.2vw, 4rem); }
 /* Mascot beside the headline, exactly two title lines tall. */
 .lab-hero-title { display: flex; align-items: center; gap: clamp(.6rem, 1.6vw, 1.25rem); margin: -.1em 0 .8rem; }
-.lab-hero-mascot { flex: none; height: calc(1.88 * var(--hero-size)); width: auto; filter: drop-shadow(0 .6rem 1rem rgba(15, 20, 25, .18)); }
+.lab-hero-mascot { flex: none; height: calc(2.5 * var(--hero-size)); margin-block: calc(-.31 * var(--hero-size)); width: auto; filter: drop-shadow(0 .6rem 1rem rgba(15, 20, 25, .18)); }  /* taller than the two-line box, overhanging evenly so the title stays level with the card */
 .lab-hero h1 {
   max-width: 11ch;
   margin: 0;
