@@ -26,15 +26,14 @@ export default function IndexedMotionEvidence({ test, definition, time, iteratio
     return {
       result,
       times: result.series.map(({ t }) => t),
-      tracks: [
-        { id: 'input', label: 'Input progress', values: result.series.map(({ input_deg }) => input_deg) },
-        { id: 'output', label: 'Output angle', values: result.series.map(({ output_deg }) => output_deg) },
-      ],
+      input: [{ id: 'input', label: 'Motor', values: result.series.map(({ input_deg }) => input_deg) }],
+      output: [{ id: 'output', label: 'Wheel', values: result.series.map(({ output_deg }) => output_deg) }],
     };
   }, [settings, test.trace]);
   if (!measured) return null;
 
-  const { result, times, tracks } = measured;
+  const { result, times, input, output } = measured;
+  const regions = goal && result.steps.length ? { label: 'Observed dwell', ranges: result.holds } : undefined;
   const passed = goal && result.consecutiveSteps >= goal.minSteps;
   return (
     <section className="workbench-follower-evidence" aria-labelledby={headingId}>
@@ -59,9 +58,12 @@ export default function IndexedMotionEvidence({ test, definition, time, iteratio
           </span>
         </>}
       </div>
-      <RecordedSeriesChart times={times} tracks={tracks} time={time} unit="°" signed={tracks[1].values.some((value) => value < 0)}
-        title="Input progress and output angle" description="Input progress and output angle from the saved simulation"
-        regions={goal && result.steps.length ? { label: 'Observed dwell', ranges: result.holds } : undefined} />
+      <div className="grid gap-3">
+        <RecordedSeriesChart times={times} tracks={input} time={time} unit="°"
+          title="Motor rotation" description="Motor rotation from the saved simulation" />
+        <RecordedSeriesChart times={times} tracks={output} time={time} unit="°" signed={output[0].values.some((value) => value < 0)}
+          title="Indexed wheel angle" description="Indexed wheel angle from the saved simulation" regions={regions} />
+      </div>
     </section>
   );
 }

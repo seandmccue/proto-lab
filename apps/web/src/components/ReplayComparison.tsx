@@ -102,11 +102,34 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
     return highlights;
   }, [versions, revisionChanges]);
   const definition = recordedTestSpec(before.testId, [versions?.[0] ?? null]) ?? baselineDefinition;
+  const [indexedSpec, setIndexedSpec] = useState<TestSpec>();
+  const ownAfterDefinition = recordedTestSpec(after.testId, [versions?.[1] ?? null]);
+  const afterDefinition = ownAfterDefinition ?? indexedSpec;
+  useEffect(() => {
+    const afterVersion = versions?.[1];
+    if (!afterVersion?.parentVersionId || ownAfterDefinition || afterTest?.metrics.indexedConsecutiveSteps === undefined) return;
+    let cancelled = false;
+    void (async () => {
+      let ancestor = afterVersion;
+      const visited = new Set([ancestor.id]);
+      while (!cancelled && ancestor.parentVersionId && !visited.has(ancestor.parentVersionId)) {
+        visited.add(ancestor.parentVersionId);
+        const { version } = await api.version(afterVersion.inventionId, ancestor.parentVersionId, false);
+        ancestor = version;
+        const definition = recordedTestSpec(after.testId, [version]);
+        if (definition) {
+          if (!cancelled) setIndexedSpec(definition);
+          return;
+        }
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [after.testId, afterTest?.metrics.indexedConsecutiveSteps, ownAfterDefinition, versions]);
+
   const travel = useMemo(() => {
     if (!versions || !beforeTest || !afterTest) return [];
-    const afterDefinition = recordedTestSpec(after.testId, [versions[1]]);
     return travelComparison(beforeTest, afterTest, versions, [definition, afterDefinition]);
-  }, [versions, beforeTest, afterTest, after.testId, definition]);
+  }, [versions, beforeTest, afterTest, afterDefinition, definition]);
   const peakTime = useMemo(() => {
     if (!beforeTest || beforeTest.passed || definition?.kind !== 'walk') return null;
     let peakTilt = definition.maxTilt_deg;
@@ -154,11 +177,11 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
         </div>
         <TriplexTimingEvidence version={version} time={time} test={test} />
         <OrbitReplayEvidence inventionId={version.inventionId} iteration={version.iteration} time={time} test={test}
-          definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
+          definition={index === 0 ? definition : afterDefinition} />
         <TrayTiltEvidence version={version} iteration={version.iteration} time={time} test={test} />
         <LotusReplayEvidence version={version} iteration={version.iteration} time={time} test={test} />
         <IndexedMotionEvidence versionId={version.id} iteration={version.iteration} time={time} test={test}
-          definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
+          definition={index === 0 ? definition : afterDefinition} />
       </article>)}
     </div>
     <ModelHandoff events={events} versions={versions} before={beforeTest} after={afterTest} />
