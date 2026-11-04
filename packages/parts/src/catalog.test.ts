@@ -169,7 +169,55 @@ test('polar pattern replicates instances, joints and drives', () => {
   ], getPart);
   assert.equal(r.assembly.instances.filter((i) => i.partId === gondola.id).length, 8);
   assert.equal(r.assembly.joints.filter((j) => j.type === 'revolute').length, 8);
+  assert.deepEqual(r.assembly.joints.map(joint => joint.a.connectorId), Array.from({ length: 8 }, (_, index) => `rim_${index}`));
+  for (const joint of r.assembly.joints) {
+    const parent = r.assembly.instances.find(instance => instance.id === joint.a.instanceId)!;
+    const child = r.assembly.instances.find(instance => instance.id === joint.b.instanceId)!;
+    const parentPoint = transformPoint(parent.transform, wheel.connectors.find(connector => connector.id === joint.a.connectorId)!.position);
+    const childPoint = transformPoint(child.transform, gondola.connectors.find(connector => connector.id === joint.b.connectorId)!.position);
+    for (let axis = 0; axis < 3; axis++) {
+      assert.ok(Math.abs(parentPoint[axis] - childPoint[axis]) < 1e-9);
+      assert.ok(Math.abs(parentPoint[axis] - joint.anchor![axis]) < 1e-9);
+    }
+  }
   const s = summarize(r.assembly); assert.ok(s.totalMass_kg > 0);
+});
+
+test('pattern preserves a valid external axis with axial spacing and leaves both-copied joints unchanged', () => {
+  const original = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'wheel', part: 'spoked-wheel-400', position: [0, .3, 0] },
+    AssemblyOp.parse({ op: 'mount', id: 'cab', part: 'gondola-40', onto: 'wheel', connector: 'rim_0', via: 'hanger', joint: 'revolute', motor: { controlId: 'level', stiffness: 3, damping: .2 } }),
+  ], getPart).assembly;
+  original.controller.drives = [{ controlId: 'level', mode: 'velocity', rampIn_s: .1, profile: { kind: 'constant', value: -.7 } }];
+  const alongAxis = applyOps(original, [AssemblyOp.parse({ op: 'pattern', instances: ['cab'], kind: 'linear', step: [0, 0, .11], count: 2 })], getPart).assembly;
+  assert.equal(alongAxis.joints[1].a.connectorId, 'rim_0', 'coaxial spacing does not need a new connector');
+  assert.ok(Math.abs(alongAxis.joints[1].anchor![2] - original.joints[0].anchor![2] - .11) < 1e-9);
+
+  const both = applyOps(original, [AssemblyOp.parse({ op: 'pattern', instances: ['wheel', 'cab'], kind: 'polar', axis: 'z', center: [0, .3, 0], count: 2 })], getPart).assembly;
+  const joint = both.joints[1];
+  assert.deepEqual(joint.a, { instanceId: 'wheel_1', connectorId: 'rim_0' });
+  assert.deepEqual(joint.b, { instanceId: 'cab_1', connectorId: 'hanger' });
+  assert.deepEqual(joint.axis, original.joints[0].axis);
+  assert.deepEqual(joint.motor, { ...original.joints[0].motor, controlId: 'level_1' });
+  assert.deepEqual(both.controller.drives[1], { ...original.controller.drives[0], controlId: 'level_1' });
+});
+
+test('remapping a legacy joint onto an antiparallel bearing preserves its effective motor axis', () => {
+  const original = structuredClone(applyOps(emptyAssembly(), [
+    { op: 'place', id: 'wheel', part: 'spoked-wheel-400', position: [0, .3, 0] },
+    AssemblyOp.parse({ op: 'mount', id: 'cab', part: 'gondola-40', onto: 'wheel', connector: 'rim_0', via: 'hanger', joint: 'revolute', motor: { controlId: 'level', stiffness: 3, damping: .2 } }),
+  ], getPart).assembly);
+  delete original.joints[0].axis;
+  original.controller.drives = [{ controlId: 'level', mode: 'velocity', rampIn_s: .1, profile: { kind: 'constant', value: -.7 } }];
+  const opposite = original.parts.find(part => part.id === 'spoked-wheel-400')!.connectors.find(connector => connector.id === 'rim_4')!;
+  opposite.axis = [0, 0, -1];
+  const patterned = applyOps(original, [AssemblyOp.parse({ op: 'pattern', instances: ['cab'], kind: 'polar', axis: 'z', center: [0, .3, 0], count: 2 })], getPart).assembly;
+  assert.equal(original.joints[0].axis, undefined, 'do not rewrite saved source joints');
+  assert.equal(patterned.joints[0].axis, undefined);
+  assert.equal(patterned.joints[1].a.connectorId, 'rim_4');
+  assert.deepEqual(patterned.joints[1].axis, [0, 0, 1], 'use the transformed original fallback, not the replacement connector’s negative normal');
+  assert.deepEqual(patterned.joints[1].motor, { ...original.joints[0].motor, controlId: 'level_1' });
+  assert.deepEqual(patterned.controller.drives[1], { ...original.controller.drives[0], controlId: 'level_1' });
 });
 
 test('walker builds from generic ops with feet on the ground and 8 motorised joints', () => {

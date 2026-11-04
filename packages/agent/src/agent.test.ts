@@ -292,7 +292,8 @@ test('tool runtime: a Ferris wheel from generic ops passes a motion test with cl
   assert.ok(!r1.error, r1.error);
   await rt.call('set_drives', { drives: [{ controlId: 'spin', mode: 'velocity', rampIn_s: 1, profile: { kind: 'constant', value: 1.5 } }] });
   await rt.call('define_test', { test: { kind: 'motion', id: 'spin', duration_s: 6, measure: { joints: ['spin'], base: 'tower', clearancePairs: [['cab', 'tower'], ['cab_1', 'tower'], ['cab_4', 'tower']], noGroundContact: ['cab', 'cab_1', 'cab_2', 'cab_3', 'cab_4', 'cab_5', 'cab_6', 'cab_7'] }, criteria: { minRevolutions: 1, torqueWithinRating: true } } });
-  const r = await rt.call('run_test', { test_id: 'spin' }) as { passed: boolean; metrics: Record<string, number>; failureReasons: string[] };
+  const r = await rt.call('run_test', { test_id: 'spin' }) as { error?: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[] };
+  assert.equal(r.error, undefined, r.error);
   console.log('ferris', r.passed, JSON.stringify(r.metrics).slice(0, 200), r.failureReasons);
   assert.ok(r.metrics['spin.revolutions'] >= 1, 'wheel turned');
   assert.equal(r.metrics.groundContactViolation, 0);
