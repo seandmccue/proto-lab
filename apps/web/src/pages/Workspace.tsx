@@ -12,6 +12,7 @@ import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
 import TrayTiltEvidence from '../components/TrayTiltEvidence.tsx';
 import LotusReplayEvidence from '../components/LotusReplayEvidence.tsx';
+import ReceiverReplayEvidence, { replayReceiverTargets } from '../components/ReceiverReplayEvidence.tsx';
 import IndexedMotionEvidence, { carouselBaselineVersionId } from '../components/IndexedMotionEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
@@ -518,7 +519,7 @@ export default function Workspace() {
     ? recordedTestSpec(test.testId, [version, prevVersion?.id === version.parentVersionId ? prevVersion : null]) ?? (testSpecKey ? earlierTestSpecs[testSpecKey] : undefined)
     : undefined;
   const strokeTargets = testDefinition?.kind === 'motion' && test?.trace.frames.length ? testDefinition.measure.linearTravel : undefined;
-  const receiverTarget = testDefinition?.kind === 'motion' ? testDefinition.measure.endIn : undefined;
+  const receiverTarget = replayReceiverTargets(testDefinition);
   const receiverPath = Array.isArray(receiverTarget) ? undefined : receiverTarget?.instance;
   const motionPath = receiverPath ?? (version ? recordedPenPath(version.assembly, test) : undefined);
   const sourceParentId = detail?.source?.versionId;
@@ -748,6 +749,7 @@ export default function Workspace() {
               {!showLive && (comparing ? <span className="workbench-view-hint">Camera fits the recorded motion</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
+          {!showLive && test && <ReceiverReplayEvidence targets={receiverTarget} test={test} time={time.t} />}
           {!showLive && test && <FollowerTimingEvidence time={time.t} test={test} definition={testDefinition} isSemaphore={version?.id === 'ver_cam_semaphore_1' && test.testId === 'cam_semaphore_stroke'} />}
           {!showLive && version && test && <TriplexTimingEvidence version={version} time={time.t} test={test} />}
           {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}

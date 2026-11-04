@@ -303,6 +303,30 @@
 .workbench-chart-limit { stroke: #a62e47; stroke-width: 1.5; stroke-dasharray: 6 3 1 3; }
 .workbench-chart-region { fill: #6544c6; opacity: .12; }
 .workbench-follower-legend .workbench-chart-region-label::before { background: #e3d9fb; border: 1px solid #a896df; height: .6rem; }
+.workbench-receiver-evidence {
+  display: grid;
+  gap: .35rem;
+  padding: .65rem .75rem;
+  border-top: 1px solid var(--bench-line);
+  background: #f7f4fc;
+}
+.workbench-receiver-evidence ul { display: grid; gap: .35rem; }
+.workbench-receiver-evidence li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .25rem .75rem;
+  padding: .45rem .55rem;
+  border: 1px solid var(--bench-line);
+  border-radius: .5rem;
+  background: var(--bench-panel);
+  color: var(--bench-muted);
+  font-size: .75rem;
+}
+.workbench-receiver-evidence li strong { color: var(--bench-ink); overflow-wrap: anywhere; }
+.workbench-receiver-evidence .is-inside { color: #08635d; font-weight: 700; }
+.workbench-receiver-result { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .35rem; margin-inline-start: auto; }
+
 .workbench-orbit-evidence {
   display: flex;
   align-items: center;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { quatFromAxisAngle, transformPoint } from '@protolab/parts';
 import type { Trace, Vec3 } from '@protolab/schema';
-import { measureEndIn } from './end-in.ts';
+import { measureEndIn, receiverOccupancyAt, sampleReceiverOccupancy } from './end-in.ts';
 
 const goal = {
   instance: 'marble', receiver: 'catcher',
@@ -42,4 +42,19 @@ test('a missing sample cannot establish a final hold', () => {
   const trace = makeTrace([[0.01, 0.02, 0], [0.01, 0.02, 0], [0.01, 0.02, 0]]);
   trace.frames.splice(1, 1);
   assert.equal(measureEndIn(trace, goal), null);
+});
+
+
+test('scrubbing a pass-through shows a hold while inside, then resets when the payload leaves', () => {
+  const inside: Vec3 = [0.01, 0.02, 0];
+  const outside: Vec3 = [0.05, 0.02, 0];
+  const samples = sampleReceiverOccupancy(makeTrace([outside, inside, inside, outside, inside]), goal);
+  assert.ok(samples);
+  assert.equal(receiverOccupancyAt(samples, 0.05)?.inside, false);
+  assert.equal(receiverOccupancyAt(samples, 0.25)?.inside, true);
+  assert.equal(receiverOccupancyAt(samples, 0.25)?.hold_s, 0.1);
+  assert.equal(receiverOccupancyAt(samples, 0.35)?.inside, false);
+  assert.equal(receiverOccupancyAt(samples, 0.35)?.hold_s, 0);
+  assert.equal(receiverOccupancyAt(samples, 0.4)?.inside, true);
+  assert.equal(receiverOccupancyAt(samples, 0.4)?.hold_s, 0);
 });
