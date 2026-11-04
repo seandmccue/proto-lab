@@ -348,6 +348,34 @@ test('assemble infers a missing "op" from the fields present', async () => {
   assert.equal(rt.assembly.joints[0].type, 'revolute');
 });
 
+test('a cardinal-vector polar pattern retains twelve independent petal drives', async () => {
+  const rt = new ToolRuntime(baseSpec('Twelve-petal pavilion'), { onLog() {}, onPlan() {}, onAssembly() {}, onTest() {} });
+  const setup = await rt.call('assemble', { rationale: 'One supported petal hinge', ops: [
+    { op: 'place', id: 'servo', part: 'servo-mg996r', position: [.14, .25, 0], anchored: true },
+    { op: 'mount', id: 'spar', part: 'leg-bar-100', onto: 'servo', connector: 'horn', via: 'pivot', joint: 'revolute', motor: { controlId: 'petal', stiffness: 5, damping: .2 } },
+  ] }) as { error?: string };
+  assert.ok(!setup.error, setup.error);
+  await rt.call('set_drives', { drives: [{ controlId: 'petal', mode: 'position', profile: { kind: 'sine', amplitude: .48, frequency_hz: .2 } }] });
+  const result = await rt.call('assemble', { rationale: 'Repeat around the upright axis', ops: [
+    { op: 'pattern', kind: 'polar', axis: [0, 1, 0], center: [0, .25, 0], count: 12, instances: ['servo', 'spar'] },
+  ] }) as { error?: string };
+  assert.ok(!result.error, result.error);
+  assert.equal(rt.assembly.instances.length, 24);
+  assert.equal(rt.assembly.joints.length, 12);
+  assert.equal(new Set(rt.assembly.controller.drives.map((drive) => drive.controlId)).size, 12);
+  const opposite = rt.assembly.instances.find((instance) => instance.id === 'servo_6')!;
+  assert.ok(Math.abs(opposite.transform.position[0] + .14) < 1e-9);
+  assert.ok(Math.abs(opposite.transform.position[1] - .25) < 1e-9);
+  const before = structuredClone(rt.assembly);
+  for (const axis of [[0, -1, 0], [1, 1, 0]]) {
+    const rejected = await rt.call('assemble', { rationale: 'Unsupported axis must not be guessed', ops: [
+      { op: 'pattern', kind: 'polar', axis, count: 3, instances: ['servo', 'spar'] },
+    ] }) as { error?: string };
+    assert.match(rejected.error ?? '', /axis/);
+    assert.deepEqual(rt.assembly, before);
+  }
+});
+
 test('define_test rejects a walk tilt limit tighter than the measured recipes', async () => {
   const rt = new ToolRuntime(baseSpec('Mechanical crab'), { onLog: () => {}, onPlan: () => {}, onAssembly: () => {}, onTest: () => {} });
   const tight = await rt.call('define_test', { test: { kind: 'walk', id: 'scuttle', duration_s: 6, base: 'body', minDistance_m: 0.3, maxTilt_deg: 6, direction: 'z' } }) as { error?: string };
