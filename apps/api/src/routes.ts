@@ -216,6 +216,16 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     return c.json({ ok: true, invention: publicInvention(getInvention(inv.id)!, sid) });
   });
 
+  app.post('/api/inventions/:id/unpublish', (c) => {
+    const sid = session(c.req);
+    const inv = getInvention(c.req.param('id'));
+    if (!inv) return c.json({ error: 'Not found' }, 404);
+    if (inv.owner_id !== sid) return c.json({ error: 'Only the creator can unpublish' }, 403);
+    db.prepare("UPDATE inventions SET visibility='private', featured=0, updated_at=? WHERE id=?")
+      .run(now(), inv.id);
+    return c.json({ ok: true, invention: publicInvention(getInvention(inv.id)!, sid) });
+  });
+
   const explainCache = new Map<string, Promise<{ text: string; modelId: string }>>();
   app.post('/api/inventions/:id/versions/:vid/explain', async (c) => {
     const sid = session(c.req);
