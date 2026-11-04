@@ -17,10 +17,10 @@
 .pipeline-model {
   padding: clamp(1rem, 3vw, 1.6rem);
   border: 1px solid var(--line);
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
 }
 .pipeline-spark { color: white; background: var(--violet); border-color: var(--violet); }
-.pipeline-spark .lab-label { color: var(--citron); }
+.pipeline-spark .lab-label { color: rgba(255,255,255,.75); }
 .pipeline-wonder { background: var(--lavender); }
 .pipeline-wonder .lab-label { color: var(--violet-dark); }
 .pipeline-model h3 { margin: .45rem 0 .35rem; font-size: clamp(1.35rem, 3vw, 2rem); font-weight: 800; letter-spacing: -.045em; line-height: 1.1; }
@@ -29,7 +29,7 @@
 .pipeline-status strong { color: var(--ink); margin-right: .35rem; }
 .pipeline-flow { margin-block: clamp(2rem, 5vw, 3.5rem); }
 .pipeline-flow h2 { margin-bottom: .85rem; font-size: clamp(1.65rem, 4vw, 2.5rem); font-weight: 800; letter-spacing: -.055em; }
-.pipeline-steps { overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
+.pipeline-steps { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
 .pipeline-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .9rem; padding: clamp(.95rem, 2.5vw, 1.35rem); }
 .pipeline-steps li + li { border-top: 1px solid var(--line); }
 .pipeline-number { display: grid; place-items: center; width: 2.15rem; height: 2.15rem; border-radius: 50%; color: var(--violet-dark); background: var(--lavender); }

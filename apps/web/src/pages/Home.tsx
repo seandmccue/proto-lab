@@ -200,7 +200,7 @@ export default function Home() {
               </div>
               <p id="invention-scope">Tell Muse what to build and how it should move.</p>
             </form>
-            {error && <p className="mt-2 text-sm text-rose-700" role="alert">{error}</p>}
+            {error && <p className="mt-2 text-sm text-fail" role="alert">{error}</p>}
             <div className="lab-hero-links">
               <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
               <a href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>

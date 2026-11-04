@@ -53,7 +53,7 @@ export default function IndexedMotionEvidence({ test, definition, time, iteratio
             <div><dt>Target step size</dt><dd>{goal.step_deg}° ± {goal.stepTolerance_deg}°</dd></div>
             <div><dt>Required hold</dt><dd>≥ {goal.minDwell_s} s</dd><dd><small>≤ {goal.maxDwellDrift_deg}° drift</small></dd></div>
           </dl>
-          <span className={`workbench-badge mt-2 inline-flex ${passed ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>
+          <span className={`workbench-badge mt-2 inline-flex ${passed ? 'workbench-pass' : 'bg-warn/15 text-warn'}`}>
             Indexing goal {passed ? 'met' : 'missed'}
           </span>
         </>}

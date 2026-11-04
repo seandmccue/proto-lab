@@ -70,7 +70,7 @@ export default function TrayTiltEvidence({ version, test, time, iteration }: {
           </div>)}
           <div><dt>Tray tilt limit</dt><dd>≤ {limit}°</dd></div>
         </dl>
-        <span className={`workbench-badge mt-2 inline-flex ${meetsGoal ? 'workbench-pass' : 'bg-amber-100 text-amber-800'}`}>Tray tilt goal {meetsGoal ? 'met' : 'missed'}</span>
+        <span className={`workbench-badge mt-2 inline-flex ${meetsGoal ? 'workbench-pass' : 'bg-warn/15 text-warn'}`}>Tray tilt goal {meetsGoal ? 'met' : 'missed'}</span>
         {twoAxis && (
           <p className="mt-2"><strong>Drive sweep goal {meetsSweepGoal ? 'met' : 'missed'}.</strong> Each drive must reach at least {fmt.deg(sweepGoal_deg)} in both directions.</p>
         )}

@@ -4,7 +4,7 @@
 .part-inventory-panel {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 .part-inventory-controls {
@@ -22,8 +22,8 @@
   min-width: 0;
   min-height: 44px;
   padding: .45rem .65rem;
-  border: 1px solid #b5a7c6;
-  border-radius: .5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--ink);
 }
@@ -53,7 +53,7 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: .85rem;
+  border-radius: var(--radius);
   background: var(--surface);
 }
 .part-inventory-illustration {
@@ -61,10 +61,10 @@
   grid-template-rows: auto minmax(0, 1fr);
   height: clamp(7rem, 13vw, 10rem);
   padding: .65rem .75rem .35rem;
-  background-color: #1d1637;
-  background-image: linear-gradient(#d4c3ff14 1px, transparent 1px), linear-gradient(90deg, #d4c3ff14 1px, transparent 1px);
+  background-color: var(--viewport);
+  background-image: linear-gradient(rgba(47,124,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(47,124,255,.08) 1px, transparent 1px);
   background-size: 1rem 1rem;
-  color: #e4d6ff;
+  color: var(--ink-2);
 }
 .part-inventory-illustration svg { width: 100%; height: 100%; }
 .part-inventory-detail { padding: .7rem .75rem .85rem; overflow-wrap: anywhere; }

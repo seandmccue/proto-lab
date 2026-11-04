@@ -7,7 +7,7 @@
 .invention-gallery__header {
   margin-block-end: clamp(1.75rem, 4vw, 3rem);
   padding-block-end: clamp(1.5rem, 4vw, 2.5rem);
-  border-bottom: 1px solid var(--line, #dcd3e3);
+  border-bottom: 1px solid var(--line, var(--line));
 }
 
 .invention-gallery__eyebrow,
@@ -19,13 +19,13 @@
 }
 
 .invention-gallery__header .invention-gallery__eyebrow {
-  color: var(--violet, #6029cc);
+  color: var(--violet, var(--accent));
   text-transform: uppercase;
 }
 
 .invention-gallery__header h1 {
   margin-block: .35rem .65rem;
-  color: var(--ink, #281838);
+  color: var(--ink, var(--ink));
   font-size: clamp(3.25rem, 8vw, 6rem);
   font-weight: 800;
   line-height: .98;
@@ -33,12 +33,12 @@
 }
 
 .invention-gallery__header h1 span {
-  color: var(--violet, #6029cc);
+  color: var(--violet, var(--accent));
 }
 
 .invention-gallery__header p:last-child {
   max-width: 38rem;
-  color: var(--muted, #5e5166);
+  color: var(--muted, var(--muted));
   font-size: clamp(.975rem, 2vw, 1.125rem);
 }
 
@@ -50,35 +50,35 @@
   max-width: 100%;
   margin-block-end: 1.25rem;
   padding: .25rem;
-  border: 1px solid var(--line, #dcd3e3);
-  border-radius: 1rem;
-  background: var(--paper, #fffcf4);
+  border: 1px solid var(--line, var(--line));
+  border-radius: var(--radius-lg);
+  background: var(--paper, var(--panel));
 }
 
 .invention-gallery__filters button {
   min-height: 2.75rem;
   padding: .45rem clamp(.55rem, 3vw, 1rem);
-  border-radius: .75rem;
-  color: var(--ink, #281838);
+  border-radius: var(--radius);
+  color: var(--ink, var(--ink));
   font-size: .875rem;
   font-weight: 650;
   text-transform: capitalize;
 }
 
 .invention-gallery__filters button:hover {
-  background: #eee5fd;
+  background: var(--panel-2);
 }
 
 .invention-gallery__filters button[aria-pressed="true"] {
-  background: var(--violet, #6029cc);
+  background: var(--violet, var(--accent));
   color: #fff;
 }
 
 .invention-gallery__empty {
   padding: 2rem 1.25rem;
-  border: 1px dashed var(--line, #dcd3e3);
-  border-radius: 1.25rem;
-  color: var(--muted, #5e5166);
+  border: 1px dashed var(--line, var(--line));
+  border-radius: var(--radius-lg);
+  color: var(--muted, var(--muted));
 }
 
 .invention-grid {
@@ -117,23 +117,23 @@
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--line, #dcd3e3);
-  border-radius: 1.25rem;
-  background: var(--paper, #fffcf4);
-  color: var(--ink, #281838);
+  border: 1px solid var(--line, var(--line));
+  border-radius: var(--radius-lg);
+  background: var(--paper, var(--panel));
+  color: var(--ink, var(--ink));
   box-shadow: 0 3px 0 rgba(40, 24, 56, .06);
   transition: border-color .18s ease, box-shadow .18s ease;
 }
 
 .invention-card:hover,
 .invention-card:focus-visible {
-  border-color: var(--violet, #6029cc);
+  border-color: var(--violet, var(--accent));
   box-shadow: 0 4px 0 rgba(96, 41, 204, .14);
 }
 
 .invention-gallery__filters button:focus-visible,
 .invention-card:focus-visible {
-  outline: 2px solid var(--violet, #6029cc);
+  outline: 2px solid var(--violet, var(--accent));
   outline-offset: 3px;
 }
 
@@ -144,9 +144,9 @@
   min-height: 9rem;
   overflow: hidden;
   place-items: center;
-  border-bottom: 1px solid var(--line, #dcd3e3);
-  background-color: #ede6fa;
-  background-image: radial-gradient(#c6b6da 1px, transparent 1px);
+  border-bottom: 1px solid var(--line, var(--line));
+  background-color: var(--viewport);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
   background-size: 13px 13px;
 }
 
@@ -161,10 +161,10 @@
   inset: 0;
 }
 
-.invention-card__preview--showcase:has(> img) { background: #eee9fa; }
+.invention-card__preview--showcase:has(> img) { background: var(--viewport); }
 
 .invention-card__placeholder {
-  color: #795f9e;
+  color: var(--muted);
 }
 
 .invention-card__tags {
@@ -178,16 +178,18 @@
 
 .invention-card__tags span {
   padding: .26rem .45rem;
-  border-radius: .35rem;
-  background: var(--ink, #281838);
-  color: white;
+  border-radius: var(--radius);
+  background: rgba(9, 11, 15, .8);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  backdrop-filter: blur(6px);
 }
 
 .invention-card__view-label {
   position: absolute;
   right: .7rem;
   bottom: .55rem;
-  color: #605175;
+  color: var(--muted);
 }
 
 .invention-card__body {
@@ -209,22 +211,22 @@
 .invention-card__status,
 .invention-card__distance {
   padding: .3rem .45rem;
-  border-radius: .35rem;
+  border-radius: var(--radius);
 }
 
 .invention-card__status {
-  background: #ffedcf;
-  color: #744000;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .invention-card__status.is-passed {
-  background: var(--citron, #e1f58f);
-  color: #304000;
+  background: var(--pass-soft);
+  color: var(--pass);
 }
 
 .invention-card__distance {
-  background: #f0e9fa;
-  color: #543a71;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .invention-card h3 {
@@ -237,13 +239,13 @@
 
 .invention-card p {
   margin-block: .35rem 1rem;
-  color: var(--muted, #5e5166);
+  color: var(--muted, var(--muted));
   font-size: .875rem;
 }
 
 .invention-card__date {
   margin-block: -.5rem .7rem;
-  color: var(--muted, #5e5166);
+  color: var(--muted, var(--muted));
   font-size: .75rem;
 }
 
@@ -255,14 +257,14 @@
   gap: .35rem .65rem;
   margin-block-start: auto;
   padding-block-start: .7rem;
-  border-top: 1px solid var(--line, #dcd3e3);
-  color: var(--muted, #5e5166);
+  border-top: 1px solid var(--line, var(--line));
+  color: var(--muted, var(--muted));
   font-size: .75rem;
   overflow-wrap: anywhere;
 }
 
 .invention-card__explore {
-  color: var(--violet, #6029cc);
+  color: var(--violet, var(--accent));
   font-weight: 750;
 }
 
