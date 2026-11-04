@@ -12,6 +12,7 @@
   "dependencies": {
     "@protolab/parts": "*",
     "@protolab/schema": "*",
+    "@protolab/simulator": "*",
     "@react-three/drei": "^9.117.3",
     "@react-three/fiber": "^8.17.10",
     "react": "^18.3.1",

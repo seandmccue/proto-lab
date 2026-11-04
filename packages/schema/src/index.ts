@@ -46,6 +46,7 @@ export const GeometryPiece = z.object({
   material: z.string().optional(),
   role: PieceRole.default('structure'),
   collide: z.boolean().default(true),
+  friction: z.number().min(0).max(2).optional(),
 });
 export type GeometryPiece = z.infer<typeof GeometryPiece>;
 
@@ -202,6 +203,24 @@ export type Spec = z.infer<typeof Spec>;
 
 // ---------- Tests ----------
 export const ClearancePair = z.tuple([z.string(), z.string()]);
+export const ReceiverCheck = z.object({
+  instance: z.string().min(1),
+  receiver: z.string().min(1),
+  centerOffset_m: Vec3.optional(),
+  halfExtents_m: z.tuple([z.number().positive(), z.number().positive(), z.number().positive()]),
+  minHold_s: z.number().positive().max(5),
+});
+export type ReceiverCheck = z.infer<typeof ReceiverCheck>;
+
+export function receiverChecks(endIn: ReceiverCheck | ReceiverCheck[] | undefined) {
+  const checks = Array.isArray(endIn) ? endIn : endIn ? [endIn] : [];
+  return checks.map((check, index) => {
+    // Preserve the published metric names for existing single-receiver tests.
+    const suffix = Array.isArray(endIn) ? `.${index + 1}` : '';
+    return { check, holdKey: `endInHold_s${suffix}`, marginKey: `endInFinalMargin_m${suffix}` };
+  });
+}
+
 export const TestSpec = z.discriminatedUnion('kind', [
   // Drive the mechanism and measure joints, a base body, clearances and ground contact.
   z.object({
@@ -211,6 +230,55 @@ export const TestSpec = z.discriminatedUnion('kind', [
       base: z.string().optional(),                           // instance whose tilt/drift are reported
       clearancePairs: z.array(ClearancePair).default([]),    // instance pairs that must not touch
       noGroundContact: z.array(z.string()).default([]),      // instances that must not touch the ground
+      uprightInstances: z.array(z.string().min(1)).min(1).max(80).optional(),
+      jointSwing: z.array(z.object({
+        joint: z.string().min(1),
+        minEachWay_rad: z.number().positive().max(Math.PI),
+      })).min(1).max(8).optional(),
+      linearTravel: z.array(z.object({
+        instance: z.string().min(1),
+        axis: Axis,
+        minTravel_m: z.number().positive(),
+      })).max(80).optional(),
+      synchronizedTravel: z.object({
+        instances: z.array(z.string().min(1)).min(2).max(16),
+        axis: Axis,
+        minTravel_m: z.number().positive(),
+        maxSpread_m: z.number().positive(),
+      }).optional(),
+      endIn: z.union([ReceiverCheck, z.array(ReceiverCheck).min(2).max(8)]).optional(),
+      indexedMotion: z.object({
+        input: z.string().min(1),
+        body: z.string().min(1),
+        center: z.string().min(1),
+        plane: z.enum(['xy', 'xz', 'yz']),
+        minSteps: z.number().int().min(2).max(20),
+        step_deg: z.number().positive().max(180),
+        stepTolerance_deg: z.number().positive().max(30),
+        minDwell_s: z.number().min(0.1).max(15),
+        maxDwellDrift_deg: z.number().positive().max(20),
+      }).optional(),
+      orbits: z.array(z.object({
+        body: z.string().min(1),
+        center: z.string().min(1),
+        plane: z.enum(['xy', 'xz', 'yz']),
+        reference: z.union([z.string().min(1), z.object({ from: z.string().min(1), to: z.string().min(1) })]).optional(),
+        minTurns: z.number().positive(),
+        direction: z.enum(['positive', 'negative']).optional(),
+        minRadius_m: z.number().positive().optional(),
+        maxRadius_m: z.number().positive().optional(),
+      })).min(1).max(4).optional(),
+      followerTiming: z.object({
+        shaft: z.string().min(1),
+        followers: z.array(z.string().min(1)).min(2).max(6),
+        axis: Axis,
+        minCycles: z.number().int().min(1).max(30),
+        minStroke_m: z.number().gt(0.001),
+        minLowDwell_s: z.number().positive().max(15).optional(),
+        minPhaseGap_deg: z.number().positive().max(180),
+        maxPhaseGap_deg: z.number().positive().max(360).optional(),
+      }).optional(),
+      payload: z.object({ instance: z.string().min(1), holder: z.string().min(1).optional() }).optional(),
     }).default({}),
     criteria: z.object({
       minJointAmplitude_rad: z.number().optional(),
@@ -218,6 +286,10 @@ export const TestSpec = z.discriminatedUnion('kind', [
       minRevolutions: z.number().optional(),
       maxBaseTilt_deg: z.number().optional(),
       maxBaseDrift_m: z.number().optional(),
+      maxInstanceTilt_deg: z.number().min(0).max(180).optional(),
+      minPayloadLift_m: z.number().positive().optional(),
+      maxPayloadSeparation_m: z.number().positive().optional(),
+      maxPayloadReturnError_m: z.number().nonnegative().optional(),
       torqueWithinRating: z.boolean().default(true),
     }).default({}),
   }),
@@ -279,6 +351,7 @@ export const VersionRecord = z.object({
   spec: Spec,
   assembly: Assembly,
   tests: z.array(TestResult),
+  testDefinitions: z.array(TestSpec).optional(),
   decisions: z.array(Decision),
   toolLog: z.array(ToolLogEntry),
   modelId: z.string(),

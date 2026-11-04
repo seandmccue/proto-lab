@@ -1,6 +1,14 @@
+import { receiverChecks } from '@protolab/schema';
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { Assembly, Instance, Joint, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
-import { compose, invert, quatConj, quatFromAxisAngle, quatMul, rotate, tiltDeg, transformPoint, sub, len, hullPoints, shapeVolume, norm, dot } from '@protolab/parts';
+import { measureFollowerTiming } from './follower-timing.ts';
+import { measurePlanarOrbit } from './planar-orbit.ts';
+import { measureIndexedMotion } from './indexed-motion.ts';
+import { measureEndIn } from './end-in.ts';
+import { auditFixedGeometry, auditStandalonePart, colliderAt, isPhysicalPiece } from './compound-geometry.ts';
+import type { Assembly, Instance, Joint, PartDefinition, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
+import { compose, invert, quatConj, quatMul, rotate, tiltDeg, transformPoint, sub, len, shapeVolume, norm, dot } from '@protolab/parts';
+
+export type { CompoundGeometryIssue } from './compound-geometry.ts';
 
 export const ENGINE = 'rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace';
 const DT = 1 / 240;
@@ -52,7 +60,19 @@ function rigidGroups(a: Assembly): RigidGroup[] {
   for (const i of a.instances) { const r = find(i.id); if (!groups.has(r)) groups.set(r, []); groups.get(r)!.push(i); }
   return [...groups.values()].map((members) => ({ rootId: members[0].id, members, anchored: members.some((m) => m.anchored) }));
 }
-function axisRotation(axis: 'x' | 'y' | 'z'): Quat { if (axis === 'y') return [0, 0, 0, 1]; if (axis === 'x') return quatFromAxisAngle([0, 0, 1], Math.PI / 2); return quatFromAxisAngle([1, 0, 0], Math.PI / 2); }
+
+/** Flag custom parts whose collision geometry has disconnected regions at rest. */
+export async function auditCompoundGeometry(assembly: Assembly) {
+  await initSimulator();
+  return auditFixedGeometry(rigidGroups(assembly).map((group) => group.members), assembly.parts);
+}
+
+/** Inspect a part before other pieces can bridge it in an assembly. */
+export async function auditPartGeometry(part: PartDefinition) {
+  await initSimulator();
+  return auditStandalonePart(part);
+}
+
 function axisAngle(q: Quat, axis: Vec3): number {
   const [x, y, z, w] = q; const proj = x * axis[0] + y * axis[1] + z * axis[2];
   const n = Math.hypot(proj, w) || 1; const ang = 2 * Math.atan2(proj / n, w / n); return Math.atan2(Math.sin(ang), Math.cos(ang));
@@ -101,19 +121,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const totalVol = part.geometry.reduce((s, gp) => s + shapeVolume(gp.shape), 0) || 1;
       let any = false;
       for (const piece of part.geometry) {
-        if (!piece.collide || piece.role === 'decor' || piece.role === 'fastener') continue;
-        const t = compose(rel, piece.offset); let rot = t.rotation; let cd: RAPIER.ColliderDesc | null = null; const s = piece.shape;
-        switch (s.kind) {
-          case 'box': cd = RAPIER.ColliderDesc.cuboid(s.size[0] / 2, s.size[1] / 2, s.size[2] / 2); break;
-          case 'sphere': cd = RAPIER.ColliderDesc.ball(s.radius); break;
-          case 'cylinder': cd = RAPIER.ColliderDesc.cylinder(s.height / 2, s.radius); rot = quatMul(t.rotation, axisRotation(s.axis)); break;
-          case 'capsule': cd = RAPIER.ColliderDesc.capsule(s.height / 2, s.radius); rot = quatMul(t.rotation, axisRotation(s.axis)); break;
-          default: { const pts = hullPoints(s); if (pts.length >= 4) cd = RAPIER.ColliderDesc.convexHull(new Float32Array(pts.flat())); }
-        }
+        if (!isPhysicalPiece(piece)) continue;
+        const cd = colliderAt(piece.shape, compose(rel, piece.offset));
         if (!cd) continue;
-        cd.setTranslation(...t.position).setRotation({ x: rot[0], y: rot[1], z: rot[2], w: rot[3] });
-        cd.setMass(Math.max(1e-5, part.mass_kg * (shapeVolume(s) / totalVol)));
-        cd.setFriction(piece.role === 'contact' || piece.role === 'payload' ? env.groundFriction : 0.5).setRestitution(piece.role === 'payload' ? 0.2 : 0);
+        cd.setMass(Math.max(1e-5, part.mass_kg * (shapeVolume(piece.shape) / totalVol)));
+        cd.setFriction(piece.friction ?? (piece.role === 'contact' || piece.role === 'payload' ? env.groundFriction : 0.5)).setRestitution(piece.role === 'payload' ? 0.2 : 0);
         const isFree = inst.free, isClear = clearSet.has(inst.id);
         const mem = (isFree ? FREE : piece.role === 'contact' ? CONTACT : STRUCT) | (isClear ? CLEAR : 0);
         const filt = isFree ? 0xffff : GROUND | FREE | (isClear ? CLEAR : 0);   // free bodies collide with everything
@@ -166,18 +178,89 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   if (test.kind === 'launch' && !projRb) failureReasons.push(`Projectile instance "${test.projectile}" not found`);
   const payRb = test.kind === 'grip' ? bodyOf.get(test.payload) : undefined;
   if (test.kind === 'grip' && !payRb) failureReasons.push(`Payload instance "${test.payload}" not found`);
+  const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
+  const motionMeasure = test.kind === 'motion' ? test.measure : undefined;
+  const uprightTilt = new Map((motionMeasure?.uprightInstances ?? []).map((id) => [id, 0]));
+  const linearTravel = (motionMeasure?.linearTravel ?? []).map((target) => ({
+    ...target, coordinate: target.axis === 'x' ? 0 : target.axis === 'y' ? 1 : 2, min: Infinity, max: -Infinity,
+  }));
+  const synchronizedTravel = motionMeasure?.synchronizedTravel;
+  const liftPayload = motionMeasure?.payload;
   if (test.kind === 'motion') {
     const { measure, criteria } = test;
     const measured = sims.filter(({ joint }) => joint.motor && (!measure.joints.length || measure.joints.includes(joint.motor.controlId)));
     for (const id of measure.joints) if (!measured.some(({ joint }) => joint.motor?.controlId === id)) failureReasons.push(`Measured motor "${id}" not found`);
     const jointThreshold = criteria.minJointAmplitude_rad !== undefined || criteria.minJointRate_rad_s !== undefined || criteria.minRevolutions !== undefined;
     const baseThreshold = criteria.maxBaseTilt_deg !== undefined || criteria.maxBaseDrift_m !== undefined;
+    const liftThreshold = criteria.minPayloadLift_m !== undefined || criteria.maxPayloadReturnError_m !== undefined;
+    const retentionThreshold = criteria.maxPayloadSeparation_m !== undefined;
+    const tiltThreshold = criteria.maxInstanceTilt_deg !== undefined;
     if (jointThreshold && !measured.length) failureReasons.push('A joint threshold needs a measurable motorized joint');
+    for (const { joint } of measure.jointSwing ?? []) {
+      if (ctlJoints.get(joint)?.joint.type !== 'revolute') {
+        failureReasons.push(`Swing joint "${joint}" must be a motorized revolute joint`);
+      }
+    }
     if (baseThreshold && !baseRb) failureReasons.push('A base threshold needs a base instance');
+    if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
+    for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
+    for (const { instance } of linearTravel) if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
+    if (synchronizedTravel) {
+      const { instances } = synchronizedTravel;
+      if (new Set(instances).size !== instances.length) failureReasons.push('Synchronized travel needs different instances');
+      for (const id of instances) if (!instById.has(id)) failureReasons.push(`Synchronized travel instance "${id}" not found`);
+    }
+    const endIn = measure.endIn;
+    for (const { check: target } of receiverChecks(endIn)) {
+      if (target.instance === target.receiver) failureReasons.push('End-in target and receiver must be different instances');
+      for (const id of [target.instance, target.receiver]) if (!instById.has(id)) failureReasons.push(`End-in instance "${id}" not found`);
+    }
+    const indexed = measure.indexedMotion;
+    if (indexed) {
+      if (ctlJoints.get(indexed.input)?.joint.type !== 'revolute') failureReasons.push(`Indexed motion input "${indexed.input}" must be a motorized revolute joint`);
+      if (indexed.body === indexed.center) failureReasons.push('Indexed motion marker and center must be different instances');
+      for (const id of [indexed.body, indexed.center]) if (!instById.has(id)) failureReasons.push(`Indexed motion instance "${id}" not found`);
+      if (indexed.stepTolerance_deg >= indexed.step_deg / 2 || indexed.maxDwellDrift_deg >= indexed.step_deg / 2) {
+        failureReasons.push('Indexed motion step tolerance and dwell drift must be less than half a step');
+      }
+    }
+    if (measure.followerTiming) {
+      const { shaft, followers, minPhaseGap_deg, maxPhaseGap_deg } = measure.followerTiming;
+      if (!sims.some(({ joint }) => joint.type === 'revolute' && joint.motor?.controlId === shaft)) {
+        failureReasons.push(`Follower timing shaft "${shaft}" must be a motorized revolute joint`);
+      }
+      if (new Set(followers).size !== followers.length) failureReasons.push('Follower timing needs different instances for each follower');
+      if (maxPhaseGap_deg !== undefined && maxPhaseGap_deg < minPhaseGap_deg) {
+        failureReasons.push('Follower timing maximum phase gap must be at least the minimum phase gap');
+      }
+      for (const id of followers) if (!instById.has(id)) failureReasons.push(`Follower timing instance "${id}" not found`);
+    }
+    const orbits = measure.orbits ?? [];
+    if (new Set(orbits.map(({ body }) => body)).size !== orbits.length) failureReasons.push('Each orbit must measure a different body');
+    for (const { body, center, reference, minRadius_m, maxRadius_m } of orbits) {
+      if (body === center) failureReasons.push(`Orbit body "${body}" must differ from its center`);
+      const references = typeof reference === 'string' ? [reference] : reference ? [reference.from, reference.to] : [];
+      if (reference && typeof reference !== 'string' && reference.from === reference.to) {
+        failureReasons.push(`Orbit reference for "${body}" needs two different instances`);
+      }
+      for (const id of new Set([body, center, ...references])) {
+        if (!instById.has(id)) failureReasons.push(`Orbit instance "${id}" not found`);
+      }
+      if (minRadius_m !== undefined && maxRadius_m !== undefined && maxRadius_m < minRadius_m) {
+        failureReasons.push(`Orbit maximum radius for "${body}" must be at least the minimum radius`);
+      }
+    }
+    if (liftThreshold && !liftPayload) failureReasons.push('A payload height threshold needs a payload instance');
+    if (retentionThreshold && !liftPayload?.holder) failureReasons.push('A retention threshold needs a payload and holder instance');
+    if (liftPayload) {
+      if (!instById.has(liftPayload.instance)) failureReasons.push(`Payload instance "${liftPayload.instance}" not found`);
+      if (liftPayload.holder && !instById.has(liftPayload.holder)) failureReasons.push(`Holder instance "${liftPayload.holder}" not found`);
+      if (liftPayload.holder === liftPayload.instance) failureReasons.push('Payload and holder must be different instances');
+    }
     for (const id of new Set([...measure.clearancePairs.flat(), ...measure.noGroundContact])) {
       if (!instById.has(id)) failureReasons.push(`Contact check instance "${id}" not found`);
     }
-    if (!jointThreshold && !baseThreshold && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
+    if (!jointThreshold && !measure.jointSwing?.length && !baseThreshold && !tiltThreshold && !liftThreshold && !retentionThreshold && !linearTravel.length && !synchronizedTravel && !orbits.length && !indexed && !endIn && !measure.followerTiming && !measure.clearancePairs.length && !measure.noGroundContact.length && !(criteria.torqueWithinRating && measured.some(({ rating }) => Number.isFinite(rating)))) {
       failureReasons.push('Motion test needs at least one measurable criterion');
     }
   }
@@ -191,8 +274,38 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   let maxTilt = 0, minHeight = start.position[1], fell = false, fellAt = -1, energy = 0;
   const settle = 0.25;
   let payloadGrounded = false;
+  const instancePose = (id: string) => compose(rootT(bodyOf.get(id)!), localOffset.get(id)!);
+  const syncCoordinate = synchronizedTravel?.axis === 'x' ? 0 : synchronizedTravel?.axis === 'y' ? 1 : 2;
+  const syncTracks = synchronizedTravel?.instances.map((instance) => ({
+    instance, start: instancePose(instance).position[syncCoordinate], min: 0, max: 0,
+  })) ?? [];
+  let peakSyncSpread = 0;
+  const payloadStartHeight = liftPayload ? instancePose(liftPayload.instance).position[1] : 0;
+  let payloadHeight = payloadStartHeight, maxPayloadHeight = payloadStartHeight, maxPayloadSeparation = 0;
+  const trackMotionInstances = () => {
+    for (const [id, maxTilt] of uprightTilt) uprightTilt.set(id, Math.max(maxTilt, tiltDeg(instancePose(id).rotation)));
+    for (const travel of linearTravel) {
+      const position = instancePose(travel.instance).position[travel.coordinate];
+      travel.min = Math.min(travel.min, position);
+      travel.max = Math.max(travel.max, position);
+    }
+    if (syncTracks.length) {
+      const displacements = syncTracks.map((track) => {
+        const displacement = instancePose(track.instance).position[syncCoordinate] - track.start;
+        track.min = Math.min(track.min, displacement);
+        track.max = Math.max(track.max, displacement);
+        return displacement;
+      });
+      peakSyncSpread = Math.max(peakSyncSpread, Math.max(...displacements) - Math.min(...displacements));
+    }
+    if (liftPayload) {
+      const load = instancePose(liftPayload.instance).position;
+      payloadHeight = load[1];
+      maxPayloadHeight = Math.max(maxPayloadHeight, payloadHeight);
+      if (liftPayload.holder) maxPayloadSeparation = Math.max(maxPayloadSeparation, len(sub(load, instancePose(liftPayload.holder).position)));
+    }
+  };
   let clearanceHit: string | null = null, groundHit: string | null = null, landing: Vec3 | null = null, maxProjHeight = projStart?.position[1] ?? 0, released = false;
-  const ctlJoints = new Map(sims.filter((s) => s.joint.motor).map((s) => [s.joint.motor!.controlId, s]));
   const snapshot = (t: number) => {
     const bodies: Record<string, Transform> = {}; const joints: Record<string, number> = {};
     for (const g of rgroups) { const T = rootT(bodyOf.get(g.rootId)!); for (const m of g.members) bodies[m.id] = compose(T, localOffset.get(m.id)!); }
@@ -200,6 +313,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     frames.push({ t: +t.toFixed(4), bodies, joints });
   };
   snapshot(0);
+  trackMotionInstances();
 
   for (let n = 1; n <= steps; n++) {
     const t = n * DT, ct = t - settle;
@@ -246,6 +360,7 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (support && test.kind === 'grip' && t >= test.supportUntil_s) { world.removeCollider(support, false); support = null; }
     if (baseRb) { const T = rootT(baseRb); const tilt = tiltDeg(T.rotation); maxTilt = Math.max(maxTilt, tilt); minHeight = Math.min(minHeight, T.position[1]); if (!fell && !instById.get(baseId!)!.anchored && (tilt > 60 || T.position[1] < start.position[1] * 0.45)) { fell = true; fellAt = +t.toFixed(2); } }
     if (projRb) { const p = projRb.translation(); maxProjHeight = Math.max(maxProjHeight, p.y); if (!released && ct > 0 && len(sub([p.x, p.y, p.z], projStart!.position)) > 0.08) released = true; }
+    trackMotionInstances();
     if (n % traceEvery === 0) snapshot(t);
   }
 
@@ -285,12 +400,130 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       const js = jointStats(test.measure.joints.length ? test.measure.joints : [...ctlJoints.keys()]);
       for (const s of js) reportJoint(s, s.joint.motor!.controlId);
       const c = test.criteria;
+      for (const { joint, minEachWay_rad } of test.measure.jointSwing ?? []) {
+        const { minA, maxA } = ctlJoints.get(joint)!;
+        metrics[`${joint}.minSwing_rad`] = +minA.toFixed(4);
+        metrics[`${joint}.maxSwing_rad`] = +maxA.toFixed(4);
+        if (minA > -minEachWay_rad || maxA < minEachWay_rad) {
+          failureReasons.push(`${joint} swung from ${minA.toFixed(3)} to ${maxA.toFixed(3)} rad, target ±${minEachWay_rad} rad`);
+        }
+      }
       if (c.minJointAmplitude_rad !== undefined) for (const s of js) if (s.maxA - s.minA < c.minJointAmplitude_rad) failureReasons.push(`${s.joint.motor!.controlId} amplitude ${(s.maxA - s.minA).toFixed(3)} < ${c.minJointAmplitude_rad}`);
       if (c.minRevolutions !== undefined) for (const s of js) if ((s.maxA - s.minA) / (2 * Math.PI) < c.minRevolutions) failureReasons.push(`${s.joint.motor!.controlId} turned ${((s.maxA - s.minA) / (2 * Math.PI)).toFixed(2)} rev < ${c.minRevolutions}`);
       if (c.minJointRate_rad_s !== undefined) for (const s of js) if (s.peakRate < c.minJointRate_rad_s) failureReasons.push(`${s.joint.motor!.controlId} peak rate ${s.peakRate.toFixed(2)} rad/s < ${c.minJointRate_rad_s}`);
       if (baseRb && c.maxBaseTilt_deg !== undefined && maxTilt > c.maxBaseTilt_deg) failureReasons.push(`Base tilt ${metrics.maxTilt_deg}° exceeds ${c.maxBaseTilt_deg}°`);
       if (baseRb && c.maxBaseDrift_m !== undefined && metrics.baseDisplacement_m > c.maxBaseDrift_m) failureReasons.push(`Base drifted ${metrics.baseDisplacement_m} m > ${c.maxBaseDrift_m} m`);
       if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);
+      for (const { instance, axis, minTravel_m, min, max } of linearTravel) {
+        const travel = max - min;
+        metrics[`${instance}.travel_${axis}_m`] = +travel.toFixed(4);
+        if (travel < minTravel_m) failureReasons.push(`${instance} travelled ${travel.toFixed(3)} m along ${axis}, target ${minTravel_m} m`);
+      }
+      if (synchronizedTravel) {
+        const minTravel = Math.min(...syncTracks.map(({ min, max }) => max - min));
+        metrics.synchronizedMinTravel_m = +minTravel.toFixed(5);
+        metrics.synchronizedMaxSpread_m = +peakSyncSpread.toFixed(5);
+        if (minTravel < synchronizedTravel.minTravel_m) {
+          failureReasons.push(`Shortest synchronized travel was ${(minTravel * 1000).toFixed(1)} mm, target ${synchronizedTravel.minTravel_m * 1000} mm`);
+        }
+        if (peakSyncSpread > synchronizedTravel.maxSpread_m) {
+          failureReasons.push(`Synchronized displacement spread reached ${(peakSyncSpread * 1000).toFixed(1)} mm, limit ${synchronizedTravel.maxSpread_m * 1000} mm`);
+        }
+      }
+      for (const orbit of test.measure.orbits ?? []) {
+        const { body, center, minTurns, direction } = orbit;
+        const path = measurePlanarOrbit({ frames, dt: 1 / TRACE_HZ }, orbit);
+        if (!path) {
+          failureReasons.push(`Orbit of "${body}" around "${center}" could not be measured from the trace`);
+          continue;
+        }
+        const { signedTurns, minRadius_m, maxRadius_m } = path;
+        metrics[`${body}.orbitSignedTurns`] = +signedTurns.toFixed(3);
+        metrics[`${body}.orbitMinRadius_m`] = +minRadius_m.toFixed(4);
+        metrics[`${body}.orbitMaxRadius_m`] = +maxRadius_m.toFixed(4);
+        const turns = direction === 'positive' ? signedTurns : direction === 'negative' ? -signedTurns : Math.abs(signedTurns);
+        if (turns < minTurns) failureReasons.push(`${body} completed ${turns.toFixed(2)} ${direction ? direction + ' ' : ''}orbit turns, target ${minTurns}`);
+        if (orbit.minRadius_m !== undefined && minRadius_m < orbit.minRadius_m) {
+          failureReasons.push(`${body} orbit radius fell to ${minRadius_m.toFixed(3)} m, minimum ${orbit.minRadius_m} m`);
+        }
+        if (orbit.maxRadius_m !== undefined && maxRadius_m > orbit.maxRadius_m) {
+          failureReasons.push(`${body} orbit radius reached ${maxRadius_m.toFixed(3)} m, maximum ${orbit.maxRadius_m} m`);
+        }
+      }
+      for (const { check: endIn, holdKey, marginKey } of receiverChecks(test.measure.endIn)) {
+        const result = measureEndIn({ frames, dt: 1 / TRACE_HZ }, endIn);
+        if (!result) {
+          failureReasons.push(`Final receiver occupancy for ${endIn.instance} in ${endIn.receiver} could not be measured from the trace`);
+        } else {
+          metrics[holdKey] = +result.hold_s.toFixed(4);
+          metrics[marginKey] = +result.finalMargin_m.toFixed(5);
+          if (result.hold_s + 1e-8 < endIn.minHold_s) {
+            const center = endIn.centerOffset_m ?? [0, 0, 0];
+            const mm = (meters: number) => (meters * 1000).toFixed(2);
+            const position = result.finalLocalPosition_m.map(mm).join(', ');
+            const bounds = endIn.halfExtents_m.map((half, axis) =>
+              `${'XYZ'[axis]} [${mm(center[axis] - half)}, ${mm(center[axis] + half)}]`).join(', ');
+            failureReasons.push(`${endIn.instance} ended inside ${endIn.receiver} for ${result.hold_s.toFixed(2)} s, target ${endIn.minHold_s} s. Final center in receiver-local XYZ [${position}] mm, allowed bounds ${bounds} mm`);
+          }
+        }
+      }
+      const indexed = test.measure.indexedMotion;
+      if (indexed) {
+        const result = measureIndexedMotion({ frames, dt: 1 / TRACE_HZ }, indexed);
+        if (!result) {
+          failureReasons.push('Indexed motion could not be measured from the recorded input and marker');
+        } else {
+          metrics.indexedConsecutiveSteps = result.consecutiveSteps;
+          if (result.consecutiveSteps < indexed.minSteps) {
+            failureReasons.push(`Measured ${result.consecutiveSteps} consecutive ${indexed.step_deg}° steps with dwell, target ${indexed.minSteps}`);
+          }
+        }
+      }
+      const timing = test.measure.followerTiming;
+      if (timing) {
+        const cycles = measureFollowerTiming({ frames, dt: 1 / TRACE_HZ }, timing);
+        metrics.followerCycles = cycles.length;
+        if (cycles.length < timing.minCycles) failureReasons.push(`Follower timing recorded ${cycles.length} complete turns after startup, target ${timing.minCycles}`);
+        if (cycles.length) {
+          const gap = Math.min(...cycles.map(({ phaseGap_deg }) => phaseGap_deg));
+          metrics.followerPhaseGap_deg = +gap.toFixed(2);
+          if (gap < timing.minPhaseGap_deg) failureReasons.push(`Follower peaks were only ${gap.toFixed(1)}° apart, target ${timing.minPhaseGap_deg}°`);
+          if (timing.followers.length === 3 || timing.maxPhaseGap_deg !== undefined) {
+            const maxGap = Math.max(...cycles.flatMap(({ phaseGaps_deg }) => phaseGaps_deg));
+            metrics.followerMaxPhaseGap_deg = +maxGap.toFixed(2);
+            if (timing.maxPhaseGap_deg !== undefined && maxGap > timing.maxPhaseGap_deg) {
+              failureReasons.push(`Follower peaks were up to ${maxGap.toFixed(1)}° apart, limit ${timing.maxPhaseGap_deg}°`);
+            }
+          }
+          for (const [index, id] of timing.followers.entries()) {
+            const readings = cycles.map(({ flags }) => flags[index]);
+            const stroke = Math.min(...readings.map(({ stroke_m }) => stroke_m));
+            const dwell = Math.min(...readings.map(({ lowDwell_s }) => lowDwell_s));
+            metrics[`${id}.cycleStroke_m`] = +stroke.toFixed(4);
+            metrics[`${id}.lowDwell_s`] = +dwell.toFixed(3);
+            if (stroke < timing.minStroke_m) failureReasons.push(`${id} travelled ${stroke.toFixed(3)} m in its shortest stroke, target ${timing.minStroke_m} m`);
+            if (timing.minLowDwell_s !== undefined && dwell < timing.minLowDwell_s) failureReasons.push(`${id} stayed low ${dwell.toFixed(2)} s in its shortest dwell, target ${timing.minLowDwell_s} s`);
+          }
+        }
+      }
+      if (uprightTilt.size) {
+        metrics.maxInstanceTilt_deg = +Math.max(...uprightTilt.values()).toFixed(2);
+        for (const [id, tilt] of uprightTilt) {
+          metrics[`${id}.maxTilt_deg`] = +tilt.toFixed(2);
+          if (c.maxInstanceTilt_deg !== undefined && tilt > c.maxInstanceTilt_deg) failureReasons.push(`${id} tilted ${tilt.toFixed(2)}°, limit ${c.maxInstanceTilt_deg}°`);
+        }
+      }
+      if (liftPayload) {
+        const lift = maxPayloadHeight - payloadStartHeight;
+        const returnError = Math.abs(payloadHeight - payloadStartHeight);
+        metrics.payloadLift_m = +lift.toFixed(4);
+        metrics.payloadMaxHeight_m = +maxPayloadHeight.toFixed(4);
+        metrics.payloadReturnError_m = +returnError.toFixed(4);
+        if (liftPayload.holder) metrics.payloadSeparation_m = +maxPayloadSeparation.toFixed(4);
+        if (c.minPayloadLift_m !== undefined && lift < c.minPayloadLift_m) failureReasons.push(`Payload lifted ${lift.toFixed(3)} m, target ${c.minPayloadLift_m} m`);
+        if (c.maxPayloadSeparation_m !== undefined && maxPayloadSeparation > c.maxPayloadSeparation_m) failureReasons.push(`Payload reached ${maxPayloadSeparation.toFixed(3)} m from the holder, limit ${c.maxPayloadSeparation_m} m`);
+        if (c.maxPayloadReturnError_m !== undefined && returnError > c.maxPayloadReturnError_m) failureReasons.push(`Payload ended ${returnError.toFixed(3)} m from its starting height, limit ${c.maxPayloadReturnError_m} m`);
+      }
       if (clearanceHit) { metrics.clearanceViolation = 1; failureReasons.push(`Clearance violated: ${clearanceHit}`); } else metrics.clearanceViolation = 0;
       if (groundHit) { metrics.groundContactViolation = 1; failureReasons.push(`${groundHit} touched the ground`); } else metrics.groundContactViolation = 0;
       if (c.torqueWithinRating && torqueFail.length) { failureReasons.push(`Motor demand exceeds rating: ${torqueFail.slice(0, 3).join('; ')}`); if (torqueNotes.length) saturationNote(); } else saturationNote();

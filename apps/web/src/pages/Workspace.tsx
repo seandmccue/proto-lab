@@ -1,12 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { Assembly, VersionRecord } from '@protolab/schema';
+import { tiltDeg, upVector } from '@protolab/parts';
+import type { Assembly, TestResult, TestSpec, VersionRecord } from '@protolab/schema';
 import Header from '../components/Header.tsx';
 import Viewer from '../components/Viewer.tsx';
+import { recordedPenPath } from '../components/replayEvidence.ts';
+import ReplayComparison from '../components/ReplayComparison.tsx';
+import CrabProofPanel, { crabProofPair } from '../components/CrabProofPanel.tsx';
+import FollowerTimingEvidence from '../components/FollowerTimingEvidence.tsx';
+import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
+import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
+import TrayTiltEvidence from '../components/TrayTiltEvidence.tsx';
+import LotusReplayEvidence from '../components/LotusReplayEvidence.tsx';
+import ReceiverReplayEvidence, { replayReceiverTargets } from '../components/ReceiverReplayEvidence.tsx';
+import IndexedMotionEvidence, { carouselBaselineVersionId } from '../components/IndexedMotionEvidence.tsx';
+import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
-import BuildProgress, { BuildStrip, IterationRibbon, keyMetric } from '../components/BuildProgress.tsx';
+import BuildProgress, { BuildStrip, IterationRibbon, LiveBuildHeartbeat, SimulationStatus, keyMetric, recordedTestSpec } from '../components/BuildProgress.tsx';
 import { api, fmt, type InventionDetail, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
+import { largeShowcases } from '../../../large-showcases.mts';
 import './Workspace.css';
 
 /** Change suggestions that fit the mechanism actually built (wings, legs, rotors, launchers, grippers), not just walkers. */
@@ -16,6 +29,7 @@ function suggestionsFor(version: VersionRecord | null): string[] {
   const kinds = new Set(version.assembly.parts.map((p) => p.kind as string));
   const tests = new Set(version.tests.map((t) => t.kind));
   const out: string[] = [];
+  if (version.assembly.parts.some((part) => /crab/i.test(part.name))) out.push('Scuttle 35 cm in 6 seconds', 'Keep peak tilt below 5°', 'Make the claws larger');
   if (version.assembly.family === 'legged_walker' || cats.has('legs')) out.push('Give it six legs', 'Walk 30% further', 'Make it dance', 'Use longer legs', 'Make it calmer');
   const rotor = kinds.has('big_wheel') || kinds.has('propeller') || kinds.has('wheel');
   // Sails and blades are wing parts too (style 3); only count real flapping wings.
@@ -29,30 +43,124 @@ function suggestionsFor(version: VersionRecord | null): string[] {
   return [...new Set(out)].slice(0, 6);
 }
 
-function replayStory(versions: VersionMeta[]) {
+type ReplayStep = { version: VersionMeta; test: TestSummary; label: string };
+
+function replayStory(versions: VersionMeta[]): ReplayStep[] {
   const results = versions.flatMap((version) => version.tests.map((test) => ({ version, test })));
-  const testName = (test: TestSummary) => test.testId.replace(/#\d+$/, '');
   for (let i = results.length - 1; i >= 1; i--) {
     const passed = results[i];
     if (!passed.test.passed) continue;
     const failed = results.slice(0, i).reverse().find((result) =>
       !result.test.passed && result.version.iteration < passed.version.iteration &&
-      result.test.kind === passed.test.kind && testName(result.test) === testName(passed.test)
+      sameTestName(result.test, passed.test)
     );
     if (!failed) continue;
     const dance = results.slice(i + 1).find((result) => result.test.passed && /^dance\b/i.test(result.test.testId));
     return [
-      { ...failed, label: 'First test' },
-      { ...passed, label: 'Revised test' },
+      { ...failed, label: 'Before revision' },
+      { ...passed, label: 'After revision' },
       ...(dance ? [{ ...dance, label: 'Dance' }] : []),
     ];
   }
   return [];
 }
 
+function revisionStory(before: VersionMeta, after: VersionMeta): ReplayStep[] {
+  const result = after.tests[after.tests.length - 1];
+  if (!result) return [];
+  const baseline = [...before.tests].reverse().find((test) => test.kind === result.kind) ?? before.tests[before.tests.length - 1];
+  return baseline ? [{ version: before, test: baseline, label: 'Before your change' }, { version: after, test: result, label: 'After your change' }] : [];
+}
+
+function sameTestName(before: TestSummary, after: TestSummary) {
+  return before.kind === after.kind && before.testId.replace(/#\d+$/, '') === after.testId.replace(/#\d+$/, '');
+}
+
+function testReadout(test: TestSummary, label: string) {
+  if (test.kind === 'walk' && test.metrics.distance_m !== undefined) {
+    const tilt = test.metrics.maxTilt_deg;
+    return `${fmt.cm(test.metrics.distance_m)} travelled${tilt !== undefined ? ` · ${fmt.deg(tilt)} peak tilt` : ''}`;
+  }
+  if (label === 'Dance' && test.metrics.maxTilt_deg !== undefined) return `tilt ${fmt.deg(test.metrics.maxTilt_deg)}`;
+  return keyMetric(test);
+}
+
+function walkTargets(test: TestSummary): string | null {
+  if (test.kind !== 'walk') return null;
+  const reasons = test.failureReasons.join(' ');
+  const distance = reasons.match(/target (\d+(?:\.\d+)?) m/i)?.[1];
+  const tilt = reasons.match(/limit (\d+(?:\.\d+)?)°/i)?.[1];
+  const duration = test.metrics.duration_s;
+  const values = [
+    distance && `at least ${Number(distance) * 100} cm${duration ? ` in ${duration} s` : ''}`,
+    tilt && `at most ${tilt}° tilt`,
+  ].filter(Boolean);
+  return values.length ? values.join(' · ') : null;
+}
+
+type LiveSnapshot = Awaited<ReturnType<typeof api.jobAssembly>>;
+const exhaustedTestBudget = /^Test budget \((\d+)\) exhausted\b/;
+
+function movedPart(before: Assembly['instances'][number] | undefined, after: Assembly['instances'][number]) {
+  return !before || before.partId !== after.partId ||
+    after.transform.position.some((value, i) => Math.abs(value - before.transform.position[i]) > 1e-4) ||
+    Math.abs(after.transform.rotation.reduce((dot, value, i) => dot + value * before.transform.rotation[i], 0)) < 0.99999;
+}
+
+function revisionChanges(before: Assembly, after: Assembly) {
+  const previousParts = new Map(before.instances.map((part) => [part.id, part]));
+  const changed = new Set(after.instances.filter((part) => movedPart(previousParts.get(part.id), part)).map((part) => part.id));
+  const previousDrives = new Map(before.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
+  const nextDrives = new Map(after.controller.drives.map((drive) => [drive.controlId, JSON.stringify(drive)]));
+  const drives = new Set<string>();
+  for (const joint of after.joints) {
+    const controlId = joint.motor?.controlId;
+    if (controlId && previousDrives.get(controlId) !== nextDrives.get(controlId)) drives.add(joint.b.instanceId);
+  }
+  return { changed, drives };
+}
+
+function walkTiltHighlight(assembly: Assembly, test: TestResult, definition: TestSpec | undefined, time: number) {
+  if (test.kind !== 'walk' || test.passed || definition?.kind !== 'walk') return null;
+  const { frames, dt } = test.trace;
+  if (!frames.length || dt <= 0) return null;
+  const end = Math.min(frames.length - 1, Math.round(time / dt));
+  // Brief failures are easy to miss at normal playback speed. Hold the strongest
+  // recent reading long enough to see which side the chassis leaned toward.
+  const start = Math.max(0, Math.ceil((time - 0.45) / dt));
+  let peak = { index: -1, tilt: definition.maxTilt_deg };
+  for (let index = start; index <= end; index++) {
+    const pose = frames[index].bodies[definition.base];
+    const tilt = pose ? tiltDeg(pose.rotation) : 0;
+    if (tilt > peak.tilt) peak = { index, tilt };
+  }
+  if (peak.index < 0) return null;
+  const frame = frames[peak.index];
+  const base = frame.bodies[definition.base];
+
+  const highlights = new Map<string, DiagnosticTone>([[definition.base, 'failure']]);
+  const [leanX, , leanZ] = upVector(base.rotation);
+  const pads = new Set(assembly.parts.filter((part) => part.kind === 'foot_pad').map((part) => part.id));
+  let feet = 0;
+  for (const foot of assembly.instances) {
+    const pose = frame.bodies[foot.id];
+    if (!pads.has(foot.partId) || !pose) continue;
+    const side = (pose.position[0] - base.position[0]) * leanX + (pose.position[2] - base.position[2]) * leanZ;
+    if (side <= 0) continue;
+    feet++;
+    highlights.set(foot.id, 'failure');
+    const link = assembly.joints.find((joint) => joint.type === 'fixed' && joint.b.instanceId === foot.id);
+    if (link) highlights.set(link.a.instanceId, 'failure');
+  }
+  return { highlights, tilt: peak.tilt, feet, limit: definition.maxTilt_deg };
+}
+
 export default function Workspace() {
   const { id = '' } = useParams();
   const [params] = useSearchParams();
+  const compareLink = params.get('compare') === '1';
+  const replayLink = compareLink || params.get('replay') === '1';
+  const requestedVersionId = replayLink ? params.get('version') : null;
   const nav = useNavigate();
   const [detail, setDetail] = useState<InventionDetail | null>(null);
   const [jobId, setJobId] = useState<string | null>(params.get('job'));
@@ -61,30 +169,57 @@ export default function Workspace() {
   const [jobStep, setJobStep] = useState<string>('');
   const [reconnecting, setReconnecting] = useState(false);
   const [versionId, setVersionId] = useState<string | null>(null);
-  const [live, setLive] = useState<{ assembly: Assembly; iteration: number; rationale: string } | null>(null); // in-progress assembly before the first simulation
+  const pinnedVersionId = detail?.versions.some((version) => version.id === requestedVersionId) ? requestedVersionId : null;
+  const [presentPinnedVersion, setPresentPinnedVersion] = useState(true);
+  const [live, setLive] = useState<(LiveSnapshot & { newIds: string[]; changedIds: Set<string> }) | null>(null);
+  const [viewMode, setViewMode] = useState<'auto' | 'live' | 'tested'>('auto');
   const [load, setLoad] = useState<{ active: number; queued: number; maxConcurrent: number } | null>(null); // queue hint while this build waits for a worker
-  // Drop-in reveal: when a new live assembly arrives, its parts appear one by one instead of all at once.
-  const [reveal, setReveal] = useState(0);
+  const [reveal, setReveal] = useState<{ snapshot: LiveSnapshot; count: number } | null>(null);
+  const [introActive, setIntroActive] = useState(false);
+  const [introBlueprint, setIntroBlueprint] = useState(false);
+  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const hasLiveAssembly = Boolean(live?.assembly.instances.length);
   useEffect(() => {
-    if (!live) { setReveal(0); return; }
-    const total = live.assembly.instances.length; let n = Math.min(reveal, total);
-    if (n >= total) return;
-    const id = setInterval(() => { n += 1; setReveal(n); if (n >= total) clearInterval(id); }, 110);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live]);
-  const liveShown = useMemo(() => {
-    if (!live) return null;
-    const inst = live.assembly.instances.slice(0, Math.max(1, reveal)); const ids = new Set(inst.map((i) => i.id));
-    return { ...live.assembly, instances: inst, joints: live.assembly.joints.filter((j) => ids.has(j.a.instanceId) && ids.has(j.b.instanceId)) } as Assembly;
-  }, [live, reveal]);
-  const revealGlow = useMemo(() => { if (!live) return new Set<string>(); const inst = live.assembly.instances; return reveal < inst.length && reveal > 0 ? new Set([inst[reveal - 1].id]) : new Set<string>(); }, [live, reveal]);
+    if (!hasLiveAssembly || reducedMotion) return;
+    setIntroActive(true);
+    setIntroBlueprint(true);
+    const shade = setTimeout(() => setIntroBlueprint(false), 4000);
+    const finish = setTimeout(() => setIntroActive(false), 4650);
+    return () => {
+      clearTimeout(shade);
+      clearTimeout(finish);
+      setIntroActive(false);
+      setIntroBlueprint(false);
+    };
+  }, [hasLiveAssembly, jobId, reducedMotion]);
+  const revealCount = !live || reducedMotion ? live?.newIds.length ?? 0 : reveal?.snapshot === live ? reveal.count : 1;
+  useEffect(() => {
+    if (!live || revealCount >= live.newIds.length) return;
+    const timer = setTimeout(() => setReveal({ snapshot: live, count: revealCount + 1 }), Math.min(110, 1300 / live.newIds.length));
+    return () => clearTimeout(timer);
+  }, [live, revealCount]);
+  const visibleLiveIds = useMemo(() => {
+    if (!live || revealCount >= live.newIds.length) return undefined;
+    const remaining = new Set(live.newIds.slice(revealCount));
+    return new Set(live.assembly.instances.filter((part) => !remaining.has(part.id)).map((part) => part.id));
+  }, [live, revealCount]);
+  const liveHighlightIds = useMemo(() => {
+    if (!live) return undefined;
+    const additions = new Set(live.newIds);
+    const highlighted = new Set([...live.changedIds].filter((id) => !additions.has(id)));
+    const arriving = live.newIds[revealCount - 1];
+    if (arriving) highlighted.add(arriving);
+    return highlighted;
+  }, [live, revealCount]);
   const [version, setVersion] = useState<VersionRecord | null>(null);
   const [prevVersion, setPrevVersion] = useState<VersionRecord | null>(null);
   const [testId, setTestId] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const [playing, setPlaying] = useState(!reducedMotion);
   const [explode, setExplode] = useState(0);
   const [blueprint, setBlueprint] = useState(false);
+  const [showStrokeGuides, setShowStrokeGuides] = useState(() =>
+    largeShowcases.find((entry) => entry.inventionId === id)?.showStrokeGuidesInitially ?? id !== 'inv_drawing_automaton');
+  const [showMotionPath, setShowMotionPath] = useState(true);
   const [follow, setFollow] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
@@ -95,15 +230,114 @@ export default function Workspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [remixOpen, setRemixOpen] = useState(false);
+  const [changeMode, setChangeMode] = useState<'follow-up' | 'remix' | null>(null);
+  const [sourceVersion, setSourceVersion] = useState<VersionRecord | null>(null);
+  const [localRevision, setLocalRevision] = useState<{ jobId: string; versionId: string; changeRequest: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean } | null>(null);
+  const [explain, setExplain] = useState<{ vid: string; text: string; modelId: string; loading?: boolean; error?: string } | null>(null);
   const [mobilePane, setMobilePane] = useState<'canvas' | 'tree' | 'agent'>('canvas');
-  const [stageMode, setStageMode] = useState(params.get('replay') === '1');
+  const [stageMode, setStageMode] = useState(replayLink);
+  const [comparisonOpen, setComparisonOpen] = useState(compareLink);
   const captureRef = useRef<(() => string | null) | null>(null);
   const uploadedPreview = useRef(false);
   const running = jobStatus === 'queued' || jobStatus === 'running';
-  const story = useMemo(() => replayStory(detail?.versions ?? []), [detail?.versions]);
+  const latestAssemblyEvent = useMemo(() => [...events].reverse().find((event) => event.type === 'assembly' || event.type === 'version'), [events]);
+  const newerAssembly = latestAssemblyEvent?.type === 'assembly' && !!live && live.at >= latestAssemblyEvent.t;
+  const showLive = hasLiveAssembly && (running
+    ? !version || viewMode === 'live' || (viewMode === 'auto' && (newerAssembly || introActive))
+    : introActive && viewMode === 'auto');
+  const activeBlueprint = blueprint || (showLive && introBlueprint);
+  const sourceId = detail?.source?.id;
+  const sourceVersionId = detail?.source?.versionId ?? detail?.invention.parentVersionId;
+  useEffect(() => {
+    if (!sourceId || !sourceVersionId) return;
+    let cancelled = false;
+    api.version(sourceId, sourceVersionId).then(({ version }) => { if (!cancelled) setSourceVersion(version); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [sourceId, sourceVersionId]);
+
+  const ownBaselineId = detail?.latestJob?.baselineVersionId ?? (localRevision?.jobId === jobId ? localRevision?.versionId : null);
+  const revisionResultId = detail?.latestJob?.versionId;
+  const changeBrief = detail?.latestJob?.changeRequest ?? localRevision?.changeRequest ?? detail?.source?.changeRequest;
+  const showcase = largeShowcases.find((entry) => entry.inventionId === id && entry.versionId === detail?.invention.currentVersionId);
+  const story = useMemo(() => {
+    const versions = detail?.versions ?? [];
+    if (replayLink && showcase?.baseline) {
+      const before = versions.find((version) => version.id === showcase.baseline?.versionId);
+      const after = versions.find((version) => version.id === showcase.versionId);
+      const failed = before?.tests.find((test) => test.testId === showcase.baseline?.testId && !test.passed);
+      const passed = after?.tests.find((test) => test.testId === showcase.testIds[0] && test.passed);
+      if (before && after && before.iteration < after.iteration && failed && passed) return [
+        { version: before, test: failed, label: 'Before revision' },
+        { version: after, test: passed, label: 'After revision' },
+      ];
+    }
+    const ownBaseline = versions.find((v) => v.id === ownBaselineId);
+    const before = ownBaseline ?? sourceVersion;
+    const after = revisionResultId === undefined ? versions[versions.length - 1] : versions.find((v) => v.id === revisionResultId);
+    const saved = replayStory(versions);
+    if (replayLink && detail?.invention.id === 'inv_b99f505fab294915') {
+      const initial = versions.find((version) => version.id === carouselBaselineVersionId);
+      const baseline = initial?.tests.find((test) => test.testId === 'geneva_10s#1' && !test.passed);
+      const revision = [...versions].reverse().flatMap((version) => version.tests.map((test) => ({ version, test })))
+        .find(({ test }) => test.passed && test.metrics.indexedConsecutiveSteps >= 2);
+      if (initial && baseline && revision) return [
+        { version: initial, test: baseline, label: 'Before revision' },
+        { ...revision, label: 'After revision' },
+      ];
+    }
+    if (replayLink && detail?.invention.id === 'inv_437c3b45e27d4138') {
+      const initial = versions.find(({ iteration }) => iteration === 1);
+      const baseline = initial?.tests.find((test) => !test.passed && test.metrics.groundContactViolation === 1);
+      const revision = [...versions].reverse().flatMap((version) => version.tests.map((test) => ({ version, test })))
+        .find(({ test }) => test.passed && test.metrics.endInHold_s >= 0.75);
+      if (initial && baseline && revision) return [
+        { version: initial, test: baseline, label: 'Before revision' },
+        { ...revision, label: 'After revision' },
+      ];
+    }
+    if (replayLink && detail?.invention.id === 'inv_ba7b3c7716564397') {
+      const initial = versions.find((version) => version.id === 'ver_3989ed3cf2374987');
+      const baseline = initial?.tests.find((test) => test.kind === 'motion' && test.testId === 'lotus_cycle#1');
+      if (initial && baseline) {
+        const revisions = versions.filter((version) => version.iteration > initial.iteration)
+          .flatMap((version) => version.tests.filter((test) => sameTestName(baseline, test))
+            .map((test) => ({ version, test }))).reverse();
+        const revision = revisions.find(({ test }) => test.passed) ?? revisions[0];
+        if (revision) return [
+          { version: initial, test: baseline, label: 'Before revision' },
+          { ...revision, label: 'After revision' },
+        ];
+      }
+    }
+    if (replayLink && detail?.invention.id === 'inv_d3f76fcc393b49d6' && saved[1]) {
+      const initial = versions.find((version) => version.id === 'ver_26bf003825cd48d9');
+      const failure = initial?.tests.find((test) => !test.passed && sameTestName(test, saved[1].test));
+      if (initial && failure) return [
+        { version: initial, test: failure, label: 'Before revision' },
+        ...saved.slice(1),
+      ];
+    }
+    if (replayLink && detail?.invention.id === curatedOrreryId) {
+      const initial = versions.find((version) => version.id === 'ver_39ff127f0f23431a');
+      const revision = versions.at(-1);
+      if (initial && revision && initial.id !== revision.id) {
+        const result = [...revision.tests].reverse().find((test) => test.kind === 'motion' &&
+          initial.tests.some((baseline) => sameTestName(baseline, test)));
+        const baseline = result && initial.tests.find((test) => sameTestName(test, result));
+        if (baseline && result) return [
+          { version: initial, test: baseline, label: 'First assembly' },
+          { version: revision, test: result, label: 'Revised assembly' },
+        ];
+      }
+    }
+    if (!ownBaselineId && replayLink && saved.length) return saved;
+    if (before && after && before.id !== after.id && (!ownBaseline || before.iteration < after.iteration)) {
+      const revision = revisionStory(before, after);
+      if (revision.length) return revision;
+    }
+    return saved;
+  }, [detail?.versions, detail?.invention.id, ownBaselineId, sourceVersion, replayLink, revisionResultId, showcase]);
 
   const refresh = useCallback(async () => {
     const d = await api.invention(id);
@@ -120,8 +354,14 @@ export default function Workspace() {
     if (!jobId) return;
     let since = 0, stop = false, retries = 0;
     let needsRefresh = false;
+    let pendingAssembly: JobEvent | undefined;
+    let readingAssembly = false;
+    let wasActive = jobId === params.get('job') || jobId === localRevision?.jobId;
     let timer: ReturnType<typeof setTimeout>;
     setEvents([]);
+    setLive(null);
+    setReveal(null);
+    setViewMode('auto');
     setReconnecting(false);
     const tick = async () => {
       try {
@@ -130,17 +370,42 @@ export default function Workspace() {
         if (j.events.length) { setEvents((prev) => [...prev, ...j.events]); since = j.eventCount; }
         setJobStatus(j.status); setJobStep(j.step);
         if (j.status === 'queued') api.load().then((next) => { if (!stop) setLoad(next); }).catch(() => {}); else setLoad(null);
-        if ((j.status === 'queued' || j.status === 'running') && j.events.some((e) => e.type === 'assembly')) api.jobAssembly(jobId).then((l) => { if (!stop) setLive(l); }).catch(() => {}); // the live snapshot only exists while the job runs; a finished job's replay would 404
         const active = j.status === 'queued' || j.status === 'running';
+        pendingAssembly = [...j.events].reverse().find((event) => event.type === 'assembly') ?? pendingAssembly;
+        const recentlyFinished = wasActive && pendingAssembly && Date.now() - Date.parse(pendingAssembly.t) < 15_000;
+        if ((active || recentlyFinished) && pendingAssembly && !readingAssembly) {
+          const requested = pendingAssembly;
+          readingAssembly = true;
+          void api.jobAssembly(jobId).then((next) => {
+            if (stop) return;
+            if (pendingAssembly === requested || (pendingAssembly && pendingAssembly.t <= next.at)) pendingAssembly = undefined;
+            setLive((previous) => {
+              if (previous && previous.at >= next.at) return previous;
+              const before = new Map(previous?.assembly.instances.map((part) => [part.id, part]));
+              return {
+                ...next,
+                newIds: next.assembly.instances.filter((part) => !before.has(part.id)).map((part) => part.id),
+                changedIds: new Set(next.assembly.instances.filter((part) => movedPart(before.get(part.id), part)).map((part) => part.id)),
+              };
+            });
+          }).catch(() => {}).finally(() => { readingAssembly = false; });
+        }
         needsRefresh ||= !active || j.events.some((e) => e.type === 'version' || e.type === 'done');
         if (needsRefresh) { await refresh(); needsRefresh = false; }
         if (stop) return;
         retries = 0;
         setReconnecting(false);
-        if (active) timer = setTimeout(tick, 700);
+        if (active) {
+          wasActive = true;
+          timer = setTimeout(tick, 700);
+        } else if (wasActive && j.versionId) {
+          setVersionId(j.versionId);
+        }
       } catch (e) {
         if (stop) return;
         if (/not found|forbidden|unauthorized|HTTP (400|401|403|404)/i.test((e as Error).message)) {
+          setJobStatus('');
+          setReconnecting(false);
           setError((e as Error).message);
           return;
         }
@@ -150,33 +415,40 @@ export default function Workspace() {
     };
     void tick();
     return () => { stop = true; clearTimeout(timer); };
-  }, [jobId, refresh]);
+  }, [jobId, localRevision?.jobId, params, refresh]);
 
   // Follow the newest version while running, otherwise keep the user's pick
   useEffect(() => {
     if (!detail) return;
     const latest = detail.versions[detail.versions.length - 1]?.id ?? null;
-    if (!versionId || running) {
+    if (!versionId || (running && viewMode !== 'tested')) {
+      if (!versionId && !running && pinnedVersionId) {
+        setVersionId(pinnedVersionId);
+        setTestId(largeShowcases.find((entry) => entry.inventionId === id && entry.versionId === pinnedVersionId)?.testIds[0] ?? null);
+        return;
+      }
       const first = !running && stageMode ? story[0] : undefined;
       setVersionId(first?.version.id ?? latest);
       if (first) setTestId(first.test.testId);
     }
-  }, [detail, running, stageMode, story, versionId]);
+  }, [detail, id, pinnedVersionId, running, stageMode, story, versionId, viewMode]);
 
   useEffect(() => {
     if (!versionId || !detail) return;
     let cancelled = false;
-    api.version(id, versionId, true).then((r) => {
+    const requestVersion = sourceVersion?.id === versionId ? Promise.resolve({ version: sourceVersion }) : api.version(id, versionId, true);
+    requestVersion.then((r) => {
       if (cancelled) return;
       setVersion(r.version);
       setTestId((cur) => (cur && r.version.tests.some((t) => t.testId === cur) ? cur : r.version.tests[r.version.tests.length - 1]?.testId ?? null));
     }).catch((e) => setError((e as Error).message));
     const idx = detail.versions.findIndex((v) => v.id === versionId);
-    const prev = idx > 0 ? detail.versions[idx - 1] : null;
-    if (prev) api.version(id, prev.id, false).then((r) => { if (!cancelled) setPrevVersion(r.version); }).catch(() => {});
-    else setPrevVersion(null);
+    const prev = story[1]?.version.id === versionId ? story[0].version : idx > 0 ? detail.versions[idx - 1] : null;
+    setPrevVersion(null);
+    if (prev?.id === sourceVersion?.id) setPrevVersion(sourceVersion);
+    else if (prev) api.version(id, prev.id, false).then((r) => { if (!cancelled) setPrevVersion(r.version); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [id, versionId, detail]);
+  }, [id, versionId, detail, sourceVersion, story]);
 
   // Once a passing version exists and the job is done, capture a thumbnail for the gallery (owner only).
   useEffect(() => {
@@ -192,33 +464,185 @@ export default function Workspace() {
   }, [detail, running, version, id]);
 
   const test = useMemo(() => version?.tests.find((t) => t.testId === testId) ?? null, [version, testId]);
-  const changedIds = useMemo(() => {
-    if (!version || !prevVersion) return new Set<string>();
-    const prevMap = new Map(prevVersion.assembly.instances.map((i) => [i.id, i]));
-    const s = new Set<string>();
-    for (const i of version.assembly.instances) {
-      const p = prevMap.get(i.id);
-      if (!p || p.partId !== i.partId || p.transform.position.some((v, k) => Math.abs(v - i.transform.position[k]) > 1e-4) || p.transform.rotation.some((v, k) => Math.abs(v - i.transform.rotation[k]) > 1e-4)) s.add(i.id);
-    }
-    return s;
+  const { changed: changedIds, drives: driveChangedIds } = useMemo(() => {
+    if (!version || !prevVersion) return { changed: new Set<string>(), drives: new Set<string>() };
+    return revisionChanges(prevVersion.assembly, version.assembly);
   }, [version, prevVersion]);
+  const revisionHighlights = useMemo(() => {
+    const highlights = new Map<string, DiagnosticTone>();
+    for (const partId of [...changedIds, ...driveChangedIds]) highlights.set(partId, 'change');
+    return highlights;
+  }, [changedIds, driveChangedIds]);
 
-  const act = async (fn: () => Promise<{ inventionId: string; jobId: string }>) => {
+  const act = async (mode: 'follow-up' | 'remix', changeRequest: string) => {
+    const baselineId = version?.inventionId === id ? version.id : detail?.invention.currentVersionId;
+    if (!baselineId || busy) return;
     setBusy(true); setError(null);
     try {
-      const r = await fn();
+      const run = mode === 'follow-up' ? api.followUp : api.remix;
+      const r = await run(id, changeRequest, baselineId);
       setRequest('');
+      setChangeMode(null);
       if (r.inventionId !== id) nav(`/i/${r.inventionId}?job=${r.jobId}`);
-      else { setJobId(r.jobId); setJobStatus('queued'); }
+      else {
+        setLocalRevision({ jobId: r.jobId, versionId: baselineId, changeRequest });
+        setStageMode(false);
+        setComparisonOpen(false);
+        setJobId(r.jobId);
+        setJobStatus('queued');
+      }
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
   const inv = detail?.invention;
   const storyStep = story.findIndex((step) => step.version.id === versionId && step.test.testId === testId);
   const currentStep = story[storyStep];
-  const stepDecision = version?.id === currentStep?.version.id ? version?.decisions.slice().reverse().find((decision) => decision.source === 'model' && decision.basedOn) : undefined;
-  const canFollowUp = !!inv?.isOwner && !running && !!inv.currentVersionId;
+  const stepDecision = storyStep === 1 && version?.id === currentStep?.version.id ? version?.decisions.slice().reverse().find((decision) => decision.source === 'model') : undefined;
+  const canRequestChange = !running && !!inv?.currentVersionId && !!version && version.id === versionId && version.inventionId === id;
+  const comparing = !running && storyStep >= 0 && storyStep < 2;
+  const cameraLock = comparing ? story.slice(0, 2).map((step) => step.version.id).join(':') : undefined;
+  const target = story[0]?.label === 'Before revision' ? walkTargets(story[0].test) : null;
+  const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
+  const sharedTravel = story[0]?.test.kind === 'motion' && story[1]?.test.kind === 'motion' &&
+    Object.keys(story[0].test.metrics).some((metric) => /\.travel_[xyz]_m$/.test(metric) && metric in story[1].test.metrics);
+  const carouselPair = inv?.id === 'inv_b99f505fab294915' && story[0]?.version.id === carouselBaselineVersionId &&
+    !!story[1]?.test.passed && story[1].test.metrics.indexedConsecutiveSteps >= 2;
+  const canCompare = !running && !!story[1] && (!separateChecks || sharedTravel || carouselPair) && story[0].version.id !== story[1].version.id;
+  const sideBySide = comparisonOpen && canCompare;
+  const pinnedPresentation = presentPinnedVersion && stageMode && !sideBySide && !!pinnedVersionId && versionId === pinnedVersionId;
+  const stageRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!changeMode && !publishOpen) return;
+    const viewport = window.visualViewport;
+    const fitDialog = () => {
+      document.querySelectorAll<HTMLElement>('.workbench-dialog').forEach((dialog) => {
+        dialog.style.top = `${viewport?.offsetTop ?? 0}px`;
+        dialog.style.height = `${viewport?.height ?? window.innerHeight}px`;
+      });
+    };
+    fitDialog();
+    window.addEventListener('resize', fitDialog);
+    viewport?.addEventListener('resize', fitDialog);
+    viewport?.addEventListener('scroll', fitDialog);
+    return () => {
+      window.removeEventListener('resize', fitDialog);
+      viewport?.removeEventListener('resize', fitDialog);
+      viewport?.removeEventListener('scroll', fitDialog);
+    };
+  }, [changeMode, publishOpen]);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const workbench = stage.closest('.workbench');
+    const heading = stage.parentElement?.querySelector('.workbench-panel-heading');
+    const fit = () => {
+      if (!stage.getClientRects().length) return;
+      const top = stage.getBoundingClientRect().top + window.scrollY;
+      const viewport = window.visualViewport?.height ?? window.innerHeight;
+      stage.style.setProperty('--stage-room', `${Math.floor(viewport - top - 12)}px`);
+    };
+    const observer = new ResizeObserver(fit);
+    if (workbench) observer.observe(workbench);
+    workbench?.querySelectorAll(':scope > :not(.workbench-grid)').forEach((element) => observer.observe(element));
+    if (heading) observer.observe(heading);
+    window.addEventListener('resize', fit);
+    window.visualViewport?.addEventListener('resize', fit);
+    fit();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fit);
+      window.visualViewport?.removeEventListener('resize', fit);
+    };
+  }, [sideBySide, mobilePane, running, reconnecting, Boolean(error), jobStatus, stageMode, inv?.title, version?.id]);
+  const canonicalProof = sideBySide && story[0].version.id === crabProofPair.beforeId && story[1].version.id === crabProofPair.afterId;
   const vmeta = detail?.versions.find((v) => v.id === versionId);
+  const [earlierTestSpecs, setEarlierTestSpecs] = useState<Record<string, TestSpec>>({});
+  const testSpecKey = version && test ? `${version.id}/${test.testId}` : null;
+  const testDefinition = test && version
+    ? recordedTestSpec(test.testId, [version, prevVersion?.id === version.parentVersionId ? prevVersion : null]) ?? (testSpecKey ? earlierTestSpecs[testSpecKey] : undefined)
+    : undefined;
+  const strokeTargets = testDefinition?.kind === 'motion' && test?.trace.frames.length ? testDefinition.measure.linearTravel : undefined;
+  const receiverTarget = replayReceiverTargets(testDefinition);
+  const receiverPath = Array.isArray(receiverTarget) ? undefined : receiverTarget?.instance;
+  const motionPath = receiverPath ?? (version ? recordedPenPath(version.assembly, test) : undefined);
+  const sourceParentId = detail?.source?.versionId;
+  useEffect(() => {
+    if (!version || !test || !testSpecKey || testDefinition || !version.parentVersionId) return;
+    let cancelled = false;
+    void (async () => {
+      let ancestor = prevVersion?.id === version.parentVersionId ? prevVersion : version;
+      const visited = new Set([ancestor.id]);
+      while (!cancelled && ancestor.parentVersionId && !visited.has(ancestor.parentVersionId)) {
+        const parentId = ancestor.parentVersionId;
+        visited.add(parentId);
+        const inventionId = parentId === sourceParentId && sourceId ? sourceId : ancestor.inventionId;
+        ancestor = (await api.version(inventionId, parentId, false)).version;
+        const definition = recordedTestSpec(test.testId, [ancestor]);
+        if (definition) {
+          if (!cancelled) setEarlierTestSpecs((cached) => ({ ...cached, [testSpecKey]: definition }));
+          break;
+        }
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [version, test, testSpecKey, testDefinition, prevVersion, sourceId, sourceParentId]);
+  const revisionDecision = version?.decisions.slice().reverse().find((decision) =>
+    decision.source === 'model' && (decision.previousTestId || decision.basedOn));
+  const tiltHighlight = !showLive && version && test && version.id === versionId
+    ? walkTiltHighlight(version.assembly, test, testDefinition, time.t)
+    : null;
+  const showRevisionHighlights = !showLive && version?.id === versionId && test && storyStep === 1 &&
+    prevVersion?.id === story[0]?.version.id && revisionHighlights.size > 0;
+  const preserveOrbitColors = inv?.id === curatedOrreryId && !comparing;
+  const diagnosticHighlights = pinnedPresentation ? undefined : tiltHighlight?.highlights ?? (showRevisionHighlights ? revisionHighlights : undefined);
+  const showChangeColors = !pinnedPresentation && !preserveOrbitColors && !(comparing && storyStep === 0);
+  const currentUntested = Boolean(inv?.currentVersionId && !inv.tests.length);
+  const savedProgress = Boolean(inv?.currentVersionId);
+  const stoppedBuild = jobStatus === 'error' || (jobStatus === 'done' && (currentUntested || inv?.status === 'failed'));
+  const stoppedEvent = stoppedBuild ? [...events].reverse().find((event) => jobStatus === 'error'
+    ? event.type === 'error' : event.type === 'done' && event.status === 'failed') : undefined;
+  const outcomeText = stoppedEvent?.type === 'error' ? stoppedEvent.message : stoppedEvent?.summary;
+  const stoppedSummary = typeof outcomeText === 'string' ? outcomeText.trim() : '';
+  const stoppedReason = jobStatus === 'error' ? jobStep || 'Build error'
+    : currentUntested ? 'Not tested' : savedProgress ? 'Design did not pass' : 'No version saved';
+  const exhaustedTest = stoppedBuild && jobStatus === 'done' ? events.find((event) =>
+    event.type === 'tool' && event.tool === 'run_test' && event.ok === false &&
+    typeof event.summary === 'string' && exhaustedTestBudget.test(event.summary)) : undefined;
+  const testLimit = typeof exhaustedTest?.summary === 'string' ? exhaustedTestBudget.exec(exhaustedTest.summary)?.[1] : undefined;
+  const finalVersion = !running && inv?.status === 'passed' && version?.id === inv.currentVersionId ? version : null;
+  const finalEvent = finalVersion && detail?.latestJob?.versionId === finalVersion.id
+    ? [...events].reverse().find((event) => event.type === 'done' && event.status === 'passed')
+    : undefined;
+  const finalSummary = (typeof finalEvent?.summary === 'string' ? finalEvent.summary : inv?.description?.trim()) || finalVersion?.spec.plan?.purpose;
+  const replayStatus = !showLive && version && test
+    ? { iteration: version.iteration, test, playing, definition: testDefinition, adjustment: revisionDecision?.summary }
+    : null;
+
+
+  const askForExplanation = async (target: VersionRecord) => {
+    setExplain({ vid: target.id, text: '', modelId: '', loading: true });
+    try {
+      const result = await api.explain(target.inventionId, target.id);
+      setExplain((current) => current?.vid === target.id ? { vid: target.id, ...result } : current);
+    } catch (error) {
+      setExplain((current) => current?.vid === target.id ? { vid: target.id, text: '', modelId: '', error: (error as Error).message } : current);
+    }
+  };
+
+  const renderExplanation = (target: VersionRecord) => {
+    const explanation = explain?.vid === target.id ? explain : null;
+    if (explanation?.text) {
+      return <div className="workbench-explanation-muse"><p>{explanation.text}</p><small>Explained by {explanation.modelId} from the recorded design and tests.</small></div>;
+    }
+    return (
+      <>
+        {explanation?.error && <p role="alert">{explanation.error}</p>}
+        <button type="button" className="btn-secondary" disabled={explanation?.loading} onClick={() => void askForExplanation(target)}>
+          {explanation?.loading ? 'Asking Muse…' : explanation?.error ? 'Retry explanation' : 'Ask Muse for more detail'}
+        </button>
+      </>
+    );
+  };
 
   if (missing) {
     return (
@@ -236,29 +660,92 @@ export default function Workspace() {
       </div>
     );
   }
+  const storyControls = !running && story.length > 0 && (
+    <div className="workbench-story">
+      <div className="workbench-story-heading">
+        <span className="workbench-label">Saved simulation</span>
+        {target ? <span><strong>Original test target</strong> {target}</span> : <span>{separateChecks ? 'Each version has its own recorded test.' : 'Compare the recorded simulations before and after the revision.'}</span>}
+        {canCompare && !sideBySide && <button type="button" className="btn-secondary workbench-comparison-toggle" onClick={() => {
+          setPresentPinnedVersion(false);
+          setComparisonOpen(true);
+          setVersionId(story[0].version.id);
+          setTestId(story[0].test.testId);
+          setStageMode(true);
+          setMobilePane('canvas');
+        }}>Compare side by side</button>}
+      </div>
+      {changeBrief && <p className="workbench-story-brief"><strong>Requested change</strong> {changeBrief}</p>}
+      {!sideBySide && <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
+        {story.map((step, index) => (
+          <button key={`${step.version.id}/${step.test.testId}`} type="button" aria-pressed={storyStep === index} onClick={() => {
+            setPresentPinnedVersion(false);
+            setVersionId(step.version.id);
+            setTestId(step.test.testId);
+            setExplode(0);
+            setBlueprint(false);
+            setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          }}>
+            <span className="workbench-story-number">{index + 1}</span>
+            <span><strong>{step.label} <small className="workbench-story-version">v{step.version.iteration}</small></strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {testReadout(step.test, step.label)}</small></span>
+          </button>
+        ))}
+      </div>}
+      {!sideBySide && currentStep && (
+        <p className="workbench-story-caption" aria-live="polite">
+          {stepDecision ? `${stepDecision.modelId === 'muse-wonder-1.0' ? 'Muse Wonder' : 'Muse'}’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.failureReasons.join(' · ') || (currentStep.test.passed ? 'The mechanism passed the recorded test.' : 'The test did not meet its target.')}
+        </p>
+      )}
+      {!sideBySide && storyStep === 1 && currentStep.test.failureReasons.length > 0 && stepDecision && <p className="workbench-story-caption">{currentStep.test.failureReasons.join(' · ')}</p>}
+    </div>
+  );
+  const requestChangeButton = inv && (
+    <button type="button" className="btn-primary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode(inv.isOwner ? 'follow-up' : 'remix'); }}>
+      Request a change
+    </button>
+  );
+  const workbenchActions = <>
+    {!stoppedBuild && requestChangeButton}
+    {inv?.isOwner && <button className="btn-secondary" disabled={!canRequestChange} onClick={() => { setError(null); setChangeMode('remix'); }}>Remix</button>}
+    {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
+    {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => {
+      const link = new URL(`/i/${inv.id}`, window.location.origin);
+      if (stageMode || sideBySide || pinnedVersionId) link.searchParams.set('replay', '1');
+      if (sideBySide) link.searchParams.set('compare', '1');
+      else if (pinnedVersionId) {
+        const selectedVersionId = detail?.versions.find((candidate) => candidate.id === versionId)?.id;
+        link.searchParams.set('version', selectedVersionId ?? pinnedVersionId);
+      }
+      navigator.clipboard?.writeText(link.href).then(() => setCopied(true)).catch(() => {});
+      setTimeout(() => setCopied(false), 1500);
+    }}>{copied ? 'Link copied' : 'Copy link'}</button>}
+    <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
+  </>;
+  const prompt = <>{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</>;
   return (
-    <div className={`workbench${stageMode ? ' workbench--stage' : ''}`}>
+    <div className={`workbench${stageMode ? ' workbench--stage' : ''}${running || reconnecting ? ' workbench--building' : ''}`}>
       <Header compact />
       <div className="workbench-heading">
         <div className="min-w-0">
           <p className="workbench-label">Invention workbench</p>
           <div className="workbench-title">
             <h1>{inv?.title ?? 'Loading invention…'}</h1>
-            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
+            {inv && <span className={`workbench-badge ${inv.status === 'passed' ? 'workbench-pass' : currentUntested || inv.status === 'failed' ? 'bg-amber-100 text-amber-800' : inv.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-sky-100 text-sky-800'}`}>{running ? 'building' : currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : inv.status === 'failed' ? 'did not pass' : inv.status}</span>}
             {inv?.visibility === 'public' && <span className="workbench-badge workbench-published">published</span>}
           </div>
-          <p className="workbench-prompt">{inv?.prompt}{detail?.source && <> · remix of <Link className="text-accent hover:underline" to={`/i/${detail.source.id}`}>{detail.source.title}</Link> by {detail.source.ownerLabel}</>}</p>
+          <p className="workbench-prompt workbench-heading-prompt">{prompt}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button className="btn-secondary" disabled={running || !inv?.currentVersionId} onClick={() => setRemixOpen(true)}>Remix</button>
-          {inv?.isOwner && inv.visibility !== 'public' && <button className="btn-primary" disabled={running || !inv.currentVersionId} onClick={() => setPublishOpen(true)}>Publish</button>}
-          {inv?.visibility === 'public' && <button className="btn-secondary" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/i/' + inv.id + (stageMode ? '?replay=1' : '')).then(() => setCopied(true)).catch(() => {}); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Link copied' : 'Copy link'}</button>}
-          <button className="btn-secondary !text-xs" disabled title="Coming soon: printable custom parts, purchased parts, tolerances and an assembly guide. Not available until validated.">3D Print — Coming Soon</button>
-        </div>
+        <div className="workbench-heading-actions">{workbenchActions}</div>
       </div>
-      {error && <div className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
-      {reconnecting && <div role="status" className="bg-amber-50 px-4 py-2 text-sm text-amber-800">Reconnecting to the build.{version && ' The last recorded simulation is still available.'}</div>}
-      {jobStatus === 'error' && <div className="bg-amber-50 px-4 py-2 text-sm text-amber-800">The build stopped: {jobStep || 'error'}. {detail?.invention.currentVersionId ? 'The versions recorded so far are shown below; use “Request change” or Remix to continue from them.' : 'Nothing was recorded; start a new build.'}</div>}
+      {error && !changeMode && <div role="alert" className="bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
+      {(running || reconnecting) && <LiveBuildHeartbeat events={events} jobStatus={jobStatus} reconnecting={reconnecting} load={load} />}
+      {stoppedBuild && <section className="workbench-build-outcome" aria-label="Build outcome">
+        <div className="workbench-build-outcome-status" role="status">
+          <strong>Build stopped</strong>
+          <span>{savedProgress && 'Progress saved · '}{stoppedReason}</span>
+        </div>
+        {savedProgress ? requestChangeButton : <Link to="/" className="btn-secondary">Start a new build</Link>}
+        {stoppedSummary && <a className="workbench-build-outcome-link" href="#build-outcome-summary">Build summary ↓{testLimit && ` · ${testLimit}-test limit reached`}</a>}
+      </section>}
 
       <div className="workbench-mobile-nav" role="group" aria-label="Workspace panels">
         {(['canvas', 'tree', 'agent'] as const).map((p) => <button key={p} onClick={() => setMobilePane(p)} aria-pressed={mobilePane === p}>{p === 'canvas' ? '3D view' : p === 'tree' ? 'Parts' : 'Agent'}</button>)}
@@ -266,66 +753,62 @@ export default function Workspace() {
 
       <div className="workbench-grid">
         <aside className="workbench-panel workbench-parts" data-active={mobilePane === 'tree'} aria-label="Assembly and parts">
-          {version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
+          {showLive && live ? <AssemblyTree assembly={live.assembly} selectedId={selected} onSelect={setSelected} changedIds={liveHighlightIds} /> : version ? <AssemblyTree assembly={version.assembly} selectedId={selected} onSelect={setSelected} changedIds={changedIds} /> : <div className="p-4 text-sm text-slate-400">{running ? 'Assembling…' : 'No assembly yet.'}</div>}
         </aside>
 
         <section className="workbench-panel workbench-canvas" data-active={mobilePane === 'canvas'} aria-label="3D simulation">
           <div className="workbench-panel-heading">
             <span className="workbench-label">{running ? 'Live build' : '3D simulation'}</span>
-            {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} running={running} events={events} onPick={setVersionId} />}
-            {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Pinch or scroll to zoom</span>}
-            {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
+            {running && hasLiveAssembly && version && (
+              <div className="workbench-control-group" role="group" aria-label="Choose live assembly or recorded test">
+                <button type="button" className="btn-ghost" aria-pressed={showLive} onClick={() => setViewMode('live')}>Live assembly</button>
+                <button type="button" className="btn-ghost" aria-pressed={!showLive} onClick={() => setViewMode('tested')}>Tested replay</button>
+              </div>
+            )}
+            {version && !running && (detail?.versions.length ?? 0) <= 1 && <span className="workbench-view-hint">Drag to orbit · Use + or − to zoom</span>}
+            {finalVersion && <a href="#prototype-explanation" className="btn-ghost">How it works ↓</a>}
+            {version && !running && <button type="button" className="btn-secondary workbench-stage-toggle" onClick={() => { setComparisonOpen(false); setStageMode((mode) => !mode); setMobilePane('canvas'); }}>{stageMode ? 'Inspect workbench' : 'Expand 3D view'}</button>}
           </div>
-          {!running && story.length > 0 && (
-            <div className="workbench-story">
-              <div className="workbench-story-heading">
-                <span className="workbench-label">Saved simulation</span>
-                <span>Follow the design from its failed test to the result.</span>
-              </div>
-              <div className="workbench-story-steps" role="group" aria-label="Simulation replay steps">
-                {story.map((step, index) => (
-                  <button key={step.test.testId} type="button" aria-pressed={storyStep === index} onClick={() => {
-                    setVersionId(step.version.id);
-                    setTestId(step.test.testId);
-                    setExplode(0);
-                    setBlueprint(false);
-                    setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-                  }}>
-                    <span className="workbench-story-number">{index + 1}</span>
-                    <span><strong>{step.label}</strong><small>{step.test.passed ? 'Passed' : 'Failed'} · {step.label === 'Dance' && step.test.metrics.maxTilt_deg !== undefined ? `tilt ${fmt.deg(step.test.metrics.maxTilt_deg)}` : keyMetric(step.test)}</small></span>
-                  </button>
-                ))}
-              </div>
-              {currentStep && (
-                <p className="workbench-story-caption" aria-live="polite">
-                  {currentStep.test.failureReasons[0] ?? (stepDecision ? `Muse’s adjustment: ${stepDecision.summary}` : currentStep.label === 'Dance' ? 'The robot swayed and bobbed while staying upright.' : currentStep.test.passed ? 'The revised mechanism passed the recorded test.' : 'The first test did not meet its target.')}
-                </p>
-              )}
-            </div>
-          )}
-          <div className="workbench-stage">
-            {!version && live ? (
+          {sideBySide ? <>
+            <ReplayComparison key={`${story[0].version.id}/${story[1].version.id}`} before={{ inventionId: story[0].version.id === sourceVersion?.id && sourceId ? sourceId : id, versionId: story[0].version.id, testId: story[0].test.testId, label: story[0].label }} after={{ inventionId: id, versionId: story[1].version.id, testId: story[1].test.testId, label: story[1].label }} reducedMotion={reducedMotion} events={events} baselineDefinition={version?.id === story[0].version.id ? testDefinition : undefined} findTilt={walkTiltHighlight} revisionChanges={revisionChanges} onShowSingle={() => setComparisonOpen(false)} />
+            {storyControls}
+            {canonicalProof && <CrabProofPanel />}
+          </> : <>
+          <div className="workbench-stage" ref={stageRef}>
+            {showLive && live ? (
               <>
-                <Viewer assembly={liveShown ?? live.assembly} test={null} playing={false} speed={1} explode={explode} blueprint={blueprint} follow={false} selectedId={selected} changedIds={revealGlow} onSelect={setSelected} autoRotate />
-                <div className="workbench-readout"><span className="workbench-readout-model">assembling · {Math.min(reveal, live.assembly.instances.length)} of {live.assembly.instances.length} components placed · not yet simulated</span><span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale.slice(0, 120)}</span></div>
+                <Viewer assembly={live.assembly} visibleInstanceIds={visibleLiveIds} enteringInstanceIds={reducedMotion ? undefined : live.newIds} test={null} playing={false} speed={1} explode={explode} blueprint={activeBlueprint} follow={false} selectedId={selected} changedIds={liveHighlightIds} onSelect={setSelected} autoRotate={!reducedMotion && !introBlueprint} />
+                <div className="workbench-readout">
+                  <span className="workbench-readout-model">{running ? 'Live assembly' : 'Assembly preview'} · v{live.iteration} · {visibleLiveIds ? `${visibleLiveIds.size} of ` : ''}{live.assembly.instances.length} parts placed</span>
+                  <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{running ? 'Assembly preview' : 'Showing the assembled parts before replay'}</span>
+                  {live.rationale && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">{live.rationale}</span>}
+                </div>
               </>
             ) : version ? (
-              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && explode === 0} selectedId={selected} changedIds={changedIds} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef} />
+              <Viewer assembly={version.assembly} test={test} playing={playing} speed={speed} explode={explode} blueprint={blueprint} follow={follow && !comparing && explode === 0} cameraLock={cameraLock} selectedId={selected} diagnosticHighlights={diagnosticHighlights} changedIds={!diagnosticHighlights && showChangeColors ? (changedIds.size ? changedIds : driveChangedIds) : undefined} onSelect={setSelected} onTime={(t, d) => { if (Math.abs(t - time.t) > 0.05 || d !== time.d) setTime({ t, d }); }} seekTo={seek} captureRef={captureRef}
+                strokeTargets={showStrokeGuides ? strokeTargets : undefined} pathInstanceId={showMotionPath ? motionPath : undefined} />
             ) : running ? (
-              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} />
+              <BuildProgress events={events} running={running} jobStatus={jobStatus} load={load} brief={inv?.prompt} />
             ) : (
               <div className="p-6 text-sm text-slate-400">{detail ? 'No assembly yet.' : 'Loading invention…'}</div>
             )}
-            {(version || live) && <BuildStrip events={events} running={running} />}
-            {version && (
+            {(version || showLive) && <BuildStrip events={events} running={running} />}
+            {version && !showLive && (
               <div className="workbench-readout">
-                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{changedIds.size > 0 && <span className="ml-2 text-warn">● {changedIds.size} parts changed</span>}</span>
+                <span className="workbench-readout-model">v{version.iteration} · {version.modelId === 'deterministic-planner' ? 'deterministic planner' : version.modelId}{!diagnosticHighlights && showChangeColors && (changedIds.size > 0 ? <span className="ml-2 text-warn">● {changedIds.size} changed parts in orange</span> : driveChangedIds.size > 0 && <span className="ml-2 text-warn">● Drive changes in orange</span>)}</span>
+                {!version.tests.length && <span className="rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-800 shadow-sm">Assembly saved · No completed simulation</span>}
                 {test && <span className={`rounded-md px-2 py-1 text-xs shadow-sm ${test.passed ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{test.passed ? 'Test passed' : 'Test failed'}{keyMetric(test) && ` · ${keyMetric(test)}`}</span>}
+                {diagnosticHighlights && <div className={`workbench-diagnostic${tiltHighlight ? ' is-failure' : ''}`}>
+                  <strong>{tiltHighlight ? 'Tilt limit exceeded' : stepDecision ? 'Changed by Muse' : 'Changed in this revision'}</strong>
+                  <span>{tiltHighlight
+                    ? `${fmt.deg(tiltHighlight.tilt)} recorded tilt · ${fmt.deg(tiltHighlight.limit)} limit${tiltHighlight.feet ? ' · Legs on the lean side highlighted' : ''}`
+                    : `${revisionHighlights.size} parts highlighted · pose or drive changes`}</span>
+                </div>}
               </div>
             )}
           </div>
           <div className="workbench-toolbar">
-            <div className="workbench-control-group" role="group" aria-label="Replay controls">
+            {!showLive && <div className="workbench-control-group" role="group" aria-label="Replay controls">
               <button className="btn-secondary" onClick={() => setPlaying((p) => !p)} disabled={!test} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
               <button className="btn-ghost" onClick={() => { setSeek(0); setTimeout(() => setSeek(null), 50); }} disabled={!test}>Reset</button>
               <input type="range" min={0} max={Math.max(0.01, time.d)} step={0.01} value={Math.min(time.t, time.d)} onChange={(e) => { setPlaying(false); setSeek(Number(e.target.value)); }} className="workbench-timeline" aria-label="Scrub time" disabled={!test} />
@@ -334,19 +817,39 @@ export default function Workspace() {
               {version && version.tests.length > 1 && (
                 <select value={testId ?? ''} onChange={(e) => setTestId(e.target.value)} aria-label="Test to replay">{version.tests.map((t) => <option key={t.testId} value={t.testId}>{t.testId} {t.passed ? '✓' : '✗'}</option>)}</select>
               )}
-            </div>
+            </div>}
             <div className="workbench-control-group" role="group" aria-label="View controls">
               <label>Explode <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-16" aria-label="Explode view" /></label>
-              <button className="btn-ghost" aria-pressed={blueprint} onClick={() => setBlueprint((b) => !b)}>Blueprint</button>
-              <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>
+              <button className="btn-ghost" aria-pressed={activeBlueprint} onClick={() => { setIntroBlueprint(false); setBlueprint(!activeBlueprint); }}>Blueprint</button>
+              {!showLive && !!strokeTargets?.length && <button type="button" className="btn-ghost" aria-pressed={showStrokeGuides && !explode} disabled={explode > 0} onClick={() => setShowStrokeGuides((show) => !show)}>Stroke guides</button>}
+              {!showLive && motionPath && <button type="button" className="btn-ghost" aria-pressed={showMotionPath && !explode} disabled={explode > 0} onClick={() => setShowMotionPath((show) => !show)}>{receiverPath ? 'Delivery path' : 'Pen path'}</button>}
+              {!showLive && (comparing ? <span className="workbench-view-hint">Camera fits the recorded motion</span> : <label><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow</label>)}
             </div>
           </div>
-          {canFollowUp && (
-            <form onSubmit={(e) => { e.preventDefault(); if (request.trim()) void act(() => api.followUp(id, request.trim())); }} className="workbench-followup">
-              <input value={request} onChange={(e) => setRequest(e.target.value)} aria-label="Describe a change" placeholder={`Ask for a change: ${suggestionsFor(version).slice(0, 3).map((x) => `“${x}”`).join(', ')}`} className="min-w-0 flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm outline-none focus:border-accent" maxLength={400} />
-              <button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>Request change</button>
-              {version?.assembly.family === 'legged_walker' && !version?.spec.followUps.includes('dance') && <button type="button" className="btn-secondary" disabled={busy} onClick={() => void act(() => api.followUp(id, 'Make it dance'))}>Make it dance</button>}
-            </form>
+          {!showLive && test && <ReceiverReplayEvidence targets={receiverTarget} test={test} time={time.t} />}
+          {!showLive && test && <FollowerTimingEvidence time={time.t} test={test} definition={testDefinition} isSemaphore={version?.id === 'ver_cam_semaphore_1' && test.testId === 'cam_semaphore_stroke'} />}
+          {!showLive && version && test && <TriplexTimingEvidence version={version} time={time.t} test={test} />}
+          {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}
+          {!showLive && version && test && <TrayTiltEvidence version={version} time={time.t} test={test} />}
+          {!showLive && version && test && <LotusReplayEvidence version={version} time={time.t} test={test} />}
+          {!showLive && test && <IndexedMotionEvidence versionId={version?.id} time={time.t} test={test} definition={testDefinition} />}
+          {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
+          {storyControls}
+          {running && <SimulationStatus events={events} running replay={replayStatus} />}
+          {!running && replayStatus && <SimulationStatus events={events} running={false} replay={replayStatus} />}
+          </>}
+          {finalVersion && (
+            <section id="prototype-explanation" className="workbench-explanation" aria-label="How the final prototype works">
+              <div className="workbench-explanation-heading">
+                <span className="workbench-label">Passed design · v{finalVersion.iteration}</span>
+                <h3>How it works</h3>
+              </div>
+              <p>{finalSummary || `This design uses ${finalVersion.assembly.instances.length} components and ${finalVersion.assembly.controller.drives.length} programmed drives.`}</p>
+              {!!finalVersion.spec.plan?.motions.length && (
+                <ul aria-label="Planned motions">{finalVersion.spec.plan.motions.slice(0, 4).map((motion, i) => <li key={i}>{motion}</li>)}</ul>
+              )}
+              {renderExplanation(finalVersion)}
+            </section>
           )}
         </section>
 
@@ -359,23 +862,15 @@ export default function Workspace() {
             {tab === 'spec' && <div className="overflow-auto p-3">{version ? <SpecPanel spec={version.spec} /> : <p className="text-xs text-slate-400">No spec yet.</p>}</div>}
             {tab === 'tests' && (
               <div className="overflow-auto p-3 space-y-3">
-                {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} · engine: {version?.tests[0]?.engine}</p>}
-                {version && !running && (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
-                    {explain?.vid === version.id && !explain.loading ? (
-                      <><p className="text-slate-800 whitespace-pre-wrap">{explain.text}</p><p className="mt-1 text-[10px] text-slate-400">Explained by {explain.modelId} from this version's recorded decisions and measurements.</p></>
-                    ) : (
-                      <button className="btn-secondary !px-3 !py-1 !text-xs" disabled={explain?.loading} onClick={async () => { setExplain({ vid: version.id, text: '', modelId: '', loading: true }); try { const r = await api.explain(id, version.id); setExplain({ vid: version.id, ...r }); } catch (e) { setExplain({ vid: version.id, text: (e as Error).message, modelId: '' }); } }}>{explain?.loading ? 'Asking Muse…' : 'Ask Muse to explain this design'}</button>
-                    )}
-                  </div>
-                )}
+                {vmeta && <p className="text-xs text-slate-500">Version v{vmeta.iteration} · {new Date(vmeta.createdAt).toLocaleTimeString()} {version?.tests[0]?.engine ? ` · engine: ${version.tests[0].engine}` : ''}</p>}
+                {version && !running && !finalVersion && <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">{renderExplanation(version)}</div>}
                 {detail && detail.versions.length > 1 && (
                   <div className="rounded-md border border-slate-200 p-2 text-xs">
                     <div className="panel-title mb-1">Iterations</div>
                     <table className="w-full mono"><tbody>
                       {detail.versions.map((v) => { const t = v.tests[v.tests.length - 1]; const key = t ? (t.metrics.distance_m !== undefined ? ['distance', fmt.m2(t.metrics.distance_m)] : t.metrics.landingDistance_m !== undefined ? ['landing', fmt.m2(t.metrics.landingDistance_m)] : t.metrics.payloadDrop_m !== undefined ? ['payload drop', fmt.m2(t.metrics.payloadDrop_m)] : Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad')) ? ['amplitude', `${Object.entries(t.metrics).find(([k]) => k.endsWith('amplitude_rad'))![1].toFixed(2)} rad`] : ['tilt', fmt.deg(t.metrics.maxTilt_deg ?? 0)]) : ['', '']; return (
                         <tr key={v.id} className={`${v.id === versionId ? 'bg-accent-soft' : ''} cursor-pointer hover:bg-slate-50`} onClick={() => setVersionId(v.id)}>
-                          <td className="px-1 py-0.5 text-slate-500">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-slate-500">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${v.status === 'passed' ? 'text-emerald-700' : 'text-rose-600'}`}>{v.status === 'passed' ? '✓' : '✗'}</td>
+                          <td className="px-1 py-0.5 text-slate-500">v{v.iteration}</td><td className="px-1 py-0.5">{t?.testId ?? '—'}</td><td className="px-1 py-0.5 text-slate-500">{key[0]}</td><td className="px-1 py-0.5">{key[1]}</td><td className={`px-1 py-0.5 ${!t ? 'text-slate-500' : v.status === 'passed' ? 'text-emerald-700' : 'text-rose-600'}`}>{!t ? 'Not tested' : v.status === 'passed' ? '✓' : '✗'}</td>
                         </tr>); })}
                     </tbody></table>
                   </div>
@@ -422,25 +917,39 @@ export default function Workspace() {
         </aside>
       </div>
 
-      {remixOpen && inv && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal>
-          <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); const r = String(new FormData(e.currentTarget).get('change') || '').trim(); if (r.length >= 2) { setRemixOpen(false); void act(() => api.remix(id, r)); } }}>
-            <h2 className="text-lg font-semibold">Remix this invention</h2>
-            <p className="mt-1 text-sm text-slate-500">Forks the current version into your own invention, keeps credit to {inv.ownerLabel}, and asks the agent for one change.</p>
-            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus defaultValue={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <div className="mt-2 flex flex-wrap gap-1">{suggestionsFor(version).map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={(e) => { const f = (e.currentTarget.closest('form') as HTMLFormElement); (f.elements.namedItem('change') as HTMLInputElement).value = s; }}>{s}</button>)}</div>
-            <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setRemixOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>Remix</button></div>
+      {stoppedSummary && <section id="build-outcome-summary" className="workbench-build-summary" aria-labelledby="build-outcome-heading">
+        <h2 id="build-outcome-heading">Build summary</h2>
+        <p>{stoppedSummary}</p>
+      </section>}
+      {inv && <div className="workbench-mobile-details">
+        <div className="workbench-detail-actions">{workbenchActions}</div>
+        <details>
+          <summary>Build brief</summary>
+          <p className="workbench-prompt">{prompt}</p>
+        </details>
+      </div>}
+      {changeMode && inv && version && (
+        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="revision-title" onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setChangeMode(null); }}>
+          <form className="card w-full max-w-md p-5" onSubmit={(e) => { e.preventDefault(); if (request.trim().length >= 2) void act(changeMode, request.trim()); }}>
+            <h2 id="revision-title" className="text-lg font-semibold">Request a change</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {changeMode === 'remix' ? `Muse will use version ${version.iteration} to build a private remix and keep credit to ${inv.ownerLabel}.` : `Muse will use version ${version.iteration} as the baseline and save a new version of your invention.`}
+            </p>
+            <label className="mt-4 block text-sm">What should change?<input name="change" autoFocus value={request} onChange={(e) => setRequest(e.target.value)} placeholder={suggestionsFor(version)[0]} maxLength={400} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
+            <div className="mt-2 flex flex-wrap gap-1">{suggestionsFor(version).map((s) => <button type="button" key={s} className="chip !py-1 !text-xs" onClick={() => setRequest(s)}>{s}</button>)}</div>
+            {error && <p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
+            <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" disabled={busy} onClick={() => setChangeMode(null)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy || request.trim().length < 2}>{busy ? 'Starting…' : changeMode === 'remix' ? 'Build my remix' : 'Build revision'}</button></div>
           </form>
         </div>
       )}
       {publishOpen && inv && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal>
+        <div className="workbench-dialog fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal aria-labelledby="publish-title">
           <form className="card w-full max-w-md p-5" onSubmit={async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); setBusy(true); try { await api.publish(id, { title: String(f.get('title') || inv.title), description: String(f.get('description') || inv.description) }); setPublishOpen(false); await refresh(); } catch (err) { setError((err as Error).message); } finally { setBusy(false); } }}>
-            <h2 className="text-lg font-semibold">Publish to the gallery</h2>
+            <h2 id="publish-title" className="text-lg font-semibold">Publish to the gallery</h2>
             <p className="mt-1 text-sm text-slate-500">Anyone will be able to open the interactive 3D assembly, see its measured test results and remix it. Credit stays with you.</p>
             <label className="mt-4 block text-sm">Title<input name="title" defaultValue={inv.title} maxLength={80} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
             <label className="mt-3 block text-sm">What it does<textarea name="description" defaultValue={inv.description.slice(0, 400)} maxLength={400} rows={3} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2" /></label>
-            <p className="mt-3 text-xs text-slate-500">Status shown on the card: {inv.status === 'passed' ? 'tests passed' : 'did not pass'} · model: {version?.modelId}</p>
+            <p className="mt-3 text-xs text-slate-500">Status shown on the card: {currentUntested ? 'not tested' : inv.status === 'passed' ? 'tests passed' : 'did not pass'} · model: {version?.modelId}</p>
             <div className="mt-4 flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setPublishOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>Publish</button></div>
           </form>
         </div>

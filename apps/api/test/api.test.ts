@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { initSimulator } from '@protolab/simulator';
 import { openDb } from '../src/db.ts';
 import { ObjectStore } from '../src/store.ts';
-import { JobRunner } from '../src/jobs.ts';
+import { JobRunner, type PublicEvent } from '../src/jobs.ts';
 import { buildApp } from '../src/routes.ts';
 
 // End-to-end API test with the deterministic planner (no model key): create → job → versions → publish → gallery → remix.
@@ -35,6 +35,14 @@ test('API golden path with the deterministic planner', async () => {
   for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${jobId}`, { headers: H }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
   const job = await j(`/api/jobs/${jobId}`, { headers: H });
   assert.equal(job.body.status, 'done', JSON.stringify(job.body).slice(0, 300));
+  const jobEvents = job.body.events as PublicEvent[];
+  const firstTestStart = jobEvents.findIndex((event) => event.type === 'test_start');
+  const firstTestResult = jobEvents.findIndex((event) => event.type === 'test');
+  assert.ok(firstTestStart >= 0 && firstTestStart < firstTestResult);
+  const timing = job.body.timing as { firstAssemblyMs: number; firstTestMs: number; totalMs: number; modelCalls: number };
+  assert.ok(Number.isFinite(timing.firstAssemblyMs) && Number.isFinite(timing.firstTestMs));
+  assert.ok(timing.firstAssemblyMs <= timing.firstTestMs && timing.firstTestMs <= timing.totalMs);
+  assert.equal(timing.modelCalls, 0);
   assert.equal(completedCheckpoints, 1, 'job completion is acknowledged after its checkpoint');
   const inv = await j(`/api/inventions/${inventionId}`, { headers: H });
   const versions = inv.body.versions as Array<{ id: string; status: string }>;
@@ -45,6 +53,19 @@ test('API golden path with the deterministic planner', async () => {
   assert.ok((v.body.version as { tests: Array<{ trace: { frames: unknown[] } }> }).tests[0].trace.frames.length > 50);
   assert.equal((await app.request(`/store/versions/${versions[0].id}.json`)).status, 404);
 
+  const previewPath = `/api/inventions/${inventionId}/preview`;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/j1sAAAAASUVORK5CYII=', 'base64');
+  assert.equal((await app.request(previewPath, { method: 'POST', headers: { 'x-session-id': 'tester', 'content-type': 'image/png' }, body: new Uint8Array(png) })).status, 200);
+  const privatePreview = await app.request(previewPath, { headers: H });
+  assert.equal(privatePreview.status, 200);
+  assert.equal(privatePreview.headers.get('cache-control'), 'private, no-store');
+  assert.deepEqual(Buffer.from(await privatePreview.arrayBuffer()), png);
+  assert.equal((await app.request(previewPath)).status, 404);
+  assert.equal((await app.request(previewPath, { headers: { 'x-session-id': 'other' } })).status, 404);
+  assert.equal((await app.request(`/store/previews/${inventionId}.png`)).status, 404);
+  const privateInv = await j(`/api/inventions/${inventionId}`, { headers: H });
+  assert.equal((privateInv.body.invention as { previewUrl: string }).previewUrl, previewPath);
+
   // not the owner → cannot publish
   const forbidden = await j(`/api/inventions/${inventionId}/publish`, { method: 'POST', headers: { ...H, 'x-session-id': 'other' }, body: '{}' });
   assert.equal(forbidden.status, 403);
@@ -53,16 +74,32 @@ test('API golden path with the deterministic planner', async () => {
   const gallery = await j('/api/gallery?sort=recent');
   assert.ok((gallery.body.items as Array<{ id: string }>).some((x) => x.id === inventionId));
 
-  const remix = await j(`/api/inventions/${inventionId}/remix`, { method: 'POST', headers: { ...H, 'x-session-id': 'other' }, body: JSON.stringify({ changeRequest: 'Give it six legs' }) });
+  const remixHeaders = { ...H, 'x-session-id': 'other' };
+  const missingBaseline = await j(`/api/inventions/${inventionId}/remix`, { method: 'POST', headers: remixHeaders, body: JSON.stringify({ changeRequest: 'Give it six legs', versionId: 'ver_missing' }) });
+  assert.equal(missingBaseline.status, 409);
+  const remix = await j(`/api/inventions/${inventionId}/remix`, { method: 'POST', headers: remixHeaders, body: JSON.stringify({ changeRequest: 'Give it six legs', versionId: versions[0].id }) });
   assert.equal(remix.status, 201);
   const rj = (remix.body as { jobId: string }).jobId;
   for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${rj}`, { headers: { ...H, 'x-session-id': 'other' } }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
   const rinv = await j(`/api/inventions/${(remix.body as { inventionId: string }).inventionId}`, { headers: { ...H, 'x-session-id': 'other' } });
   assert.equal((rinv.body.source as { id: string }).id, inventionId);
+  assert.equal((rinv.body.source as { versionId: string }).versionId, versions[0].id);
+  assert.equal((rinv.body.latestJob as { baselineVersionId: string }).baselineVersionId, versions[0].id);
+  assert.equal((rinv.body.latestJob as { changeRequest: string }).changeRequest, 'Give it six legs');
   const rv = rinv.body.versions as Array<{ id: string }>;
   assert.ok(rv.length >= 1, 'remix produced a version');
   const rver = await j(`/api/inventions/${(remix.body as { inventionId: string }).inventionId}/versions/${rv[rv.length - 1].id}?trace=0`, { headers: { ...H, 'x-session-id': 'other' } });
   assert.equal((rver.body.version as { assembly: { familyConfig: { legCount: number } } }).assembly.familyConfig.legCount, 6);
+  assert.equal((rinv.body.latestJob as { versionId: string }).versionId, rv[rv.length - 1].id);
+  const wrongInvention = await j(`/api/inventions/${inventionId}/follow-up`, { method: 'POST', headers: H, body: JSON.stringify({ changeRequest: 'Walk farther', versionId: rv[0].id }) });
+  assert.equal(wrongInvention.status, 409);
+  const followUp = await j(`/api/inventions/${inventionId}/follow-up`, { method: 'POST', headers: H, body: JSON.stringify({ changeRequest: 'Give it six legs', versionId: versions[0].id }) });
+  assert.equal(followUp.status, 201);
+  const followUpId = (followUp.body as { jobId: string }).jobId;
+  for (let i = 0; i < 300; i++) { const s = await j(`/api/jobs/${followUpId}`, { headers: H }); if (s.body.status === 'done' || s.body.status === 'error') break; await new Promise((r) => setTimeout(r, 100)); }
+  const revised = await j(`/api/inventions/${inventionId}`, { headers: H });
+  assert.equal((revised.body.latestJob as { baselineVersionId: string }).baselineVersionId, versions[0].id);
+  assert.equal((revised.body.latestJob as { status: string }).status, 'done');
 });
 
 test('titleFromPrompt drops the verb and stops at the first clause', () => {

@@ -16,6 +16,8 @@ import { CloudCheckpoint } from './persistence.ts';
 import { originOf, rewriteOg } from './og.ts';
 import { buildApp } from './routes.ts';
 import { seedFeatured, requeueInterruptedSeeds } from './seed.ts';
+import { seedReferenceShowcases } from './showcase.ts';
+import { curateLargeShowcases } from './curate.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_DIR = resolve(process.env.DATA_DIR ?? './data');
@@ -26,6 +28,13 @@ await initSimulator();
 const db = openDb(DATA_DIR);
 const store = new ObjectStore(resolve(DATA_DIR, 'store'));
 const persist = checkpoint ? () => checkpoint.save(db) : undefined;
+// Curate the existing public Gravity Clock without changing its ownership or saved versions.
+const gravityClock = db.prepare(
+  "UPDATE inventions SET featured=1 WHERE id=? AND visibility='public' AND status='passed' AND current_version_id IS NOT NULL AND featured=0",
+).run('inv_a1f1665e649b41c2');
+const curated = curateLargeShowcases(db, store);
+if (gravityClock.changes || curated) await persist?.();
+
 const runner = new JobRunner(db, store, { persist });
 // Requeue anything that was running when the process last stopped.
 db.prepare('UPDATE jobs SET status=\'error\', step=\'Interrupted by restart\', error_code=\'interrupted\' WHERE status IN (\'queued\',\'running\')').run();
@@ -78,5 +87,6 @@ if (existsSync(resolve(webDist, 'index.html'))) {
   console.log(`[web] serving the built web app from ${webDist}`);
 }
 seedFeatured(db, runner);
+await seedReferenceShowcases(db, store, persist);
 requeueInterruptedSeeds(db, runner);
 serve({ fetch: app.fetch, port: PORT }, () => console.log(`[api] ProtoLab API on http://localhost:${PORT} (data: ${DATA_DIR})`));

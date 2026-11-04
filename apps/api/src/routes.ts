@@ -7,18 +7,23 @@ import type { VersionRecord } from '@protolab/schema';
 import { catalog, generatorInfo, getPart } from '@protolab/parts';
 import { modelConfigFromEnv, DETERMINISTIC_MODEL_ID, prettyModelName, explainDesign } from '@protolab/agent';
 import type { ObjectStore } from './store.ts';
-import { JobRunner, newId, now, stripTrace, versionSummary } from './jobs.ts';
+import { JobRunner, newId, now, stripTrace, versionSummary, buildTiming, type PublicEvent } from './jobs.ts';
 import type { InventionRow, JobRow, VersionRow } from './db.ts';
 import { EXAMPLES } from './seed.ts';
 
 export interface AppDeps { db: DatabaseSync; store: ObjectStore; runner: JobRunner; modelStatus: { modelId: string; live: boolean; detail: string } }
 
 const CreateBody = z.object({ prompt: z.string().trim().min(3).max(600).optional(), exampleId: z.string().optional(), title: z.string().trim().max(80).optional() });
-const RemixBody = z.object({ changeRequest: z.string().trim().min(2).max(400) });
+const RemixBody = z.object({ changeRequest: z.string().trim().min(2).max(400), versionId: z.string().regex(/^ver_[a-z0-9_-]{1,96}$/i).optional() });
 const PublishBody = z.object({ title: z.string().trim().min(1).max(80).optional(), description: z.string().trim().max(400).optional() });
 const ReportBody = z.object({ inventionId: z.string(), reason: z.string().trim().min(3).max(400) });
 
 const sanitize = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim();
+
+function integerQuery(value: string | undefined, fallback: number) {
+  const parsed = Math.floor(Number(value));
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
 
 export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
   const app = new Hono();
@@ -99,8 +104,8 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     }
     c.header('Cache-Control', 'private, no-store');
     const since = Number(c.req.query('since') ?? 0);
-    const events = runner.events(job.id) ?? (JSON.parse(job.progress_json) as unknown[]);
-    return c.json({ id: job.id, inventionId: job.invention_id, status: job.status, step: job.step, versionId: job.version_id, errorCode: job.error_code, events: events.slice(since), eventCount: events.length, updatedAt: job.updated_at });
+    const events = runner.events(job.id) ?? (JSON.parse(job.progress_json) as PublicEvent[]);
+    return c.json({ id: job.id, inventionId: job.invention_id, status: job.status, step: job.step, versionId: job.version_id, errorCode: job.error_code, events: events.slice(since), eventCount: events.length, updatedAt: job.updated_at, timing: buildTiming(job, events) });
   });
 
   /** Latest in-progress assembly of a running job (before its first recorded version), so the workbench can show the build taking shape. */
@@ -118,9 +123,15 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const inv = getInvention(c.req.param('id'));
     if (!inv || !canSee(inv, session(c.req))) return c.json({ error: 'Not found' }, 404);
     const versions = listVersions(inv.id).map((v) => ({ id: v.id, iteration: v.iteration, status: v.status, modelId: v.model_id, parentVersionId: v.parent_version_id, createdAt: v.created_at, tests: JSON.parse(v.metrics_json), spec: JSON.parse(v.spec_json) }));
-    const latestJob = db.prepare('SELECT id, status, step FROM jobs WHERE invention_id=? ORDER BY created_at DESC LIMIT 1').get(inv.id) as { id: string; status: string; step: string } | undefined;
+    const job = db.prepare('SELECT id, status, step, version_id, baseline_version_id, change_request FROM jobs WHERE invention_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(inv.id) as Pick<JobRow, 'id' | 'status' | 'step' | 'version_id' | 'baseline_version_id' | 'change_request'> | undefined;
     const source = inv.source_invention_id ? getInvention(inv.source_invention_id) : undefined;
-    return c.json({ invention: publicInvention(inv, session(c.req)), versions, latestJob, source: source && canSee(source, session(c.req)) ? { id: source.id, title: source.title, ownerLabel: ownerLabel(source) } : null });
+    const visibleSource = source && canSee(source, session(c.req)) ? source : null;
+    const remix = visibleSource ? db.prepare('SELECT source_version_id, change_request FROM remixes WHERE derived_invention_id=?').get(inv.id) : undefined;
+    const latestJob = job ? { id: job.id, status: job.status, step: job.step, versionId: job.version_id, baselineVersionId: !source || visibleSource || versions.some((version) => version.id === job.baseline_version_id) ? job.baseline_version_id : null, changeRequest: job.change_request } : undefined;
+    return c.json({
+      invention: publicInvention(inv, session(c.req)), versions, latestJob,
+      source: visibleSource ? { id: visibleSource.id, title: visibleSource.title, ownerLabel: ownerLabel(visibleSource), versionId: remix?.source_version_id ?? inv.parent_version_id, changeRequest: remix?.change_request ?? null } : null,
+    });
   });
 
   app.get('/api/inventions/:id/versions/:vid', (c) => {
@@ -133,9 +144,10 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     return c.json({ version: withTrace ? v : stripTrace(v), summary: versionSummary(v) });
   });
 
-  const startDerived = (sid: string, inv: InventionRow, changeRequest: string, mode: 'remix' | 'follow-up') => {
-    const parent = inv.current_version_id ? loadVersion(inv.current_version_id) : null;
-    if (!parent) return { error: 'This invention has no finished version to build on yet' } as const;
+  const startDerived = (sid: string, inv: InventionRow, changeRequest: string, mode: 'remix' | 'follow-up', versionId?: string) => {
+    const baseline = versionId ?? inv.current_version_id;
+    const parent = baseline ? loadVersion(baseline) : null;
+    if (!parent || parent.inventionId !== inv.id) return { error: versionId ? 'The selected version is unavailable for this invention' : 'This invention has no finished version to build on yet' } as const;
     let target = inv;
     if (mode === 'remix') {
       // Name the remix after the change so lineage reads in the gallery: "Mechanical butterfly → four wings like a dragonfly".
@@ -147,7 +159,8 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
       db.prepare('INSERT INTO remixes (id, source_version_id, derived_invention_id, change_request, created_at) VALUES (?,?,?,?,?)').run(newId('rmx'), parent.id, target.id, changeRequest, now());
     }
     const job: JobRow = { id: newId('job'), invention_id: target.id, version_id: null, status: 'queued', step: 'Queued', progress_json: '[]', error_code: null, created_at: now(), updated_at: now() };
-    db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(job.id, job.invention_id, null, job.status, job.step, '[]', null, job.created_at, job.updated_at);
+    db.prepare('INSERT INTO jobs (id, invention_id, version_id, status, step, progress_json, error_code, created_at, updated_at, baseline_version_id, change_request) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(job.id, job.invention_id, null, job.status, job.step, '[]', null, job.created_at, job.updated_at, parent.id, changeRequest);
     runner.enqueue(job, target, { parent, changeRequest });
     return { inventionId: target.id, jobId: job.id } as const;
   };
@@ -161,7 +174,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const body = RemixBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: 'changeRequest required' }, 400);
     if (!canQueue()) return c.json({ error: 'Build capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
-    const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'remix');
+    const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'remix', body.data.versionId);
     return 'error' in r ? c.json(r, 409) : c.json(r, 201);
   });
 
@@ -176,7 +189,7 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const active = db.prepare("SELECT 1 FROM jobs WHERE invention_id=? AND status IN ('queued','running') LIMIT 1").get(inv.id);
     if (active) return c.json({ error: 'A build is already in progress for this invention' }, 409);
     if (!canQueue()) return c.json({ error: 'Build capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
-    const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'follow-up');
+    const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'follow-up', body.data.versionId);
     return 'error' in r ? c.json(r, 409) : c.json(r, 201);
   });
 
@@ -212,6 +225,16 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     catch (e) { if (explainCache.get(v.id) === pending) explainCache.delete(v.id); return c.json({ error: (e as Error).message }, 502); }
   });
 
+  app.get('/api/inventions/:id/preview', (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const inv = getInvention(c.req.param('id'));
+    if (!inv || inv.owner_id !== session(c.req)) return c.text('Not found', 404);
+    const bytes = store.getBytes(`previews/${inv.id}.png`);
+    if (!bytes) return c.text('Not found', 404);
+    c.header('Content-Type', 'image/png');
+    return c.body(new Uint8Array(bytes));
+  });
+
   app.post('/api/inventions/:id/preview', async (c) => {
     const sid = session(c.req);
     const inv = getInvention(c.req.param('id'));
@@ -226,18 +249,20 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
 
   app.get('/api/gallery', (c) => {
     const sort = c.req.query('sort') ?? 'recent';
-    const cursor = Number(c.req.query('cursor') ?? 0);
-    const limit = Math.min(24, Number(c.req.query('limit') ?? 12));
+    const cursor = Math.max(0, integerQuery(c.req.query('cursor'), 0));
+    const limit = Math.max(1, Math.min(24, integerQuery(c.req.query('limit'), 12)));
     const where = sort === 'featured' ? 'visibility=\'public\' AND featured=1' : sort === 'remixes' ? 'visibility=\'public\' AND source_invention_id IS NOT NULL' : 'visibility=\'public\'';
-    const rows = db.prepare(`SELECT * FROM inventions WHERE ${where} AND current_version_id IS NOT NULL ORDER BY featured DESC, updated_at DESC LIMIT ? OFFSET ?`).all(limit + 1, cursor) as unknown as InventionRow[];
+    const rows = db.prepare(`SELECT * FROM inventions WHERE ${where} AND current_version_id IS NOT NULL ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`).all(limit + 1, cursor) as unknown as InventionRow[];
     const items = rows.slice(0, limit).map((inv) => publicInvention(inv, session(c.req)));
     return c.json({ items, nextCursor: rows.length > limit ? cursor + limit : null });
   });
 
   app.get('/api/mine', (c) => {
     const sid = session(c.req);
-    const rows = sid ? db.prepare('SELECT * FROM inventions WHERE owner_id=? ORDER BY updated_at DESC LIMIT 30').all(sid) as unknown as InventionRow[] : [];
-    return c.json({ items: rows.map((inv) => publicInvention(inv, sid)) });
+    const cursor = Math.max(0, integerQuery(c.req.query('cursor'), 0));
+    const limit = 30;
+    const rows = sid ? db.prepare('SELECT * FROM inventions WHERE owner_id=? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?').all(sid, limit + 1, cursor) as unknown as InventionRow[] : [];
+    return c.json({ items: rows.slice(0, limit).map((inv) => publicInvention(inv, sid)), nextCursor: rows.length > limit ? cursor + limit : null });
   });
 
   app.get('/api/parts', (c) => {
@@ -274,12 +299,17 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     // Latest walk and dance results across all versions (a dance-only revision does not re-run the walk).
     const rows = db.prepare('SELECT metrics_json FROM versions WHERE invention_id=? ORDER BY iteration DESC, created_at DESC').all(inv.id) as unknown as Array<{ metrics_json: string }>;
     const latest = (kind?: string): T | null => { for (const r of rows) { const t = (JSON.parse(r.metrics_json) as T[]).filter((x) => !kind || x.kind === kind).pop(); if (t) return t; } return null; };
+    const previewKey = `previews/${inv.id}.png`;
+    let previewUrl = null;
+    if ((inv.visibility === 'public' || inv.owner_id === sid) && store.has(previewKey)) {
+      previewUrl = inv.visibility === 'public' ? `/store/${previewKey}` : `/api/inventions/${inv.id}/preview`;
+    }
     return {
       latestWalk: latest('walk'), latestDance: latest('motion'), latestTest: latest(),
       id: inv.id, title: inv.title, description: inv.description, prompt: inv.prompt, visibility: inv.visibility, status: inv.status,
       currentVersionId: inv.current_version_id, featured: !!inv.featured, isOwner: inv.owner_id === sid, ownerLabel: ownerLabel(inv),
       sourceInventionId: inv.source_invention_id, parentVersionId: inv.parent_version_id, modelId: v?.model_id ?? null,
-      tests, previewUrl: inv.visibility === 'public' && store.has(`previews/${inv.id}.png`) ? `/store/previews/${inv.id}.png` : null, createdAt: inv.created_at, updatedAt: inv.updated_at,
+      tests, previewUrl, createdAt: inv.created_at, updatedAt: inv.updated_at,
     };
   }
   return app;

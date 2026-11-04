@@ -1,5 +1,5 @@
-import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape } from '@protolab/schema';
-import { QUAT_ID, quatFromAxisAngle, quatMul } from './math.ts';
+import { PartDefinition, type GeometryPiece, type Connector, type Vec3, type PartCategory, type Shape, type Profile, type Vec2 } from '@protolab/schema';
+import { QUAT_ID, quatFromAxisAngle, quatMul, rotate } from './math.ts';
 import { profiles, shapeVolume, ensureCCW } from './geometry.ts';
 
 export type ParamSpec = Record<string, { min: number; max: number; default: number; unit: string; description: string }>;
@@ -20,11 +20,57 @@ const mm = (v: number) => (v * 1000).toFixed(0);
 const vol = (pieces: GeometryPiece[]) => pieces.reduce((s, p) => s + shapeVolume(p.shape), 0);
 const fx = (id: string, position: Vec3, axis: Vec3, kind: Connector['kind'] = 'fixed', description?: string): Connector => ({ id, position, axis, kind, description });
 
+const GENEVA_PARAMS: ParamSpec = {
+  centreDistance: { min: 0.025, max: 0.2, default: 0.06, unit: 'm', description: 'Distance between driver and output axes. Match both parts.' },
+  pinRadius: { min: 0.001, max: 0.012, default: 0.0025, unit: 'm', description: 'Driver pin radius. Match both parts.' },
+  clearance: { min: 0.0002, max: 0.004, default: 0.0008, unit: 'm', description: 'Total slot clearance. Match both parts.' },
+  thickness: { min: 0.003, max: 0.02, default: 0.006, unit: 'm', description: 'Wheel thickness and driver axial offset. Match both parts.' },
+};
+
+function genevaDimensions(centreDistance: number, pinRadius: number, clearance: number) {
+  const crankRadius = centreDistance / Math.SQRT2;
+  if (pinRadius + clearance > crankRadius / 7) throw new ParamError('Geneva pin and clearance must total at most one seventh of the crank radius.');
+  const halfSlot = pinRadius + clearance / 2;
+  const lockRadius = crankRadius - 3 * pinRadius;
+  const recessRadius = lockRadius + clearance / 2 + crankRadius * 0.004;
+  const slotLipX = Math.sqrt(crankRadius ** 2 - halfSlot ** 2);
+  if (Math.hypot(crankRadius - slotLipX, crankRadius - halfSlot) <= recessRadius) {
+    throw new ParamError('Geneva locking recess reaches the slot lip. Increase the pin radius or reduce the clearance.');
+  }
+  return { crankRadius, halfSlot, lockRadius, recessRadius };
+}
+
 // ------------------------------------------------------------------------------------------------
 // Generators. Conventions: X is the main length axis; Y is up; Z is lateral. Connector axes point
 // OUT of the part; mating connectors face each other. Revolute connectors spin about their axis.
 // ------------------------------------------------------------------------------------------------
 export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
+  marker_tip: {
+    kind: 'marker_tip', name: 'Drawing marker', category: 'misc',
+    description: 'Fixed-mount marker for a plotter or drawing linkage. Its working point is the local origin, facing +Z.',
+    params: {
+      diameter: { min: 0.004, max: 0.025, default: 0.008, unit: 'm', description: 'Barrel diameter' },
+      length: { min: 0.008, max: 0.06, default: 0.016, unit: 'm', description: 'Length from rear to tip' },
+    },
+    generate: (p, id) => {
+      const radius = p.diameter / 2;
+      const barrelLength = p.length * 0.75;
+      const tipRadius = radius * 0.3;
+      const geometry = [
+        piece({ kind: 'cylinder', radius, height: barrelLength, axis: 'z' }, [0, 0, -p.length + barrelLength / 2], COLORS.red),
+        piece({ kind: 'cylinder', radius: radius * 0.55, height: p.length - barrelLength, axis: 'z' }, [0, 0, -(p.length - barrelLength) / 2], COLORS.brass),
+        piece({ kind: 'sphere', radius: tipRadius }, [0, 0, 0], COLORS.red),
+      ];
+      return finish({
+        id, kind: 'marker_tip', name: `Drawing marker Ø${mm(p.diameter)} mm`, category: 'misc',
+        description: 'Carries a visible tip on a passive drawing linkage or plotter.',
+        params: p, mass_kg: vol(geometry) * DENSITY.pla, dimensions_m: [p.diameter, p.diameter, p.length + tipRadius],
+        material: 'polymer', geometry, connectors: [
+          fx('mount', [0, 0, -p.length * 0.6875], [0, 0, -1], 'fixed', 'Attach to a linkage or carriage'),
+        ], cost_usd: 2,
+      });
+    },
+  },
   // ---------- structural ----------
   beam: { kind: 'beam', name: 'Beam', category: 'beams', description: 'Rectangular aluminium beam along X with fixed mounts at both ends and on each face centre.', params: { length: { min: 0.02, max: 1.2, default: 0.1, unit: 'm', description: 'Length (X)' }, width: { min: 0.003, max: 0.08, default: 0.01, unit: 'm', description: 'Width (Z)' }, height: { min: 0.003, max: 0.08, default: 0.01, unit: 'm', description: 'Height (Y)' } },
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.length, p.height, p.width] }, [0, 0, 0], COLORS.aluminium)]; return finish({ id, kind: 'beam', name: `Beam ${mm(p.length)}×${mm(p.width)}×${mm(p.height)} mm`, category: 'beams', description: 'Rigid aluminium beam.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.length, p.height, p.width], material: 'aluminium 6061', geometry: g,
@@ -50,6 +96,102 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
   tower: { kind: 'tower', name: 'A-frame tower', category: 'frames', description: 'Two-leg A-frame support with a revolute axle mount at the top (axis Z) and a wide base; place anchored on the ground.', params: { height: { min: 0.05, max: 1.2, default: 0.3, unit: 'm', description: 'Height to axle' }, baseWidth: { min: 0.04, max: 1.0, default: 0.2, unit: 'm', description: 'Base spread (X)' }, legWidth: { min: 0.004, max: 0.05, default: 0.012, unit: 'm', description: 'Leg section' } },
     generate: (p, id) => { const L = Math.hypot(p.height, p.baseWidth / 2); const ang = Math.atan2(p.baseWidth / 2, p.height); const g = [piece({ kind: 'box', size: [p.legWidth, L, p.legWidth] }, [p.baseWidth / 4, p.height / 2, 0], COLORS.steel, 'structure', quatFromAxisAngle([0, 0, 1], ang)), piece({ kind: 'box', size: [p.legWidth, L, p.legWidth] }, [-p.baseWidth / 4, p.height / 2, 0], COLORS.steel, 'structure', quatFromAxisAngle([0, 0, 1], -ang)), piece({ kind: 'box', size: [p.baseWidth, p.legWidth, p.legWidth * 3] }, [0, p.legWidth / 2, 0], COLORS.steel), piece({ kind: 'cylinder', radius: p.legWidth, height: p.legWidth * 3, axis: 'z' }, [0, p.height, 0], COLORS.brass)];
       return finish({ id, kind: 'tower', name: `A-frame tower ${mm(p.height)} mm`, category: 'frames', description: 'Steel A-frame with top axle boss.', params: p, mass_kg: vol(g) * DENSITY.steel * 0.6, dimensions_m: [p.baseWidth, p.height, p.legWidth * 3], material: 'steel', geometry: g, connectors: [fx('base', [0, 0, 0], [0, -1, 0]), fx('axle', [0, p.height, p.legWidth * 1.5], [0, 0, 1], 'revolute', 'axle boss, spins about Z'), fx('axle_back', [0, p.height, -p.legWidth * 1.5], [0, 0, -1], 'revolute'), fx('top', [0, p.height + p.legWidth, 0], [0, 1, 0])], cost_usd: 8 }); } },
+  radial_hub: {
+    kind: 'radial_hub', name: 'Radial linkage hub', category: 'linkages',
+    description: 'Round Y-axis hub with evenly spaced stations for folding petals, iris blades, and vents. Use hinge_0…N−1 for tangential fold hinges or pin_0…N−1 for vertical iris pivots. Attach mount below to a support, or slide/spin to a driver.',
+    params: {
+      radius: { min: 0.015, max: 0.24, default: 0.055, unit: 'm', description: 'Centre to hinge station' },
+      thickness: { min: 0.003, max: 0.03, default: 0.008, unit: 'm', description: 'Hub plate thickness along Y' },
+      stations: { min: 3, max: 12, default: 6, unit: '', description: 'Number of equally spaced stations (integer)' },
+    },
+    generate: (p, id) => {
+      const { radius, thickness, stations } = p;
+      if (!Number.isInteger(stations)) throw new ParamError('Radial hub station count must be an integer.');
+      if (thickness > radius * 0.65) throw new ParamError('Radial hub thickness must be at most 65% of the station radius.');
+      const bossRadius = Math.min(thickness * 0.75, radius * 0.18);
+      const hingeHeight = thickness / 2 + bossRadius;
+      const geometry = [
+        piece({ kind: 'cylinder', radius: radius * 0.9, height: thickness, axis: 'y' }, [0, 0, 0], '#3c526a'),
+        piece({ kind: 'cylinder', radius: radius * 0.28, height: thickness * 0.4, axis: 'y' }, [0, thickness * 0.7, 0], COLORS.brass),
+      ];
+      const connectors: Connector[] = [
+        fx('mount', [0, -thickness / 2, 0], [0, -1, 0], 'fixed', 'Fixed mount beneath the hub'),
+        fx('slide', [0, -thickness / 2, 0], [0, -1, 0], 'prismatic', 'Vertical guide or synchronized linkage yoke'),
+        fx('spin', [0, -thickness / 2, 0], [0, -1, 0], 'revolute', 'Central rotary axis'),
+        fx('top', [0, thickness * 0.9, 0], [0, 1, 0]),
+      ];
+      for (let station = 0; station < stations; station++) {
+        const angle = station * 2 * Math.PI / stations;
+        const radial: Vec3 = [Math.cos(angle), 0, Math.sin(angle)];
+        const tangent: Vec3 = [-radial[2], 0, radial[0]];
+        const pivot: Vec3 = [radial[0] * radius, hingeHeight, radial[2] * radius];
+        const padRadius = radius * 0.15;
+        geometry.push(
+          piece({ kind: 'cylinder', radius: padRadius, height: thickness, axis: 'y' }, [pivot[0], 0, pivot[2]], '#52748b'),
+          piece({ kind: 'cylinder', radius: bossRadius, height: padRadius * 1.4, axis: 'z' }, pivot, COLORS.brass, 'structure', quatFromAxisAngle([0, 1, 0], -angle)),
+        );
+        connectors.push(
+          fx(`hinge_${station}`, pivot, tangent, 'revolute', 'Tangential axis. Mount a petal by its hinge with spin_deg 0 for a flat outward rest pose. Positive joint angle lifts it.'),
+          fx(`pin_${station}`, pivot, [0, 1, 0], 'revolute', `Vertical axis for an iris blade. With hinged_petal.iris_pivot, use spin_deg ${Math.round(-angle * 180 / Math.PI)} to point outward before adding a sweep offset.`),
+        );
+      }
+      return finish({
+        id, kind: 'radial_hub', name: `Radial hub ${stations}-station Ø${mm(radius * 2)} mm`, category: 'linkages',
+        description: `A ${stations}-station hub or yoke with tangential folding hinges and vertical iris pivots. Stagger or space the panels to give them clearance.`,
+        params: p, geometry, connectors, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [radius * 2.3, Math.max(thickness * 1.4, thickness + 2 * bossRadius), radius * 2.3], cost_usd: 5,
+      });
+    },
+  },
+  hinged_petal: {
+    kind: 'hinged_petal', name: 'Hinged petal panel', category: 'panels',
+    description: 'Lightweight tapered panel for flower mechanisms, shutters, iris blades or vents. Extends from its root along +X. Mount hinge for vertical fold about Z, or iris_pivot for planar swing about Y. Use fold_link or iris_link for optional rods, and tip for a fixed test marker.',
+    params: {
+      length: { min: 0.025, max: 0.45, default: 0.09, unit: 'm', description: 'Root-to-tip length along X' },
+      width: { min: 0.008, max: 0.28, default: 0.038, unit: 'm', description: 'Maximum panel width along Z' },
+      thickness: { min: 0.0008, max: 0.009, default: 0.002, unit: 'm', description: 'Panel thickness along Y' },
+      rootRatio: { min: 0.1, max: 1, default: 0.35, unit: 'ratio', description: 'Root width divided by panel width' },
+      linkRatio: { min: 0.15, max: 0.85, default: 0.35, unit: 'ratio', description: 'Optional link mount distance from the root, divided by panel length' },
+    },
+    generate: (p, id) => {
+      const { length, width, thickness, rootRatio, linkRatio } = p;
+      if (thickness > Math.min(length, width) / 3) throw new ParamError('Hinged panel thickness must be at most one third of its length and width.');
+      const samples = 16;
+      const halfWidth = (t: number) => width / 2 * (rootRatio * (1 - t) + (1 - rootRatio * (1 - t)) * Math.sin(Math.PI * t) ** 0.8);
+      const profile: Profile = [];
+      for (let i = 0; i < samples; i++) {
+        const t = i / samples;
+        profile.push([t * length, -halfWidth(t)]);
+      }
+      profile.push([length, 0]);
+      for (let i = samples - 1; i >= 0; i--) {
+        const t = i / samples;
+        profile.push([t * length, halfWidth(t)]);
+      }
+      const rootWidth = width * rootRatio;
+      const bossRadius = Math.min(thickness * 1.2, width * 0.12);
+      const linkX = length * linkRatio;
+      const geometry = [
+        piece({ kind: 'extrude', profile, depth: thickness, axis: 'y' }, [0, 0, 0], '#a25aa6', 'shell'),
+        piece({ kind: 'cylinder', radius: bossRadius, height: rootWidth, axis: 'z' }, [0, 0, 0], COLORS.brass),
+        piece({ kind: 'cylinder', radius: bossRadius, height: thickness, axis: 'y' }, [linkX, -thickness, 0], COLORS.brass),
+      ];
+      return finish({
+        id, kind: 'hinged_petal', name: `Hinged petal panel ${mm(length)}×${mm(width)} mm`, category: 'panels',
+        description: 'A tapered lightweight panel with alternative folding and iris pivots at its root and optional link mounts underneath.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [length + bossRadius, bossRadius + Math.max(1.5 * thickness, bossRadius), width],
+        connectors: [
+          fx('hinge', [0, 0, 0], [0, 0, -1], 'revolute', 'Tangential root pivot for folding the panel up and down'),
+          fx('iris_pivot', [0, 0, 0], [0, -1, 0], 'revolute', 'Vertical root pivot for swinging in the XZ plane'),
+          fx('fold_link', [linkX, -thickness, 0], [0, 0, -1], 'revolute', 'Under-panel connecting rod pivot about the folding axis'),
+          fx('iris_link', [linkX, -thickness * 1.5, 0], [0, -1, 0], 'revolute', 'Under-panel connecting rod pivot for an iris'),
+          fx('tip', [length, 0, 0], [1, 0, 0], 'fixed', 'Tip position for a marker or test target'),
+        ],
+        cost_usd: 2,
+      });
+    },
+  },
   // ---------- rotational ----------
   shaft: { kind: 'shaft', name: 'Shaft', category: 'shafts', description: 'Round steel shaft along X; revolute ends and mid-point mounts for gears/wheels (fixed, "hub_*").', params: { length: { min: 0.01, max: 0.8, default: 0.06, unit: 'm', description: 'Length' }, radius: { min: 0.001, max: 0.02, default: 0.003, unit: 'm', description: 'Radius' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.length, axis: 'x' }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'shaft', name: `Shaft Ø${mm(p.radius * 2)}×${mm(p.length)} mm`, category: 'shafts', description: 'Ground steel shaft.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.length, p.radius * 2, p.radius * 2], material: 'steel', geometry: g, connectors: [fx('end_a', [-p.length / 2, 0, 0], [-1, 0, 0], 'revolute'), fx('end_b', [p.length / 2, 0, 0], [1, 0, 0], 'revolute'), fx('hub_mid', [0, 0, 0], [1, 0, 0], 'fixed', 'press-fit hub at mid length'), fx('hub_a', [-p.length / 4, 0, 0], [1, 0, 0]), fx('hub_b', [p.length / 4, 0, 0], [1, 0, 0])], cost_usd: 1 }); } },
@@ -57,6 +199,41 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const r = (p.module * p.teeth) / 2; const g = [piece({ kind: 'extrude', profile: profiles.gear(Math.round(p.teeth), p.module), depth: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.brass)]; return finish({ id, kind: 'gear', name: `Gear ${Math.round(p.teeth)}T m${(p.module * 1000).toFixed(1)}`, category: 'gears', description: `${Math.round(p.teeth)}-tooth spur gear, pitch Ø${mm(r * 2)} mm.`, params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [r * 2, r * 2, p.thickness], material: 'steel', geometry: g, connectors: [fx('bore', [0, 0, 0], [0, 0, 1], 'revolute'), fx('hub', [0, 0, -p.thickness / 2], [0, 0, -1], 'fixed', 'press onto a shaft hub'), fx('face', [0, 0, p.thickness / 2], [0, 0, 1])], cost_usd: 2 + p.teeth * 0.05 }); } },
   bearing: { kind: 'bearing', name: 'Ball bearing', category: 'bearings', description: 'Radial bearing: outer race fixed (outer), inner race revolute (inner, Z).', params: { outerRadius: { min: 0.004, max: 0.05, default: 0.011, unit: 'm', description: 'Outer radius' }, width: { min: 0.002, max: 0.02, default: 0.007, unit: 'm', description: 'Width' } },
     generate: (p, id) => { const g = [piece({ kind: 'revolve', profile: profiles.rim(p.outerRadius, p.outerRadius * 0.45, p.width), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'bearing', name: `Bearing Ø${mm(p.outerRadius * 2)} mm`, category: 'bearings', description: 'Shielded radial bearing.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.outerRadius * 2, p.outerRadius * 2, p.width], material: 'steel', geometry: g, connectors: [fx('outer', [0, p.outerRadius, 0], [0, 1, 0]), fx('housing', [0, 0, -p.width / 2], [0, 0, -1]), fx('inner', [0, 0, p.width / 2], [0, 0, 1], 'revolute')], limits: { maxLoad_N: 400 }, cost_usd: 1.5 }); } },
+  pillow_block: {
+    kind: 'pillow_block', name: 'Pillow block bearing', category: 'bearings',
+    description: 'Supports a horizontal rotating shaft. Fix "mount" to a frame and connect a shaft end to "bore_front" or "bore_back" with a revolute joint about Z.',
+    params: {
+      bore: { min: 0.004, max: 0.02, default: 0.008, unit: 'm', description: 'Shaft diameter' },
+      depth: { min: 0.006, max: 0.035, default: 0.012, unit: 'm', description: 'Bearing depth along Z' },
+    },
+    generate: (p, id) => {
+      const boreRadius = p.bore / 2;
+      const raceRadius = boreRadius + 0.003;
+      const housingRadius = raceRadius + 0.003;
+      const baseWidth = housingRadius * 3.2;
+      const baseDepth = p.depth * 1.25;
+      const baseThickness = 0.004;
+      const boreDepth = p.depth + 0.001;
+      const geometry = [
+        piece({ kind: 'box', size: [baseWidth, baseThickness, baseDepth] }, [0, -housingRadius - baseThickness / 2, 0], COLORS.steel),
+        piece({ kind: 'box', size: [housingRadius * 1.6, housingRadius * 0.5, p.depth] }, [0, -housingRadius * 0.75, 0], COLORS.steel),
+        piece({ kind: 'revolve', profile: profiles.rim(housingRadius, raceRadius, p.depth), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.steel),
+        piece({ kind: 'revolve', profile: profiles.rim(raceRadius, boreRadius, boreDepth), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.brass),
+      ];
+      return finish({
+        id, kind: 'pillow_block', name: `Pillow block bearing Ø${mm(p.bore)} mm`, category: 'bearings',
+        description: 'Base-mounted bearing support for a shaft, axle, or rotating transmission.',
+        params: p, geometry, material: 'steel', mass_kg: vol(geometry) * DENSITY.steel,
+        dimensions_m: [baseWidth, 2 * housingRadius + baseThickness, Math.max(baseDepth, boreDepth)],
+        connectors: [
+          fx('mount', [0, -housingRadius - baseThickness, 0], [0, -1, 0]),
+          fx('bore_front', [0, 0, boreDepth / 2], [0, 0, 1], 'revolute'),
+          fx('bore_back', [0, 0, -boreDepth / 2], [0, 0, -1], 'revolute'),
+        ],
+        cost_usd: 4,
+      });
+    },
+  },
   wheel: { kind: 'wheel', name: 'Wheel', category: 'wheels', description: 'Rubber-tyred wheel; hub is revolute about Z.', params: { radius: { min: 0.01, max: 0.3, default: 0.03, unit: 'm', description: 'Radius' }, width: { min: 0.004, max: 0.08, default: 0.012, unit: 'm', description: 'Width' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.width, axis: 'z' }, [0, 0, 0], COLORS.rubber, 'contact'), piece({ kind: 'cylinder', radius: p.radius * 0.6, height: p.width * 1.05, axis: 'z' }, [0, 0, 0], COLORS.aluminium, 'decor', QUAT_ID, { collide: false })]; return finish({ id, kind: 'wheel', name: `Wheel Ø${mm(p.radius * 2)} mm`, category: 'wheels', description: 'Rubber-tyred wheel.', params: p, mass_kg: Math.PI * p.radius ** 2 * p.width * DENSITY.rubber * 0.6, dimensions_m: [p.radius * 2, p.radius * 2, p.width], material: 'rubber / nylon', geometry: g, connectors: [fx('hub', [0, 0, 0], [0, 0, 1], 'revolute'), fx('hub_fixed', [0, 0, -p.width / 2], [0, 0, -1])], cost_usd: 2 }); } },
   big_wheel: { kind: 'big_wheel', name: 'Spoked wheel', category: 'wheels', description: 'Large spoked wheel (Ferris wheel / waterwheel): hub revolute about Z; N rim mounts "rim_{i}" (axis Z, for gondolas or sails) and "spoke_tip_{i}" (radial).', params: { radius: { min: 0.05, max: 0.7, default: 0.25, unit: 'm', description: 'Radius' }, spokes: { min: 3, max: 16, default: 8, unit: '', description: 'Spokes / rim mounts' }, spokeWidth: { min: 0.003, max: 0.03, default: 0.008, unit: 'm', description: 'Spoke section' } },
@@ -76,10 +253,370 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.size, p.size * 0.5, p.size * 1.2] }, [0, 0, 0], COLORS.aluminium)]; return finish({ id, kind: 'carriage', name: `Carriage ${mm(p.size)} mm`, category: 'sliders', description: 'Aluminium carriage block.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.size, p.size * 0.5, p.size * 1.2], material: 'aluminium', geometry: g, connectors: [fx('rail_face', [-p.size / 2, 0, 0], [-1, 0, 0], 'prismatic'), fx('top', [0, p.size * 0.25, 0], [0, 1, 0]), fx('front', [p.size / 2, 0, 0], [1, 0, 0])], cost_usd: 3 }); } },
   link: { kind: 'link', name: 'Linkage bar', category: 'linkages', description: 'Flat link with revolute pivots at both ends (Z axis) and a fixed mid mount; length is pivot-to-pivot along X.', params: { length: { min: 0.01, max: 0.6, default: 0.06, unit: 'm', description: 'Pivot spacing' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Width (Y)' }, thickness: { min: 0.002, max: 0.02, default: 0.004, unit: 'm', description: 'Thickness (Z)' } },
     generate: (p, id) => { const g = [piece({ kind: 'extrude', profile: profiles.roundedRect(p.length + p.width, p.width, p.width / 2), depth: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.titanium)]; return finish({ id, kind: 'link', name: `Link ${mm(p.length)} mm`, category: 'linkages', description: 'Aluminium linkage bar.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.length + p.width, p.width, p.thickness], material: 'aluminium', geometry: g, connectors: [fx('pivot_a', [-p.length / 2, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('pivot_b', [p.length / 2, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('pivot_a_back', [-p.length / 2, 0, -p.thickness / 2], [0, 0, -1], 'revolute'), fx('pivot_b_back', [p.length / 2, 0, -p.thickness / 2], [0, 0, -1], 'revolute'), fx('mid', [0, p.width / 2, 0], [0, 1, 0])], cost_usd: 1.2 }); } },
+  adjustable_link: {
+    kind: 'adjustable_link', name: 'Adjustable linkage plate', category: 'linkages',
+    description: 'Five selectable pin holes for changing lever arms or linking several outputs. Holes are numbered from 1 to 5 along +X. Each "pin_n" faces +Z and has a matching "pin_n_back".',
+    params: {
+      span: { min: 0.04, max: 0.25, default: 0.06, unit: 'm', description: 'Distance between outermost pins' },
+      thickness: { min: 0.002, max: 0.016, default: 0.004, unit: 'm', description: 'Plate thickness along Z' },
+    },
+    generate: (p, id) => {
+      const pitch = p.span / 4;
+      const outerRadius = Math.min(pitch * 0.4, 0.012);
+      const holeRadius = outerRadius * 0.45;
+      const geometry: GeometryPiece[] = [];
+      const connectors: Connector[] = [];
+      for (let i = 0; i < 5; i++) {
+        const x = (i - 2) * pitch;
+        geometry.push(piece({ kind: 'revolve', profile: profiles.rim(outerRadius, holeRadius, p.thickness), axis: 'z', segments: 24 }, [x, 0, 0], COLORS.aluminium));
+        if (i < 4) {
+          geometry.push(piece({ kind: 'box', size: [pitch - outerRadius, outerRadius, p.thickness] }, [x + pitch / 2, 0, 0], COLORS.aluminium));
+        }
+        connectors.push(
+          fx(`pin_${i + 1}`, [x, 0, p.thickness / 2], [0, 0, 1], 'revolute'),
+          fx(`pin_${i + 1}_back`, [x, 0, -p.thickness / 2], [0, 0, -1], 'revolute'),
+        );
+      }
+      return finish({
+        id, kind: 'adjustable_link', name: `Adjustable linkage plate ${mm(p.span)} mm`, category: 'linkages',
+        description: `Five evenly spaced pivots at ${mm(pitch)} mm pitch for adjusting stroke or leverage.`,
+        params: p, geometry, material: 'aluminium', mass_kg: vol(geometry) * DENSITY.aluminium,
+        dimensions_m: [p.span + 2 * outerRadius, 2 * outerRadius, p.thickness], connectors, cost_usd: 3,
+      });
+    },
+  },
   leg_segment: { kind: 'leg_segment', name: 'Leg segment', category: 'legs', description: 'Leg bar: revolute pivot at the top (Z axis), fixed tip at the bottom (−Y). Length runs down −Y from the pivot.', params: { length: { min: 0.01, max: 0.4, default: 0.06, unit: 'm', description: 'Pivot-to-tip' }, width: { min: 0.003, max: 0.04, default: 0.012, unit: 'm', description: 'Bar width (X)' }, thickness: { min: 0.002, max: 0.02, default: 0.004, unit: 'm', description: 'Thickness (Z)' } },
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.width, p.length, p.thickness] }, [0, -p.length / 2, 0], COLORS.titanium), piece({ kind: 'cylinder', radius: p.width * 0.7, height: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.steel)]; return finish({ id, kind: 'leg_segment', name: `Leg bar ${mm(p.length)} mm`, category: 'legs', description: 'Aluminium leg bar.', params: p, mass_kg: vol(g) * DENSITY.aluminium, dimensions_m: [p.width, p.length, p.thickness], material: 'aluminium', geometry: g, connectors: [fx('pivot', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'top pivot; mount onto a servo horn'), fx('pivot_front', [0, 0, p.thickness / 2], [0, 0, 1], 'revolute'), fx('tip', [0, -p.length, 0], [0, -1, 0]), fx('tip_side', [0, -p.length + p.width / 2, p.thickness / 2], [0, 0, 1])], cost_usd: 1.2 }); } },
   crank: { kind: 'crank', name: 'Crank arm', category: 'cranks', description: 'Crank: "shaft" bore (revolute Z) at origin and "pin" (revolute Z) at radius `throw` along +X for a connecting rod.', params: { throw: { min: 0.005, max: 0.3, default: 0.03, unit: 'm', description: 'Crank radius' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Arm width' }, thickness: { min: 0.002, max: 0.02, default: 0.005, unit: 'm', description: 'Thickness' } },
     generate: (p, id) => { const g = [piece({ kind: 'extrude', profile: profiles.roundedRect(p.throw + p.width, p.width, p.width / 2), depth: p.thickness, axis: 'z' }, [p.throw / 2, 0, 0], COLORS.steel), piece({ kind: 'cylinder', radius: p.width * 0.3, height: p.thickness * 2, axis: 'z' }, [p.throw, 0, p.thickness], COLORS.brass)]; return finish({ id, kind: 'crank', name: `Crank ${mm(p.throw)} mm throw`, category: 'cranks', description: 'Steel crank arm with pin.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.throw + p.width, p.width, p.thickness * 3], material: 'steel', geometry: g, connectors: [fx('shaft', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'mount onto a motor shaft or axle'), fx('pin', [p.throw, 0, p.thickness * 2], [0, 0, 1], 'revolute', 'crank pin for a connecting rod')], cost_usd: 2 }); } },
+  geneva_wheel: {
+    kind: 'geneva_wheel', name: 'Four-slot Geneva index wheel', category: 'linkages',
+    description: 'Passive four-stop Geneva wheel. A matching offset pin enters its open slots to index it by a quarter turn. Put the driver centre on +X, rotate this wheel +45° around Z at rest, and mount output_axis on a passive Z pivot. For a horizontal turntable, use wheel rotation_deg [-90,45,0] and driver [-90,0,0]. Use table for a fixed output.',
+    params: GENEVA_PARAMS,
+    generate: (p, id) => {
+      const { centreDistance, pinRadius, clearance, thickness } = p;
+      const { crankRadius, halfSlot, recessRadius } = genevaDimensions(centreDistance, pinRadius, clearance);
+      const hubRadius = centreDistance - crankRadius - pinRadius - clearance;
+      const geometry = [piece({ kind: 'cylinder', radius: hubRadius, height: thickness, axis: 'z' }, [0, 0, 0], '#52748b')];
+      const start = Math.asin(halfSlot / crankRadius);
+      const samples = 16;
+      const edges = Array.from({ length: samples + 1 }, (_, index) => {
+        const angle = start + index / samples * (Math.PI / 2 - 2 * start);
+        const x = Math.cos(angle);
+        const y = Math.sin(angle);
+        const alongRay = crankRadius * (x + y);
+        const discriminant = alongRay ** 2 - centreDistance ** 2 + recessRadius ** 2;
+        const outer = discriminant > 0 ? Math.min(crankRadius, alongRay - Math.sqrt(discriminant)) : crankRadius;
+        const inner = halfSlot / Math.min(x, y);
+        return { inner: [x * inner, y * inner] as Vec2, outer: [x * outer, y * outer] as Vec2 };
+      });
+      // Keep the slot channels and locking recesses physically open. Rapier takes a convex
+      // hull per piece, so each narrow material strip gets its own collider.
+      for (let quadrant = 0; quadrant < 4; quadrant++) {
+        const rotation = quatFromAxisAngle([0, 0, 1], quadrant * Math.PI / 2);
+        for (let index = 0; index < samples; index++) {
+          const a = edges[index];
+          const b = edges[index + 1];
+          const profile = [a.inner, a.outer, b.outer, b.inner].filter((point, i, points) =>
+            i === 0 || Math.hypot(point[0] - points[i - 1][0], point[1] - points[i - 1][1]) > 1e-8);
+          if (profile.length >= 3) geometry.push(piece({ kind: 'extrude', profile: ensureCCW(profile), depth: thickness, axis: 'z' }, [0, 0, 0], '#52748b', 'structure', rotation));
+        }
+      }
+      geometry.push(piece({ kind: 'cylinder', radius: hubRadius * 0.53, height: thickness * 0.32, axis: 'z' }, [0, 0, thickness * 0.66], COLORS.brass));
+      return finish({
+        id, kind: 'geneva_wheel', name: `Four-slot Geneva wheel ${mm(centreDistance)} mm spacing`, category: 'linkages',
+        description: 'Four physical slots accept the matching driver pin. Recesses between the slots receive its dwell sector.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [crankRadius * 2, crankRadius * 2, thickness * 1.32],
+        connectors: [
+          fx('output_axis', [0, 0, -thickness / 2], [0, 0, -1], 'revolute', 'Passive output shaft about Z'),
+          fx('table', [0, 0, thickness * 0.82], [0, 0, 1], 'fixed', 'Output tray or marker mount'),
+        ],
+        cost_usd: 8,
+      });
+    },
+  },
+  geneva_crank: {
+    kind: 'geneva_crank', name: 'Geneva pin crank', category: 'cranks',
+    description: 'Powered Geneva driver with one physical offset pin and a relieved dwell sector. At rest the pin points +X; place its centre to the right of the matching wheel and one thickness behind it along Z (one thickness below the wheel for horizontal mounting). Power only the drive pivot.',
+    params: GENEVA_PARAMS,
+    generate: (p, id) => {
+      const { centreDistance, pinRadius, clearance, thickness } = p;
+      const { crankRadius, lockRadius } = genevaDimensions(centreDistance, pinRadius, clearance);
+      const plateRadius = crankRadius + pinRadius * 1.5;
+      const relief = 40 * Math.PI / 180;
+      const geometry = [
+        piece({ kind: 'cylinder', radius: plateRadius, height: thickness * 0.7, axis: 'z' }, [0, 0, 0], '#354e64'),
+        piece({ kind: 'cylinder', radius: pinRadius, height: thickness * 1.25, axis: 'z' }, [crankRadius, 0, thickness * 0.9], COLORS.orange, 'contact', QUAT_ID, { friction: 0.35 }),
+      ];
+      // The dwell sector wraps more than 180 degrees. Split it into convex halves so the
+      // contact hulls preserve the relief around the pin through the indexing phase.
+      for (const [start, end] of [[relief, Math.PI], [Math.PI, 2 * Math.PI - relief]]) {
+        const profile: Profile = [[0, 0]];
+        for (let index = 0; index <= 24; index++) {
+          const angle = start + index / 24 * (end - start);
+          profile.push([lockRadius * Math.cos(angle), lockRadius * Math.sin(angle)]);
+        }
+        geometry.push(piece({ kind: 'extrude', profile, depth: thickness, axis: 'z' }, [0, 0, thickness], COLORS.brass, 'contact', QUAT_ID, { friction: 0.35 }));
+      }
+      geometry.push(piece({ kind: 'cylinder', radius: pinRadius * 1.2, height: thickness, axis: 'z' }, [0, 0, thickness * 0.7], '#354e64'));
+      return finish({
+        id, kind: 'geneva_crank', name: `Geneva pin crank ${mm(centreDistance)} mm spacing`, category: 'cranks',
+        description: 'The orange pin indexes the wheel through contact. The relieved bronze sector holds the wheel between steps.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [plateRadius * 2, plateRadius * 2, thickness * 1.875],
+        connectors: [fx('drive', [0, 0, -thickness * 0.35], [0, 0, -1], 'revolute', 'Powered input shaft about Z')],
+        cost_usd: 6,
+      });
+    },
+  },
+  eccentric_disc: {
+    kind: 'eccentric_disc', name: 'Eccentric drive disc', category: 'cranks',
+    description: 'Round crank with a rear "shaft" bore, fixed front "hub" for a shaft extension, and an offset front "pin" to drive a connecting rod. Both pivots rotate about Z.',
+    params: {
+      radius: { min: 0.012, max: 0.12, default: 0.02, unit: 'm', description: 'Disc radius' },
+      throw: { min: 0.004, max: 0.1, default: 0.01, unit: 'm', description: 'Shaft-to-pin distance' },
+      thickness: { min: 0.003, max: 0.02, default: 0.006, unit: 'm', description: 'Disc thickness' },
+    },
+    generate: (p, id) => {
+      const pinRadius = Math.min(p.thickness / 2, p.radius * 0.15);
+      const boreRadius = p.radius * 0.18;
+      if (p.throw + pinRadius > p.radius || p.throw - pinRadius < boreRadius) {
+        throw new ParamError('Eccentric disc pin must sit on the disc between the shaft bore and rim.');
+      }
+      const disc = piece({ kind: 'revolve', profile: profiles.rim(p.radius, boreRadius, p.thickness), axis: 'z', segments: 32 }, [0, 0, 0], COLORS.steel);
+      const pin = piece({ kind: 'cylinder', radius: pinRadius, height: p.thickness, axis: 'z' }, [p.throw, 0, p.thickness], COLORS.brass);
+      return finish({
+        id, kind: 'eccentric_disc', name: `Eccentric drive disc Ø${mm(p.radius * 2)} mm`, category: 'cranks',
+        description: `Converts shaft rotation into reciprocating motion through a connecting rod. The pin sits ${mm(p.throw)} mm from the shaft.`,
+        params: p, mass_kg: vol([disc, pin]) * DENSITY.steel, dimensions_m: [p.radius * 2, p.radius * 2, p.thickness * 2],
+        material: 'steel', geometry: [disc, pin],
+        connectors: [
+          fx('shaft', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'mount to a motor or axle'),
+          fx('hub', [0, 0, p.thickness / 2], [0, 0, 1], 'fixed', 'coaxial mount for a shaft extension'),
+          fx('pin', [p.throw, 0, p.thickness * 1.5], [0, 0, 1], 'revolute', 'offset pin for a connecting rod'),
+        ],
+        cost_usd: 3,
+      });
+    },
+  },
+  eccentric_cam: {
+    kind: 'eccentric_cam', name: 'Eccentric contact cam', category: 'cranks',
+    description: 'A colliding eccentric lobe lifts a separate flat-foot follower without a joint between the two. Axis Z, lobe toward +X; use "shaft" for a fixed axle connection or "drive" for a revolute drive.',
+    params: {
+      coreRadius: { min: 0.012, max: 0.09, default: 0.037, unit: 'm', description: 'Concentric dwell radius' },
+      lobeRadius: { min: 0.006, max: 0.07, default: 0.025, unit: 'm', description: 'Radius of the raised lobe' },
+      eccentricity: { min: 0.004, max: 0.075, default: 0.031, unit: 'm', description: 'Offset of the lobe centre from the shaft' },
+      thickness: { min: 0.003, max: 0.03, default: 0.014, unit: 'm', description: 'Thickness along Z' },
+    },
+    generate: (p, id) => {
+      const { coreRadius, lobeRadius, eccentricity, thickness } = p;
+      const lift = eccentricity + lobeRadius - coreRadius;
+      if (lift <= 0 || lobeRadius - eccentricity >= coreRadius || eccentricity >= coreRadius + lobeRadius) {
+        throw new ParamError('Cam lobe must overlap the core and protrude on one side while leaving a dwell region.');
+      }
+      const geometry = [
+        piece({ kind: 'cylinder', radius: coreRadius, height: thickness, axis: 'z' }, [0, 0, 0], '#586c84'),
+        piece({ kind: 'cylinder', radius: lobeRadius, height: thickness, axis: 'z' }, [eccentricity, 0, 0], COLORS.orange),
+      ];
+      return finish({
+        id, kind: 'eccentric_cam', name: `Eccentric contact cam Ø${mm(coreRadius * 2)} mm`, category: 'cranks',
+        description: `Lifts a passive follower by up to ${mm(lift)} mm from the core dwell radius through direct contact. Rotate about Z to set the phase.`,
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [coreRadius * 2 + lift, 2 * Math.max(coreRadius, lobeRadius), thickness],
+        connectors: [
+          fx('shaft', [0, 0, -thickness / 2], [0, 0, -1], 'fixed', 'rear coaxial axle mount'),
+          fx('drive', [0, 0, -thickness / 2], [0, 0, -1], 'revolute', 'rear driven pivot'),
+          fx('shaft_front', [0, 0, thickness / 2], [0, 0, 1], 'fixed', 'front coaxial axle mount'),
+        ],
+        cost_usd: 3,
+      });
+    },
+  },
+  cam_follower: {
+    kind: 'cam_follower', name: 'Flat-foot cam follower', category: 'sliders',
+    description: 'A flat contact shoe centered at the origin with a stem along +Y. Mount "slide" onto a fixed follower guide with a passive prismatic joint; attach a payload to "mount". Gravity or a return spring keeps the shoe against the cam.',
+    params: {
+      shoeLength: { min: 0.026, max: 0.18, default: 0.098, unit: 'm', description: 'Shoe length along X' },
+      shoeWidth: { min: 0.008, max: 0.045, default: 0.019, unit: 'm', description: 'Shoe width along Z' },
+      shoeThickness: { min: 0.003, max: 0.02, default: 0.01, unit: 'm', description: 'Shoe thickness along Y' },
+      stemSize: { min: 0.004, max: 0.02, default: 0.009, unit: 'm', description: 'Width of the square stem' },
+      stemLength: { min: 0.025, max: 0.15, default: 0.057, unit: 'm', description: 'Stem length above the shoe, along Y' },
+    },
+    generate: (p, id) => {
+      const { shoeLength, shoeWidth, shoeThickness, stemSize, stemLength } = p;
+      if (stemSize > shoeWidth) throw new ParamError('Follower stem must fit on the shoe.');
+      const stemCenter = (shoeThickness + stemLength) / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [shoeLength, shoeThickness, shoeWidth] }, [0, 0, 0], '#344661'),
+        piece({ kind: 'box', size: [stemSize, stemLength, stemSize] }, [0, stemCenter, 0], '#586c84', 'structure', undefined, { collide: false }),
+      ];
+      return finish({
+        id, kind: 'cam_follower', name: `Flat-foot cam follower ${mm(shoeLength)} mm`, category: 'sliders',
+        description: 'The lower shoe makes cam contact while the prismatic joint guides the stem. A flag, plunger, or other payload mounts at the top.',
+        params: p, geometry, material: 'nylon', mass_kg: vol(geometry) * DENSITY.nylon,
+        dimensions_m: [shoeLength, shoeThickness + stemLength, shoeWidth],
+        connectors: [
+          fx('slide', [0, stemCenter, 0], [0, -1, 0], 'prismatic', 'mates with follower_guide.guide'),
+          fx('mount', [0, shoeThickness / 2 + stemLength, 0], [0, 1, 0], 'fixed', 'payload mount at the stem tip'),
+        ],
+        cost_usd: 2,
+      });
+    },
+  },
+  follower_guide: {
+    kind: 'follower_guide', name: 'Cam follower guide', category: 'sliders',
+    description: 'Fixed offset bracket with a hollow vertical bushing. Connect "guide" to a cam follower’s "slide" with a prismatic joint to constrain motion along local Y.',
+    params: {
+      stemSize: { min: 0.004, max: 0.02, default: 0.009, unit: 'm', description: 'Matching square follower stem width' },
+      reach: { min: 0.025, max: 0.12, default: 0.063, unit: 'm', description: 'Distance from support mount to slide axis along X' },
+    },
+    generate: (p, id) => {
+      const sleeveInner = Math.SQRT1_2 * p.stemSize + 0.0004;
+      const sleeveOuter = sleeveInner + 0.002;
+      const sleeveHeight = 0.014;
+      // The prismatic joint represents the sliding bearing. Its housing must not snag the stem.
+      const geometry = [
+        piece({ kind: 'box', size: [p.reach + 0.001, 0.009, 0.011] }, [-(p.reach - 0.001) / 2, 0.004, -0.017], '#586c84', 'structure', undefined, { collide: false }),
+        piece({ kind: 'box', size: [0.013, 0.009, 0.014] }, [0, 0.004, -sleeveInner - 0.006], '#586c84', 'structure', undefined, { collide: false }),
+        piece({ kind: 'revolve', profile: profiles.rim(sleeveOuter, sleeveInner, sleeveHeight), axis: 'y', segments: 24 }, [0, 0.004, 0], '#899ab0', 'structure', undefined, { collide: false }),
+      ];
+      return finish({
+        id, kind: 'follower_guide', name: `Cam follower guide ${mm(p.stemSize)} mm`, category: 'sliders',
+        description: 'A fixed bracket for a passive cam follower. The hollow bushing shows the path enforced by the prismatic joint.',
+        params: p, geometry, material: 'aluminium', mass_kg: vol(geometry) * DENSITY.aluminium,
+        dimensions_m: [p.reach + Math.max(0.0065, sleeveOuter), sleeveHeight, Math.max(0.0225, sleeveInner + 0.013) + sleeveOuter],
+        connectors: [
+          fx('mount', [-p.reach, 0.004, -0.017], [-1, 0, 0]),
+          fx('guide', [0, 0, 0], [0, 1, 0], 'prismatic', 'vertical slide axis; attach the follower here'),
+        ],
+        cost_usd: 3,
+      });
+    },
+  },
+  camera_cradle: {
+    kind: 'camera_cradle', name: 'Suspended camera cradle', category: 'joints',
+    description: 'Open camera platform under a Z-axis pivot. The deck has a fixed camera mount above and a fixed ballast mount below.',
+    params: {
+      length: { min: 0.025, max: 0.2, default: 0.04, unit: 'm', description: 'Deck length along X' },
+      width: { min: 0.025, max: 0.2, default: 0.048, unit: 'm', description: 'Width across the pivot cheeks along Z' },
+      drop: { min: 0.012, max: 0.1, default: 0.018, unit: 'm', description: 'Distance from the pivot down to the deck top' },
+      thickness: { min: 0.002, max: 0.008, default: 0.003, unit: 'm', description: 'Deck and cheek thickness' },
+    },
+    generate: (p, id) => {
+      const { length, width, drop, thickness } = p;
+      const cheekZ = (width - thickness) / 2;
+      const cheekHeight = drop + thickness;
+      const cheekY = (thickness - drop) / 2;
+      const cheekSize: Vec3 = [length * 0.4, cheekHeight, thickness];
+      const geometry = [
+        piece({ kind: 'box', size: [length, thickness, width] }, [0, -drop - thickness / 2, 0], COLORS.aluminium),
+        piece({ kind: 'box', size: cheekSize }, [0, cheekY, cheekZ], '#304962'),
+        piece({ kind: 'box', size: cheekSize }, [0, cheekY, -cheekZ], '#304962'),
+      ];
+      return finish({
+        id, kind: 'camera_cradle', name: `Suspended camera cradle ${mm(width)} mm`, category: 'joints',
+        description: 'Two pivot cheeks support a deck below the shaft. Secure a camera above the deck and ballast below it.',
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [length, drop + 2 * thickness, width],
+        material: 'aluminium', geometry, connectors: [
+          fx('pivot_front', [0, 0, width / 2], [0, 0, 1], 'revolute', 'Pivot about Z'),
+          fx('pivot_back', [0, 0, -width / 2], [0, 0, -1], 'revolute', 'Pivot about Z'),
+          fx('camera', [0, -drop, 0], [0, 1, 0], 'fixed', 'Mount the camera or test payload above the deck'),
+          fx('ballast', [0, -drop - thickness, 0], [0, -1, 0], 'fixed', 'Mount a counterweight under the deck'),
+        ], cost_usd: 4,
+      });
+    },
+  },
+  gimbal_frame: {
+    kind: 'gimbal_frame', name: 'Open gimbal frame', category: 'joints',
+    description: 'Open horizontal frame with outer pivots along X and inward pivots along Z. Nest a smaller frame on the perpendicular axis for a two-axis gimbal.',
+    params: {
+      opening: { min: 0.025, max: 0.3, default: 0.084, unit: 'm', description: 'Clear width of the square opening' },
+      rim: { min: 0.004, max: 0.02, default: 0.008, unit: 'm', description: 'Rail width' },
+      thickness: { min: 0.004, max: 0.025, default: 0.01, unit: 'm', description: 'Frame thickness along Y' },
+    },
+    generate: (p, id) => {
+      const { opening, rim, thickness } = p;
+      const span = opening + 2 * rim;
+      const railCenter = (opening + rim) / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [rim, thickness, span] }, [-railCenter, 0, 0], '#304962'),
+        piece({ kind: 'box', size: [rim, thickness, span] }, [railCenter, 0, 0], '#304962'),
+        piece({ kind: 'box', size: [opening, thickness, rim] }, [0, 0, railCenter], COLORS.aluminium),
+        piece({ kind: 'box', size: [opening, thickness, rim] }, [0, 0, -railCenter], COLORS.aluminium),
+      ];
+      return finish({
+        id, kind: 'gimbal_frame', name: `Open gimbal frame ${mm(span)} mm`, category: 'joints',
+        description: `Aluminium frame with a ${mm(opening)} mm clear opening and perpendicular bearing axes.`,
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [span, thickness, span],
+        material: 'aluminium', geometry, connectors: [
+          fx('outer_left', [-span / 2, 0, 0], [-1, 0, 0], 'revolute', 'Outer pivot along X'),
+          fx('outer_right', [span / 2, 0, 0], [1, 0, 0], 'revolute', 'Outer pivot along X'),
+          fx('inner_front', [0, 0, opening / 2], [0, 0, -1], 'revolute', 'Inward pivot along Z'),
+          fx('inner_back', [0, 0, -opening / 2], [0, 0, 1], 'revolute', 'Inward pivot along Z'),
+          fx('top', [0, thickness / 2, railCenter], [0, 1, 0]),
+          fx('bottom', [0, -thickness / 2, railCenter], [0, -1, 0]),
+        ], cost_usd: 4,
+      });
+    },
+  },
+  clevis: {
+    kind: 'clevis', name: 'Forked clevis', category: 'joints',
+    description: 'Forked bracket with a fixed bottom "mount" and a revolute crosswise "pin" along Z, for a rod or linkage.',
+    params: {
+      gap: { min: 0.006, max: 0.05, default: 0.012, unit: 'm', description: 'Inside width of the fork' },
+      rise: { min: 0.01, max: 0.08, default: 0.016, unit: 'm', description: 'Height of pin above base centre' },
+      wall: { min: 0.002, max: 0.008, default: 0.003, unit: 'm', description: 'Thickness of each cheek and base' },
+    },
+    generate: (p, id) => {
+      const width = p.wall * 3;
+      const depth = p.gap + 2 * p.wall;
+      const geometry = [
+        piece({ kind: 'box', size: [width, p.wall, depth] }, [0, 0, 0], COLORS.aluminium),
+        ...[-1, 1].map((side) => piece({ kind: 'box', size: [width, p.rise, p.wall] }, [0, (p.wall + p.rise) / 2, side * (p.gap + p.wall) / 2], COLORS.aluminium)),
+        piece({ kind: 'cylinder', radius: p.wall / 2, height: p.gap, axis: 'z' }, [0, p.rise, 0], COLORS.brass),
+      ];
+      return finish({
+        id, kind: 'clevis', name: `Forked clevis ${mm(p.gap)} mm gap`, category: 'joints',
+        description: `Holds a rod or linkage between two cheeks on a single cross pin. The fork has ${mm(p.gap)} mm of inside clearance.`,
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [width, p.rise + p.wall, depth],
+        material: 'aluminium', geometry,
+        connectors: [
+          fx('mount', [0, -p.wall / 2, 0], [0, -1, 0]),
+          fx('pin', [0, p.rise, 0], [0, 0, 1], 'revolute', 'pin centre inside the fork'),
+        ],
+        cost_usd: 2,
+      });
+    },
+  },
+  bell_crank: {
+    kind: 'bell_crank', name: 'Bell crank', category: 'linkages',
+    description: 'Right-angle lever with a rear centre "pivot", an "input" along +X, and an "output" along +Y. All three joints rotate about Z.',
+    params: {
+      input: { min: 0.01, max: 0.2, default: 0.03, unit: 'm', description: 'Input arm pivot-to-pin length' },
+      output: { min: 0.01, max: 0.2, default: 0.04, unit: 'm', description: 'Output arm pivot-to-pin length' },
+      width: { min: 0.004, max: 0.024, default: 0.01, unit: 'm', description: 'Arm width' },
+      thickness: { min: 0.002, max: 0.02, default: 0.004, unit: 'm', description: 'Plate thickness' },
+    },
+    generate: (p, id) => {
+      const geometry = [
+        piece({ kind: 'box', size: [p.input + p.width, p.width, p.thickness] }, [p.input / 2, 0, 0], COLORS.orange),
+        piece({ kind: 'box', size: [p.width, p.output, p.thickness] }, [0, (p.width + p.output) / 2, 0], COLORS.orange),
+      ];
+      return finish({
+        id, kind: 'bell_crank', name: `Bell crank ${mm(p.input)}×${mm(p.output)} mm`, category: 'linkages',
+        description: 'Redirects motion through a right angle. Different arm lengths change the travel and leverage.',
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [p.input + p.width, p.output + p.width, p.thickness],
+        material: 'aluminium', geometry,
+        connectors: [
+          fx('pivot', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'central support pivot'),
+          fx('input', [p.input, 0, p.thickness / 2], [0, 0, 1], 'revolute', 'input link pin'),
+          fx('output', [0, p.output, p.thickness / 2], [0, 0, 1], 'revolute', 'output link pin'),
+        ],
+        cost_usd: 2.5,
+      });
+    },
+  },
   piston: { kind: 'piston', name: 'Piston in cylinder', category: 'pistons', description: 'Cylinder body (fixed "base") with a piston rod that slides along +X ("rod": prismatic, travel = stroke); rod end has a revolute "rod_end" (Z) for a connecting rod.', params: { bore: { min: 0.005, max: 0.08, default: 0.02, unit: 'm', description: 'Bore diameter' }, stroke: { min: 0.01, max: 0.3, default: 0.05, unit: 'm', description: 'Stroke' } },
     generate: (p, id) => { const L = p.stroke * 1.3; const g = [piece({ kind: 'cylinder', radius: p.bore / 2 + 0.002, height: L, axis: 'x' }, [0, 0, 0], COLORS.aluminium)]; return finish({ id, kind: 'piston', name: `Cylinder Ø${mm(p.bore)} stroke ${mm(p.stroke)} mm`, category: 'pistons', description: 'Pneumatic-style cylinder body; use with a rod part mounted prismatically.', params: p, mass_kg: vol(g) * DENSITY.aluminium * 0.5, dimensions_m: [L, p.bore + 0.004, p.bore + 0.004], material: 'aluminium', geometry: g, connectors: [fx('base', [-L / 2, 0, 0], [-1, 0, 0]), fx('mount', [0, -(p.bore / 2 + 0.002), 0], [0, -1, 0]), fx('rod', [L / 2, 0, 0], [1, 0, 0], 'prismatic', 'rod slides along +X')], limits: { travel_m: p.stroke, maxForce_N: 50 }, cost_usd: 8 }); } },
   // ---------- actuation ----------
@@ -145,12 +682,91 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
     generate: (p, id) => { const g = [piece({ kind: 'sphere', radius: p.radius }, [0, 0, 0], COLORS.blue, 'decor', QUAT_ID, { collide: false })]; return finish({ id, kind: 'eye_module', name: `Eye dome Ø${mm(p.radius * 2)} mm`, category: 'shells', description: 'Translucent dome with LED.', params: p, mass_kg: 0.004, dimensions_m: [p.radius * 2, p.radius * 2, p.radius * 2], material: 'acrylic', geometry: g, connectors: [fx('mount', [-p.radius, 0, 0], [-1, 0, 0])], cost_usd: 1.5 }); } },
   screw: { kind: 'screw', name: 'Machine screw', category: 'fasteners', description: 'Metric machine screw (cosmetic in simulation).', params: { length: { min: 0.004, max: 0.06, default: 0.01, unit: 'm', description: 'Length' }, radius: { min: 0.001, max: 0.004, default: 0.0015, unit: 'm', description: 'Thread radius' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.length, axis: 'y' }, [0, -p.length / 2, 0], COLORS.steel, 'fastener', QUAT_ID, { collide: false }), piece({ kind: 'cylinder', radius: p.radius * 1.8, height: p.radius * 1.5, axis: 'y' }, [0, p.radius * 0.75, 0], COLORS.steel, 'fastener', QUAT_ID, { collide: false })]; return finish({ id, kind: 'screw', name: `M${mm(p.radius * 2)}×${mm(p.length)} screw`, category: 'fasteners', description: 'Stainless screw.', params: p, mass_kg: vol(g) * DENSITY.steel, dimensions_m: [p.radius * 2, p.length, p.radius * 2], material: 'stainless', geometry: g, connectors: [fx('head', [0, 0, 0], [0, 1, 0])], cost_usd: 0.05 }); } },
+  orrery_globe: {
+    kind: 'orrery_globe', name: 'Orrery globe', category: 'shells',
+    description: 'Lightweight mountable Sun, Earth or Moon globe. Fixed connectors at the bottom and top poles face −Y and +Y.',
+    params: {
+      radius: { min: 0.005, max: 0.08, default: 0.022, unit: 'm', description: 'Globe radius' },
+      style: { min: 0, max: 2, default: 1, unit: '', description: '0: Sun, 1: Earth, 2: Moon' },
+    },
+    generate: (p, id) => {
+      const { radius } = p;
+      const style = Math.round(p.style);
+      const [name, color] = [
+        ['Sun', '#ffb52f'], ['Earth', '#2479e7'], ['Moon', '#b9c7d9'],
+      ][style];
+      const body = piece({ kind: 'sphere', radius }, [0, 0, 0], color, 'shell');
+      const geometry = [body];
+      // Shallow painted details follow the surface. Only the main sphere has mass and collision.
+      const mark = (latitude: number, longitude: number, width: number, height: number, paint: string) => {
+        const rotation = quatMul(quatFromAxisAngle([0, 1, 0], longitude), quatFromAxisAngle([0, 0, 1], latitude - Math.PI / 2));
+        geometry.push(piece({ kind: 'ellipsoid', radii: [radius * height, radius * 0.06, radius * width] },
+          rotate(rotation, [0, radius * 0.96, 0]), paint, 'decor', rotation, { collide: false }));
+      };
+      if (style === 0) {
+        mark(0.2, 0.6, 0.55, 0.16, '#ffd85a');
+        mark(-0.33, 3.6, 0.52, 0.14, '#f07821');
+      } else if (style === 1) {
+        mark(0.4, 0.75, 0.38, 0.36, '#2fae73');
+        mark(-0.19, 1.01, 0.21, 0.31, '#52b673');
+        mark(0.36, 3.43, 0.49, 0.3, '#46b776');
+        mark(-0.28, 4.5, 0.25, 0.18, '#66c681');
+        mark(1.48, 0, 0.25, 0.25, '#ebf5ff');
+      } else {
+        mark(0.25, 0.75, 0.25, 0.29, '#778ba3');
+        mark(-0.32, 1.65, 0.18, 0.21, '#8799af');
+        mark(0.16, 3.95, 0.28, 0.19, '#8799af');
+      }
+      const diameter = radius * 2;
+      return finish({
+        id, kind: 'orrery_globe', name: `${name} globe Ø${mm(diameter)} mm`, category: 'shells',
+        description: `Painted ${name} model for an orrery. Secure the bottom mount to a stand or orbit arm.`,
+        params: p, mass_kg: shapeVolume(body.shape) * 60, dimensions_m: [diameter, diameter, diameter],
+        material: 'painted foam', geometry, connectors: [
+          fx('mount', [0, -radius, 0], [0, -1, 0], 'fixed', 'Bottom pole mount'),
+          fx('top', [0, radius, 0], [0, 1, 0], 'fixed', 'Top pole mount'),
+        ], cost_usd: 1.5,
+      });
+    },
+  },
   ball: { kind: 'ball', name: 'Ball', category: 'payloads', description: 'Free payload / projectile ball (foam, rubber or wood by density).', params: { radius: { min: 0.005, max: 0.15, default: 0.03, unit: 'm', description: 'Radius' }, density: { min: 20, max: 2000, default: 60, unit: 'kg/m³', description: 'Density (foam 30–60, wood 600, rubber 1100)' } },
     generate: (p, id) => { const g = [piece({ kind: 'sphere', radius: p.radius }, [0, 0, 0], p.density < 200 ? '#f4d35e' : COLORS.wood, 'payload')]; return finish({ id, kind: 'ball', name: `Ball Ø${mm(p.radius * 2)} mm`, category: 'payloads', description: 'Payload ball.', params: p, mass_kg: vol(g) * p.density, dimensions_m: [p.radius * 2, p.radius * 2, p.radius * 2], material: p.density < 200 ? 'foam' : 'wood', geometry: g, connectors: [fx('top', [0, p.radius, 0], [0, 1, 0]), fx('bottom', [0, -p.radius, 0], [0, -1, 0])], cost_usd: 1 }); } },
   block: { kind: 'block', name: 'Block', category: 'payloads', description: 'Free payload block (box) of given density.', params: { length: { min: 0.005, max: 0.3, default: 0.04, unit: 'm', description: 'Length' }, width: { min: 0.005, max: 0.3, default: 0.04, unit: 'm', description: 'Width' }, height: { min: 0.005, max: 0.3, default: 0.04, unit: 'm', description: 'Height' }, density: { min: 20, max: 8000, default: 600, unit: 'kg/m³', description: 'Density' } },
     generate: (p, id) => { const g = [piece({ kind: 'box', size: [p.length, p.height, p.width] }, [0, 0, 0], COLORS.wood, 'payload')]; return finish({ id, kind: 'block', name: `Block ${mm(p.length)}×${mm(p.width)}×${mm(p.height)} mm`, category: 'payloads', description: 'Payload block.', params: p, mass_kg: vol(g) * p.density, dimensions_m: [p.length, p.height, p.width], material: 'wood', geometry: g, connectors: [fx('top', [0, p.height / 2, 0], [0, 1, 0]), fx('bottom', [0, -p.height / 2, 0], [0, -1, 0])], cost_usd: 1 }); } },
   disc: { kind: 'disc', name: 'Disc / pizza', category: 'payloads', description: 'Flat disc payload (e.g. a foam pizza) with a mount underneath.', params: { radius: { min: 0.01, max: 0.2, default: 0.04, unit: 'm', description: 'Radius' }, thickness: { min: 0.002, max: 0.03, default: 0.008, unit: 'm', description: 'Thickness' }, density: { min: 20, max: 1200, default: 60, unit: 'kg/m³', description: 'Density' } },
     generate: (p, id) => { const g = [piece({ kind: 'cylinder', radius: p.radius, height: p.thickness, axis: 'y' }, [0, 0, 0], '#f4a261', 'payload'), piece({ kind: 'cylinder', radius: p.radius * 0.8, height: p.thickness * 1.02, axis: 'y' }, [0, 0, 0], '#e63946', 'decor', QUAT_ID, { collide: false })]; return finish({ id, kind: 'disc', name: `Disc Ø${mm(p.radius * 2)} mm`, category: 'payloads', description: 'Foam disc payload.', params: p, mass_kg: Math.PI * p.radius ** 2 * p.thickness * p.density, dimensions_m: [p.radius * 2, p.thickness, p.radius * 2], material: 'foam', geometry: g, connectors: [fx('bottom', [0, -p.thickness / 2, 0], [0, -1, 0]), fx('top', [0, p.thickness / 2, 0], [0, 1, 0])], cost_usd: 1 }); } },
+  gravity_chute: {
+    kind: 'gravity_chute', name: 'Gravity chute', category: 'misc',
+    description: 'Open-ended gravity ramp with two solid side rails. Angle it downhill toward +X for marbles or other loose parts.',
+    params: {
+      length: { min: 0.04, max: 0.6, default: 0.16, unit: 'm', description: 'Length along X' },
+      width: { min: 0.014, max: 0.2, default: 0.054, unit: 'm', description: 'Clear width between the rails' },
+      railHeight: { min: 0.004, max: 0.1, default: 0.016, unit: 'm', description: 'Side rail height above the floor' },
+      thickness: { min: 0.001, max: 0.012, default: 0.004, unit: 'm', description: 'Floor and rail thickness' },
+    },
+    generate: (p, id) => {
+      const { length, width, railHeight, thickness } = p;
+      const outerWidth = width + 2 * thickness;
+      const railOffset = (width + thickness) / 2;
+      const floorTop = thickness / 2;
+      const geometry = [
+        piece({ kind: 'box', size: [length, thickness, outerWidth] }, [0, 0, 0], COLORS.orange),
+        ...[-railOffset, railOffset].map((z) =>
+          piece({ kind: 'box', size: [length, railHeight, thickness] }, [0, floorTop + railHeight / 2, z], COLORS.blue)),
+      ];
+      return finish({
+        id, kind: 'gravity_chute', name: `Gravity chute ${mm(length)} × ${mm(width)} mm`, category: 'misc',
+        description: 'Open ramp with a solid floor and two side rails. Mount it on an incline to guide loose marbles or parts.',
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium, dimensions_m: [length, thickness + railHeight, outerWidth],
+        material: 'aluminium', geometry, cost_usd: 4,
+        connectors: [
+          fx('mount', [0, -floorTop, 0], [0, -1, 0], 'fixed', 'Underside support'),
+          fx('entry', [-length / 2, floorTop, 0], [-1, 0, 0], 'fixed', 'Open upstream floor edge'),
+          fx('exit', [length / 2, floorTop, 0], [1, 0, 0], 'fixed', 'Open downstream floor edge'),
+        ],
+      });
+    },
+  },
   tray: { kind: 'tray', name: 'Launch tray', category: 'misc', description: 'Shallow cup/tray that holds a projectile (floor + rim wall segments, so a ball stays in it until flung); "mount" underneath, "payload" on the floor.', params: { radius: { min: 0.01, max: 0.2, default: 0.045, unit: 'm', description: 'Inner radius' }, depth: { min: 0.003, max: 0.05, default: 0.012, unit: 'm', description: 'Rim height' } },
     generate: (p, id) => { const g: GeometryPiece[] = [piece({ kind: 'cylinder', radius: p.radius + 0.003, height: 0.003, axis: 'y' }, [0, 0.0015, 0], COLORS.aluminium)]; const n = 10; const segLen = 2 * Math.PI * (p.radius + 0.0015) / n;
       for (let i = 0; i < n; i++) { const a = (2 * Math.PI * i) / n; g.push(piece({ kind: 'box', size: [0.003, p.depth, segLen * 1.05] }, [Math.cos(a) * (p.radius + 0.0015), 0.003 + p.depth / 2, Math.sin(a) * (p.radius + 0.0015)], COLORS.aluminium, 'structure', quatFromAxisAngle([0, 1, 0], -a))); }

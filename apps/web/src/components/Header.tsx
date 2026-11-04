@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { api, type ModelInfo } from '../api.ts';
 
 let cached: ModelInfo | null = null;
@@ -11,22 +11,49 @@ export function useModelInfo() {
 
 export default function Header({ compact = false }: { compact?: boolean }) {
   const model = useModelInfo();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const navId = useId();
+  useEffect(() => {
+    if (!menuOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!headerRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [menuOpen]);
+  const prefix = 'Powered by ';
+  const attribution = model?.label.startsWith(prefix) ? model.label.slice(prefix.length) : null;
   return (
-    <header className={`site-header ${compact ? 'site-header--compact' : ''}`}>
-      <Link to="/" className="site-brand">
-        <img src="/protolab.svg" alt="" width="36" height="36" />
-        <span>Proto<span className="site-brand-accent">Lab</span></span>
-      </Link>
-      <nav className="site-nav" aria-label="Main navigation">
+    <header ref={headerRef} className={`site-header ${compact ? 'site-header--compact' : ''}`} onKeyDown={(event) => {
+      if (event.key === 'Escape' && menuOpen) { setMenuOpen(false); menuRef.current?.focus(); }
+    }}>
+      <div className="site-identity">
+        <Link to="/" className="site-brand">
+          <img src="/protolab.svg" alt="" width="36" height="36" />
+          <span>Proto<span className="site-brand-accent">Lab</span></span>
+        </Link>
+        {model && (
+          <span className="site-attribution" data-live={model.live} title={model.detail}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 1l1.7 5.3L15 8l-5.3 1.7L8 15 6.3 9.7 1 8l5.3-1.7L8 1Z" />
+            </svg>
+            <span>{attribution ? <>Powered by <strong>{attribution}</strong></> : model.label}</span>
+            <span className="site-attribution-status" aria-hidden="true" />
+          </span>
+        )}
+      </div>
+      <div className="site-mobile-actions">
+        <Link to="/" className="btn-secondary" onClick={() => setMenuOpen(false)}>Build</Link>
+        <button ref={menuRef} type="button" className="btn-ghost site-menu-toggle" aria-expanded={menuOpen} aria-controls={navId} onClick={() => setMenuOpen((open) => !open)}>
+          Menu <span aria-hidden="true">{menuOpen ? '−' : '☰'}</span>
+        </button>
+      </div>
+      <nav id={navId} className="site-nav" data-open={menuOpen} aria-label="Main navigation" onClick={() => setMenuOpen(false)}>
         <NavLink to="/how-it-works" className="btn-ghost">How it works</NavLink>
         <NavLink to="/gallery" className="btn-ghost">Gallery</NavLink>
         <Link to="/" className="btn-secondary site-new"><span aria-hidden="true">+</span> <span className="site-new-full">New invention</span><span className="site-new-short">Build</span></Link>
-        {model && (
-          <span className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${model.live ? 'border-emerald-200 text-emerald-700 bg-emerald-50' : 'border-slate-200 text-slate-500'}`} title={model.detail}>
-            <span className={`h-1.5 w-1.5 rounded-full ${model.live ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-            {model.label}
-          </span>
-        )}
       </nav>
     </header>
   );

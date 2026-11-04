@@ -1,0 +1,83 @@
+.crab-proof {
+  border: 1px solid var(--bench-line);
+  border-radius: 0.8rem;
+  background: var(--bench-panel);
+}
+
+.crab-proof summary {
+  cursor: pointer;
+  padding: 0.7rem 0.85rem;
+  color: var(--bench-violet);
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.crab-proof summary span + span {
+  margin-inline-start: 0.6rem;
+  color: var(--bench-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.crab-proof-body {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.25rem 0.85rem 0.85rem;
+  color: var(--bench-muted);
+  font-size: 0.8rem;
+}
+
+.crab-proof-body strong {
+  color: var(--bench-ink);
+}
+
+.crab-proof-runs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.5rem;
+}
+
+.crab-proof-run {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--bench-line);
+  border-radius: 0.6rem;
+  background: var(--bench-paper);
+}
+
+.crab-proof-run-title,
+.crab-proof-run dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+}
+
+.crab-proof-run-title {
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.15rem;
+}
+
+.crab-proof-run h3,
+.crab-proof-run dd {
+  color: var(--bench-ink);
+  font-weight: 750;
+}
+
+.crab-proof-verdict {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #fff1d7;
+  color: #854208;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.crab-proof-verdict[data-passed='true'] {
+  background: #e3f6ea;
+  color: #185d37;
+}
+
+.crab-proof-run dl {
+  margin-top: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}

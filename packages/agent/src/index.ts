@@ -1,5 +1,6 @@
-import type { Assembly, Decision, Spec, TestResult, ToolLogEntry, VersionRecord } from '@protolab/schema';
-import { chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
+import { isDeepStrictEqual } from 'node:util';
+import { TestSpec, type Assembly, type Decision, type Spec, type TestResult, type ToolLogEntry, type VersionRecord } from '@protolab/schema';
+import { assistantMessage, chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
 import { runPlanner } from './planner.ts';
@@ -26,10 +27,12 @@ export type AgentEvent =
   | { type: 'spec'; spec: Spec }
   | { type: 'tool'; entry: ToolLogEntry }
   | { type: 'assembly'; iteration: number; assembly: Assembly; rationale: string }
+  | { type: 'test_start'; iteration: number; testId: string; kind: TestSpec['kind'] }
   | { type: 'test'; iteration: number; result: TestResult }
   | { type: 'version'; version: VersionRecord }
   | { type: 'handoff'; from: string; to: string; message: string }
   | { type: 'done'; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string }
+  | { type: 'model_timing'; ms: number; inputTokens?: number; outputTokens?: number }
   | { type: 'error'; message: string };
 
 export interface AgentInput {
@@ -40,10 +43,24 @@ export interface AgentInput {
 export interface AgentOutput { versions: VersionRecord[]; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string; spec: Spec }
 export const DETERMINISTIC_MODEL_ID = 'deterministic-planner';
 
+function savedTestDefinitions(parent?: VersionRecord | null): TestSpec[] {
+  if (parent?.testDefinitions !== undefined) return parent.testDefinitions;
+
+  // Older versions recorded definitions only in the local tool log.
+  const definitions = new Map<string, TestSpec>();
+  for (const { tool, ok, args } of parent?.toolLog ?? []) {
+    if (tool !== 'define_test' || !ok || !args || typeof args !== 'object' || !('test' in args)) continue;
+    const parsed = TestSpec.safeParse(args.test);
+    if (parsed.success) definitions.set(parsed.data.id, parsed.data);
+  }
+  return [...definitions.values()];
+}
+
 export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void): Promise<AgentOutput> {
   const model = input.model === undefined ? modelConfigFromEnv() : input.model;
   const specialist = model ? (input.specialist === undefined ? specialistConfigFromEnv() : input.specialist) : null;
   const modelId = model ? model.model : DETERMINISTIC_MODEL_ID;
+  const savedParent = model && input.parent?.assembly.instances.length ? input.parent : null;
   let activeModelId = modelId;
   const maxIterations = input.maxIterations ?? 7;
   const fullPrompt = input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt;
@@ -52,10 +69,45 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   emit({ type: 'spec', spec });
 
   const versions: VersionRecord[] = [];
-  let iteration = input.startIteration ?? 0;
-  let pending: { assembly: Assembly; decision: Decision; log: ToolLogEntry[] } | null = null;
+  const firstIteration = (input.startIteration ?? 0) + 1;
+  let iteration = firstIteration - 1;
+  type PendingVersion = { assembly: Assembly; decision: Decision; log: ToolLogEntry[] };
+  let pending: PendingVersion | null = null;
   let currentLog: ToolLogEntry[] = [];
   let parentId: string | null = input.parent?.id ?? null;
+  const inheritedDefinitions = savedTestDefinitions(input.parent);
+  const snapshotTestDefinitions = () => {
+    // Keep inherited targets as reference metadata through an untested checkpoint.
+    // Only explicitly defined tests enter ToolRuntime and its pending checks.
+    const definitions = new Map(inheritedDefinitions.map((test) => [test.id, test]));
+    for (const [id, test] of rt.testSpecs) definitions.set(id, test);
+    return [...definitions.values()];
+  };
+  const recordVersion = (draft: PendingVersion, tests: TestResult[], status: VersionRecord['status'], versionSpec: Spec) => {
+    const version: VersionRecord = {
+      id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId,
+      iteration, prompt: fullPrompt, spec: versionSpec, assembly: draft.assembly, tests,
+      testDefinitions: snapshotTestDefinitions(),
+      decisions: [draft.decision], toolLog: [...draft.log, ...currentLog],
+      modelId: draft.decision.modelId ?? modelId, status, createdAt: new Date().toISOString(),
+    };
+    currentLog = [];
+    versions.push(version);
+    parentId = version.id;
+    emit({ type: 'version', version });
+  };
+  const untestedNote = 'The latest assembly was saved without a completed simulation. You can continue from this version.';
+  const checkpointUntested = (status: 'failed' | 'error', latestSpec: Spec) => {
+    const lastSaved = versions.at(-1);
+    if (!pending || !pending.assembly.instances.length || lastSaved?.iteration === iteration) return false;
+    const baseline = lastSaved?.assembly ?? input.parent?.assembly;
+    if (baseline && isDeepStrictEqual(pending.assembly, baseline)) return false;
+
+    recordVersion({
+      ...pending, decision: { ...pending.decision, summary: `${pending.decision.summary} ${untestedNote}` },
+    }, [], status, latestSpec);
+    return true;
+  };
   const rt = new ToolRuntime(spec, {
     onLog: (entry) => { currentLog.push(entry); emit({ type: 'tool', entry }); },
     onPlan: (s) => { spec = s; emit({ type: 'spec', spec: s }); },
@@ -63,11 +115,11 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       const testedThisIteration = versions.length > 0 && versions[versions.length - 1].iteration === iteration;
       if (!pending || testedThisIteration) {
         // First build, or the first change after a test: a new iteration begins and its decision is this rationale.
-        iteration = Math.max(iteration + (pending ? 1 : 0), (input.startIteration ?? 0) + 1);
-        const lastTest = rt.tests[rt.tests.length - 1];
+        iteration = Math.max(iteration + (pending ? 1 : 0), firstIteration);
+        const lastTest = rt.tests.at(-1) ?? savedParent?.tests.at(-1);
         pending = { assembly, decision: { source: model ? 'model' : 'planner', modelId: activeModelId, summary: rationale, basedOn, previousTestId: lastTest?.testId, changes: {} }, log: currentLog };
         currentLog = [];
-        emit({ type: 'status', message: iteration === (input.startIteration ?? 0) + 1 ? 'Assembling components' : `Revising design (iteration ${iteration})` });
+        emit({ type: 'status', message: iteration === firstIteration && !savedParent ? 'Assembling components' : `Revising design (iteration ${iteration})` });
       } else {
         // Further edits before the next test refine the same iteration; keep the first rationale, but adopt a cited measurement.
         pending.assembly = assembly; pending.log = [...pending.log, ...currentLog]; currentLog = [];
@@ -75,56 +127,85 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       }
       emit({ type: 'assembly', iteration, assembly, rationale });
     },
+    onTestStart: (testId, kind) => {
+      emit({ type: 'status', message: `Testing: ${testId}` });
+      emit({ type: 'test_start', iteration: !pending && savedParent ? firstIteration : iteration, testId, kind });
+    },
     onTest: (result) => {
-      emit({ type: 'status', message: `Testing: ${result.testId}` });
+      if (!pending && savedParent) {
+        iteration = firstIteration;
+        pending = {
+          assembly: rt.assembly,
+          decision: { source: 'model', modelId: activeModelId, summary: 'Retested the saved assembly', previousTestId: savedParent.tests.at(-1)?.testId, changes: {} },
+          log: [],
+        };
+      }
       emit({ type: 'test', iteration, result });
       if (!pending) return;
       const existing = versions.length && versions[versions.length - 1].iteration === iteration ? versions[versions.length - 1] : null;
-      if (existing) { existing.tests = [...existing.tests, result]; existing.assembly = rt.assembly; existing.spec = spec; existing.toolLog = [...existing.toolLog, ...currentLog]; existing.status = existing.tests.every((t) => t.passed) ? 'passed' : 'failed'; currentLog = []; emit({ type: 'version', version: existing }); return; }
-      const v: VersionRecord = { id: input.newVersionId(), inventionId: input.inventionId, parentVersionId: parentId, iteration, prompt: fullPrompt, spec, assembly: rt.assembly, tests: [result], decisions: [pending.decision], toolLog: [...pending.log, ...currentLog], modelId: pending.decision.modelId ?? modelId, status: result.passed ? 'passed' : 'failed', createdAt: new Date().toISOString() };
-      currentLog = []; versions.push(v); parentId = v.id; emit({ type: 'version', version: v });
+      if (existing) {
+        existing.tests = [...existing.tests, result];
+        existing.testDefinitions = snapshotTestDefinitions();
+        existing.assembly = rt.assembly;
+        existing.spec = spec;
+        existing.toolLog = [...existing.toolLog, ...currentLog];
+        existing.status = existing.tests.every((t) => t.passed) ? 'passed' : 'failed';
+        currentLog = [];
+        emit({ type: 'version', version: existing });
+        return;
+      }
+      recordVersion(pending, [result], result.passed ? 'passed' : 'failed', spec);
     },
-  }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 });
+  }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 }, savedParent?.assembly);
 
   try {
-    if (model) await runModelLoop(model, specialist, rt, input, emit, maxIterations, (id) => { activeModelId = id; });
+    if (model) await runModelLoop(model, specialist, rt, input, savedParent, emit, maxIterations, (id) => { activeModelId = id; });
     else await runPlanner(rt, spec, { parent: input.parent ?? null, changeRequest: input.changeRequest, maxIterations });
   } catch (e) {
-    const message = (e as Error).message; emit({ type: 'error', message });
+    const checkpoint = checkpointUntested('error', rt.spec);
+    const message = (e as Error).message + (checkpoint ? ` ${untestedNote}` : '');
+    emit({ type: 'error', message });
     return { versions, status: 'error', summary: message, modelId, spec: rt.spec };
   }
   const status: 'passed' | 'failed' = rt.finalized?.status ?? (rt.pendingChecks().length ? 'failed' : 'passed');
-  const summary = rt.finalized?.summary ?? (status === 'passed' ? 'Design passed its tests.' : 'Prototype did not pass its tests. The design is inspectable; try a change request.');
-  // Keep the spec's unverified list in sync with the final statement.
-  if (versions.length) versions[versions.length - 1].spec = rt.spec;
+  const checkpoint = status === 'failed' && checkpointUntested(status, rt.spec);
+  const summary = (rt.finalized?.summary ?? (status === 'passed' ? 'Design passed its tests.' : 'Prototype did not pass its tests. The design is inspectable; try a change request.')) + (checkpoint ? ` ${untestedNote}` : '');
+  // Keep the most recent recorded spec's unverified list in sync with the final statement.
+  if (!checkpoint && versions.length) versions[versions.length - 1].spec = rt.spec;
   emit({ type: 'done', status, summary, modelId });
   return { versions, status, summary, modelId, spec: rt.spec };
 }
 
-/** The assemble/set_drives op lists that produced the parent's final assembly (from its tool log). */
-function parentOps(parent: VersionRecord): unknown[] {
-  const ops: unknown[] = [];
-  for (const e of parent.toolLog) if (e.ok && e.tool === 'assemble') { const a = e.args as { ops?: unknown[] }; if (a?.ops) ops.push(...a.ops); }
-  return ops;
-}
-
 function systemPrompt(parent?: VersionRecord | null): string {
+  const definitions = savedTestDefinitions(parent);
   return `You are the ProtoLab engineering agent: an autonomous mechanical designer. The user describes an invention; you turn it into a working, recognisable, interactive mechanical prototype using real components, structured assembly operations and a rigid-body physics simulator. You act only through tools. Every decision is yours and must come from catalog data or measured test results; never claim a result you did not measure.
+${parent ? `
+This follow-up or remix starts with an exact copy of saved assembly v${parent.iteration}, including its instance IDs, poses, connections, drive settings and part definitions. Start with inspect_assembly, then adapt the procedure below to edit the relevant instances and drives in place. Keep all unaffected components. Existing custom part IDs are available to get_part and assemble without re-creation. Do not replay earlier assembly operations. Define and run fresh tests for the requested behavior, even if the saved design previously passed.
+Saved instances [instance id, part id]: ${JSON.stringify(parent.assembly.instances.map((instance) => [instance.id, instance.partId]))}
+Saved moving joints [joint id, type, endpoints, motor control id]: ${JSON.stringify(parent.assembly.joints.filter((joint) => joint.type !== 'fixed').map((joint) => [joint.id, joint.type, `${joint.a.instanceId}.${joint.a.connectorId}`, `${joint.b.instanceId}.${joint.b.connectorId}`, joint.motor?.controlId])).slice(0, 3000)}
+Saved drives: ${JSON.stringify(parent.assembly.controller.drives).slice(0, 2000)}
+Saved tests (historical context only): ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics, failureReasons: t.failureReasons }))).slice(0, 5000)}${definitions.length ? `
+Saved test definitions (reference targets, not evidence of a pass): ${JSON.stringify(definitions)}
+For a comparable repair, call define_test with the saved definition unchanged, including its duration, measured instances and thresholds, then run_test. For new or changed behavior, define the tests relevant to this request.` : ''}` : ''}
 
 Procedure (follow it, briefly narrating each step in one sentence for the user):
-1. Understand the invention and its purpose. 2. Identify its recognisable physical features and required motions. 3. Break it into sub-assemblies and components → write_plan (include honest "unverified" items such as aerodynamic lift, fluid flow, or anything this simulator cannot measure).
+1. Understand the invention and its purpose. 2. Identify its recognisable physical features and required motions. 3. Break it into sub-assemblies and components → write_plan (include a few exact candidate_part_ids from the catalog index if you already know them, plus honest "unverified" items such as aerodynamic lift, fluid flow, or anything this simulator cannot measure).
 4. search_catalog for each sub-assembly (use categories; results carry every connector's id, position and axis, so mount straight from them; get_part only when you need the geometry pieces). 5. create_part (parametric) or design_part (primitives/extrusions/revolves) for anything missing — custom chassis sizes, wings, shells, curved silhouettes, brackets. 6. assemble with "mount" ops so parts connect at real connectors (axis = parent connector axis; spin_deg orients the child; use pattern for mirrored or polar repeats), set_drives for every motorised joint. 7. define_test with measurable criteria (motion: amplitudes/revolutions/clearances/base tilt; walk: distance & tilt; launch: landing distance; grip: payload retention). 8. run_test. 9. Read failure reasons and metrics; sweep_drive to measure before changing; revise with assemble (move/remove/mount) or set_drives, then re-test. 10. finalize_design with an honest summary and the unverified behaviours.
 
 Rules of thumb:
 - Make it look like the thing: use the recognisable silhouette (butterfly = body + 2 or 4 large shaped wings; Ferris wheel = tower + spoked wheel + hanging gondolas; crab = wide body + 6–8 legs; catapult = base + pivot arm + tray + counterweight/spring; windmill = tower + rotor blades; crane = base + boom + winch/line stand-in; drawbridge = deck on a hinge + tower + actuator). Choose colours (create_part color) and shells for appeal, but every motion must come from real joints and drives.
+- Custom parts must be physically connected: a collection of separated shapes is not a working rotor or housing merely because the simulator moves them as one body. Seat blade roots inside their hubs, join shell panels along their edges, and support fixed vanes with visible brackets. design_part warns about disconnected physical pieces; run_test checks their solid geometry, including supports fixed to the same assembly. Piece groups in these warnings use one-based indices. Repair the geometry or add real supports; do not hide functional pieces, disable their collisions, or label them as decoration to make a test pass. Mount stationary machine parts to a visible stand instead of anchoring them in mid-air.
+- For fan or turbine stages, prefer create_part with kind propeller: it provides 2–8 pitched blades on a connected hub and accepts radius, blades, chord, pitch and color. Mount several stages fixed along one driven shaft for a simple cutaway demonstrator; keep the stationary casing and vanes visibly supported with room for the rotating blades.
 - Coordinates: metres, +Y up, ground at y = 0. Place one anchored base for fixed machines (anchored:true) or a chassis for free-standing machines (feet/wheels must touch y = 0). A walker needs legs mounted so feet sit under the hips and a gait profile (swing on hips, lift on knees, swingDuty ≤ 0.25 for a crawl with 4 legs, 0.5 tripod with 6).
 - Mount semantics: {op:"mount", id, part, onto, connector, via, joint}: the child's "via" connector is placed on the parent's "connector", facing it; revolute joints turn about that axis; spin_deg rotates the child about the axis before any motion; offset_m adds clearance. Joint coordinates are 0 at the assembled pose.
 - Motors: servos (position drives, rad) for oscillation and holding; gearmotors (velocity drives, rad/s) for continuous rotation; linear actuators / pistons (position drives, m). Keep demand under the rating (metrics report it; saturation is applied physically). A test fails on torque only when a motor sits at its rating ≥ 3 % of the run or demand exceeds 1.5× rating; brief peaks a few percent over are tolerated and noted.
 - Test criteria must leave room for the mechanism as built: a legged machine measured at 4–5° tilt in the recipe will show 6–8° with a shell or claws on top, so use maxTilt_deg 10–12 and a distance target the measured configuration beats by a margin (0.3 m when the recipe walks 0.39 m); do not set a 6° limit and then spend nine tests chasing it.
-- Tests must be meaningful for the invention: a wheel must turn N revolutions without gondolas hitting the tower (clearancePairs), a wing must reach its stroke amplitude and rate with the body stable, a catapult must land the projectile near the target, a gripper must hold its payload after the support is removed, a walker must travel the distance upright.
-- Honesty: if a requested behaviour cannot be verified (flight, lift, airflow, water), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
+- Tests must be meaningful for the invention: a Ferris wheel should check every cabin with uprightInstances/maxInstanceTilt_deg as well as wheel revolutions and clearance; a crane should check the load with measure.payload plus minPayloadLift_m and maxPayloadSeparation_m, and maxPayloadReturnError_m if it should lower back to its starting height. A rocking machine should use measure.jointSwing to check both sides of its rest position. A wing must reach its stroke amplitude and rate with the body stable, a catapult must land the projectile near the target, a gripper must hold its payload after the support is removed, and a walker must travel the distance upright.
+- Honesty: if a requested behaviour cannot be verified (flight, aerodynamic lift, airflow, fluid motion), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
 - One behaviour at a time, and never re-run a passed test: when the brief asks for several behaviours (walk, then dance), get the first to pass, record it, then change drives for the next and test only that. Each passing test is a recorded version; a later drive set for another behaviour does not undo it. When every requested behaviour has a passing test, finalize with status "passed".
-- Be economical: search results already include connector ids/axes, so avoid get_part lookups unless you need geometry; one well-formed assemble call with all ops beats many small ones; fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- Closed linkages: mount the moving parts at a feasible starting pose, then use bridge to fit each passive rod between its two revolute endpoints. When editing a fit, add inspect_instance_ids to assemble to get the new world connector positions and axes in the same call. Use inspect_assembly with instance_ids for an existing pose without an edit.
+- Be economical: search results already include connector ids/axes, so use get_part only when you need exact geometry and use part_ids to inspect several known parts together. Create missing parts essential to the requested dimensions, silhouette, or motion before mounting them. Build and test a coherent requested subassembly, then add the remaining mechanisms. Fix errors by resending the corrected batch. Keep component count under 80 and total mass under the budget.
+- When the parts, joint IDs and test criteria are known and the batch fits, group assemble, set_drives, define_test and run_test in that order in one reply. If a setup call fails, correct it before retrying the skipped steps.
 - Set realistic criteria for the size: a tabletop walker covers 0.2–0.6 m in 6 s; a wing flaps 0.5–1.2 rad at 1–4 Hz; a Ferris wheel turns 0.5–2 rad/s; a catapult throws 0.3–1 m. Do not demand what a 200 mm machine cannot do.
 
 Component library index (part id, size L×H×W in mm, mass, rating, connector ids with ⟳ revolute / ↔ prismatic and their outward axis). You can mount any of these directly by id without searching; use search_catalog only to filter by query or get_part when you need exact geometry or all connectors:
@@ -136,28 +217,33 @@ Worked recipes (adapt, do not copy blindly):
 • Dance in place (legged machine, after walking passes): all knees bob together with a sine on the lift sign ({kind:"sine", amplitude:∓0.15, offset:∓0.15, frequency_hz:3.2}) while each hip adds half that bob so the foot stays under the hip plus a small alternating sway ({kind:"sine", amplitude:±0.1, offset:±0.075, frequency_hz:1.6, phase: 0 or π per leg}); measured: base tilt about 8° and drift under 3 cm on chassis-quad-160 with 12 mm feet (up to 11° and 11 cm with 24 mm feet), so set maxBaseTilt_deg 12–15 and maxBaseDrift_m 0.15. Large hip sway with all feet planted just drags the body along.
 • Flapping wings (butterfly / bird / dragonfly): body-butterfly-80 (or create_part insect_body: length, radius, wingPairs, torque) has built-in flap hinges wing_L0 (+Z side, axis −X) and wing_R0 (−Z side, axis +X). Mount the LEFT wing (catalog wing-butterfly-200-left or create_part wing with side:1) {onto:"body",connector:"wing_L0",via:"hinge",joint:"revolute",spin_deg:0,motor:{controlId:"flapL",stiffness:0.5,damping:0.05}} and the RIGHT wing (wing-butterfly-200, side:0) the same way on wing_R0 with controlId flapR. Give both the same drive {kind:"sine",amplitude:0.7,frequency_hz:2,phase:0} and both wings rise together. Measured: 200 mm film wings on a 0.3 N·m body flap ≈1.1 rad at 2 Hz with stiffness 0.3–1 / damping 0.03–0.05 and < 0.2 N·m demand; stiffness ≥ 2 saturates the 0.3 N·m rating (demand 1 N·m). Put the body on an anchored perch (rod or plate) via "perch" so only the wings move; test motion with minJointAmplitude_rad 0.5, clearancePairs wingL↔wingR and torqueWithinRating. If you design your own body, its wing connectors must run along the body axis (left −X, right +X), not sideways — a sideways (±Z) hinge makes the wing twist about its span instead of flapping.
 • Windmill: place tower-500 anchored; mount windmill-4x600 {onto:"tower",connector:"axle",via:"shaft",joint:"revolute",offset_m:0.06,motor:{controlId:"spin",stiffness:0.5,damping:0.2}} — the 60 mm offset keeps the sails clear of the tower (without it the test reports "tower touched rotor"); drive {mode:"velocity", profile:{kind:"constant", value:2.5}, rampIn_s:1}; test motion with minRevolutions 2 and clearancePairs rotor↔tower. Measured: passes first try in about a minute.
-• Wheel on a tower: place tower anchored at the origin; mount the spoked wheel {onto:"tower",connector:"axle",via:"hub",joint:"revolute",motor:{controlId:"spin",stiffness:0.5,damping:0.2}}; gondolas {onto:"wheel",connector:"rim_0",via:"hanger",joint:"revolute"} then {op:"pattern",instances:["cab"],kind:"polar",axis:"z",center:[0,<axle height>,0],count:8}; drive spin with {mode:"velocity", profile:{kind:"constant", value:1.5}, rampIn_s:1}; test motion with minRevolutions and clearancePairs gondola↔tower.
-• Crane / luffing boom: anchored base-plate-300x200; tower-150 {onto:"base",connector:"top_back",via:"base"}; luff servo on tower.top via "bottom"; boom (link or leg_segment via "pivot" on the horn) carrying a short rod and a free block-40 load at its tip; drive the luff with a sine 0 → 0.6 rad at 0.25 Hz; test motion with minJointAmplitude_rad 0.5 and torqueWithinRating. Measured in benchmark runs: the luff torque is the boom's weight at half its length plus the load at full length — a 150 mm link with a 38 g block needs ≈ 2.5 N·m (servo-mg996r 1.1 N·m fails, servo-high-torque-35 passes); a 400 mm boom needs ≈ 7–8 N·m (servo-giant-8). Size the servo from the boom length before the first test.
+• Triplex pump: use one powered shaft with eccentric crank pins at 0°, 120°, and 240°, three connecting rods and three passive linear guides. Keep the guide axes parallel with identical lateral offsets relative to the shaft; placing each guide above its pin's initial X coordinate creates unequal slider geometry. In followerTiming measure all three piston instances, require at least two complete turns, at least 0.030 m of stroke, and adjacent peak gaps between 110° and 130°. Use 3–4 rad/s and allow time for startup. Adjust a crank's phase from measured peaks, then repeat the same test.
+• Gravity-leveled tray: drive only the outer cradle. Keep the tray on a separate passive revolute pivot above the combined center of mass. For two perpendicular pivots, nest gimbal-frame-74 inside gimbal-frame-100. The camera-cradle-48 has a camera mount above and ballast mount below. Its pivot_front mates with gimbal-frame-74.inner_front at a 0.007 m offset to center the deck. Use jointSwing on the powered cradle, uprightInstances for the tray, and noGroundContact for the suspended parts.
+• Nested orrery: use orrery-sun-84, orrery-earth-44, and orrery-moon-20. Give the Sun an anchored pedestal and carry the Moon pivot on the moving Earth arm. Keep both pivot axes vertical. Mount Earth on a horizontal top face or short vertical standoff to keep its top connector facing +Y. Measure Earth relative to Sun in XZ. Measure Moon relative to Earth in XZ with reference {from:"sun",to:"earth"} to subtract the Earth's carrier motion. Use the two measured paths with independent turn and radius targets, and check clearance between the globes.
+• Two-follower camshaft: place an anchored gearmotor-37 at [0,0.085,-0.057], rotation_deg:[0,-90,0], for a +Z output. Mount eccentric-cam-74 via its rear drive connector to motor.shaft with revolute drive spin (stiffness 0.5, damping 0.2). Mount a second cam fixed via first.shaft_front → second.shaft, offset_m:0.03, spin_deg:180. Their centers are at Z=0 and Z=0.044. At each Z, place cam-follower-98 at [0,0.127,Z] with free:true and its shoe down. Fix follower-guide-9 at [0,0.1605,Z], then connect guide.guide to follower.slide with a passive prismatic joint. Gravity returns the shoes. Keep other hardware clear and intentional cam–shoe contact out of clearancePairs. A constant 3 rad/s velocity drive with 0.5 s ramp passes a 10 s followerTiming test along Y with minCycles:3, minStroke_m:0.014, minLowDwell_s:0.2, minPhaseGap_deg:140, and torqueWithinRating:true.
+• Wheel on a tower: an anchored tower-500 with spoked-wheel-400 on tower.axle via hub, offset_m 0.06, motor spin stiffness 0.5/damping 0.2. Mount each gondola-40 independently on rim_0 through rim_7 via hanger with joint:"revolute", spin_deg:0 so the cabin hangs upright in the starting pose; a polar pattern rotates each cabin too. With spin velocity 1.5 rad/s and rampIn_s 1, a 10 s motion test passes 2 revolutions, every cabin within 20° of vertical, no cabin–tower contact and no cabin–ground contact. Set measure.uprightInstances to all 8 cabin ids and criteria.maxInstanceTilt_deg to 20 alongside minRevolutions:2.
+• Crane / luffing boom: use tower-300 anchored and mount servo-high-torque-35 on tower.top via bottom; leg-bar-100 on servo.horn via pivot with revolute spin_deg 90, lift stiffness 20/damping 0.7. Mount beam-50 as the hook on boom.tip via end_a and hold block-40 beneath hook.bottom via top (fixed = secured demonstration load; do not claim a grip or real hoist). One lift/lower cycle is a sine drive offset 0.4, amplitude 0.4, phase -1.5708, frequency_hz 0.25 and a 4.25 s test. Measure payload:{instance:"load",holder:"hook"}: the simulated load rises at least 0.06 m, stays within 0.04 m of the hook, and returns within 0.025 m of starting height. Include noGroundContact:["load"] and torqueWithinRating:true. Longer booms need stronger servos.
 • Grabbing claw (two-finger gripper): anchored plate-120x80 base; beam-100 post {onto:"base",connector:"top",via:"end_a"}; palm plate-120x80 {onto:"post",connector:"end_b",via:"top"} so its top_front/top_back face down; servo_L {onto:"palm",connector:"top_back",via:"bottom",joint:"fixed"} and servo_R the same on top_front with spin_deg 180 (the flipped horn then faces the other way, so {op:"move", id:"servo_R", translate:[0,0,0.046]} brings both fingers into one plane); fingers gripper-finger-50 {onto:"servo_L",connector:"horn",via:"root",joint:"revolute",motor:{controlId:"grip_L",stiffness:8,damping:0.3}} (same for R). Place block-40 free between the finger tips with its centre ≈ 12 mm above the tips. Drive both fingers {kind:"step",before:0,after:0.6,at_s:0.5}; test grip {payload:"block", holder:"palm", supportUntil_s:1.2, maxSeparation_m:0.15}. Measured: fingers 96 mm apart closing 0.6 rad cradle the block with 2 cm settle and it never reaches the floor; a block that is not between the fingers falls and the test fails with "Payload fell to the ground". Keep one assemble batch — do not deliberate over finger kinematics before the first test.
 • Drawbridge / lid / flap that lifts: anchored base-plate-300x200; servo on it {onto:"base",connector:"top_back",via:"bottom",joint:"fixed"} (the horn axis then runs sideways along Z); the deck is a plate (create_part plate length 0.3 width 0.15 thickness 0.006, or plate-200x150) mounted {onto:"servo",connector:"horn",via:"hinge_back",joint:"revolute",spin_deg:180,motor:{controlId:"lift",stiffness:40,damping:2}} so it lies flat pointing +X; drive {kind:"ramp",from:0,to:1.1,start_s:0.5,duration_s:3} (positive lifts the free end) and test motion with minJointAmplitude_rad 1.0, clearancePairs deck↔base, noGroundContact deck. Measured: a 300×150×6 mm deck needs 1.23 N·m at the hinge: servo-high-torque-35 (35 % of rating) or servo-ds3218 (62 %) lift it to 64°; spin_deg 0 points the deck backwards into the ground. To raise AND lower, use one sine cycle {kind:"sine", offset:0.55, amplitude:0.55, phase:-1.5708, frequency_hz:0.2} over duration_s 10 — measured 1.1 N·m peak on the 3.5 N·m servo with zero saturation at 0.1–0.25 Hz; a step drive that drops the deck slams it and spikes demand past 20 N·m, which fails the rating check. A linear actuator or tower can be added as the visible lifting element, but drive the hinge; do not spend rounds solving a four-bar linkage before the first test.
 • Catapult: anchored base-plate-300x200; servo-giant-8 {onto:"base",connector:"top_back",via:"bottom",joint:"fixed",offset_m:0.03}; arm (leg_segment via "pivot" onto the servo horn, spin_deg 195 so it stands up leaning back, motor stiffness 30 / damping 0.5) with tray-45 on its "tip"; projectile set down on the tray in the same batch with {op:"mount", id:"pizza", part:"foam-pizza-80", onto:"tray", connector:"payload", via:"bottom", joint:"free"} (no world coordinates to compute); drive {kind:"step", before:0, after:-1.4, at_s:0.5}; launch test with duration_s 5. Measured (8 N·m servo, foam-pizza-80): the throw is torque-limited, so the step amplitude (−0.8 … −1.4) barely matters and the ARM LENGTH sets the range — leg-bar-80 → 0.29 m, leg-bar-100 → 0.35 m, create_part leg_segment length 0.14 → 0.59 m, 0.18 → 0.76 m, 0.22 → 0.98 m; foam-ball-60 flies ≈ 20 % further than the pizza. 2–3.5 N·m servos do not fling the pizza off the tray (the test reports "had not landed"); a 350 mm arm overshoots a 0.5 m target by a metre. Pick the arm length from the target first, then test once.
-${parent ? `\nThis is a remix of an existing design. Rebuild it from its recorded operations, apply the change request, keep what worked.
-Parent parts: ${JSON.stringify(parent.assembly.parts.map((p) => p.id))}
-Parent assembly ops (last successful build, in order): ${JSON.stringify(parentOps(parent)).slice(0, 6000)}
-Parent drives: ${JSON.stringify(parent.assembly.controller.drives).slice(0, 2000)}
-Parent tests: ${JSON.stringify(parent.tests.map((t) => ({ id: t.testId, kind: t.kind, passed: t.passed, metrics: t.metrics })))}
-Custom parts the parent created must be re-created with create_part/design_part before use (their definitions: ${JSON.stringify(parent.assembly.parts.filter((p) => p.kind === 'designed' || p.id.startsWith('custom-')).map((p) => ({ id: p.id, kind: p.kind, name: p.name, params: p.params, category: p.category, material: p.material, pieces: p.kind === 'designed' ? p.geometry.map((g) => ({ shape: g.shape, offset: g.offset, color: g.color, role: g.role })) : undefined, connectors: p.kind === 'designed' ? p.connectors : undefined }))).slice(0, 5000)}).` : ''}`;
+`;
 }
 
-async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
+const setupTools = new Set(['write_plan', 'create_part', 'design_part', 'assemble', 'set_drives', 'define_test']);
+const dependentTools = new Set(['run_test', 'sweep_drive', 'finalize_design']);
+const nextPartOrAssembly = 'If a part essential to the requested size, shape, or motion is missing, use create_part or design_part next. Use the returned ID in a later mount. If the required parts are ready, assemble a coherent requested subassembly with its support and moving parts.';
+
+async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, savedParent: VersionRecord | null, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
+  const savedAssembly = savedParent ? rt.assembly : null;
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(input.parent) },
+    { role: 'system', content: systemPrompt(savedParent) },
     { role: 'user', content: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt },
   ];
-  const maxRounds = 24 + maxIterations * 6;
+  const maxRounds = 34 + maxIterations * 6;
   // The same deadline bounds model requests and retry delays across all rounds.
   const timeBudgetMs = Math.max(60, Number(process.env.AGENT_TIME_BUDGET_S) || 1200) * 1000;
   const deadline = AbortSignal.timeout(timeBudgetMs);
+  const started = performance.now();
   let researchNudged = false;
   let consults = 0, specialistRoundsLeft = 0, failsAtLastConsult = 0;
   const fails = () => { let n = 0; for (const t of [...rt.tests].reverse()) { if (t.passed) break; n++; } return n; };
@@ -168,12 +254,20 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       emit({ type: 'handoff', from: model.model, to: specialist.model.model, message: msg });
       messages.push({ role: 'user', content: `[Engineering specialist ${prettyModelName(specialist.model.model)} takes over for a few steps.] The last ${fails()} tests failed. Read the history: diagnose the mechanical cause (support polygon, torque vs mass, stride vs slip, clearance, joint axis orientation, drive sign), state it in one or two sentences, then act: sweep_drive if the drive space is unmeasured, redesign or move parts with assemble, change drives, and run_test once. Hand back after one test.` });
     }
-    // Research guard: after a dozen tool calls with nothing assembled, ask for the first assemble batch now.
-    if (!researchNudged && rt.calls >= 12 && rt.assembly.instances.length === 0) { researchNudged = true; emit({ type: 'status', message: 'Enough research for a first build; asking the model to assemble now and refine from measurements.' }); messages.push({ role: 'user', content: 'You have searched and designed enough for a first build. Assemble now with the parts you have (one assemble batch), set_drives, define_test and run_test; refine from the measured result rather than researching further.' }); }
+    // Give slow first assemblies a nudge between model calls, when Muse can act on it.
+    const awaitingFirstEdit = savedAssembly ? rt.assembly === savedAssembly && !rt.tests.length : rt.assembly.instances.length === 0;
+    if (!researchNudged && awaitingFirstEdit && (rt.calls >= 12 || (rt.calls > 0 && performance.now() - started >= 45_000))) {
+      researchNudged = true;
+      emit({ type: 'status', message: savedAssembly ? 'Asking the model to revise and test the saved assembly.' : 'Asking the model to prepare the required parts and build the first testable mechanism.' });
+      messages.push({ role: 'user', content: savedAssembly
+        ? 'Apply the requested edit now. If it needs a missing part, create or design that part before mounting it. Define and run the requested test once the edit is in place. For a test-only request, test the saved assembly directly.'
+        : `Take the next construction step now. ${nextPartOrAssembly} Then set_drives, define_test, and run_test for that mechanism. Use the measurement to refine it and complete the remaining requested subassemblies.` });
+    }
     const driver = specialistRoundsLeft > 0 && specialist ? specialist.model : model;
     setActive(driver.model);
     const testsBefore = rt.tests.length;
     let res;
+    const modelStarted = performance.now();
     try {
       res = await chat(driver, messages, TOOL_DEFS, { toolChoice: 'auto', signal: deadline, onRetry: (r) => emit({ type: 'status', message: `${prettyModelName(driver.model)} did not answer (${/HTTP (\d+)/.exec(r.reason)?.[0] ?? r.reason.replace(/^Meta Model API (error from [^:]+|request failed \([^)]+\)): ?/, '').slice(0, 80)}); retrying in ${Math.round(r.delayMs / 1000)} s (attempt ${r.attempt + 1} of ${r.maxAttempts}).` }) });
     } catch (e) {
@@ -188,26 +282,57 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
         continue;
       }
       throw e;
+    } finally {
+      emit({ type: 'model_timing', ms: Math.round(performance.now() - modelStarted), inputTokens: res?.usage?.prompt_tokens, outputTokens: res?.usage?.completion_tokens });
     }
-    const content = res.content && res.content.trim() ? res.content : res.toolCalls.length ? null : '(no output)';
-    messages.push(res.toolCalls.length ? { role: 'assistant', content, tool_calls: res.toolCalls } : { role: 'assistant', content: content ?? '(no output)' });
+    messages.push(assistantMessage(res));
     if (res.content && res.content.trim()) emit({ type: 'status', message: `${driver === model ? '' : `${prettyModelName(driver.model)}: `}${res.content.trim().slice(0, 300)}` });
     if (!res.toolCalls.length) {
-      if (res.finishReason === 'length') { emit({ type: 'status', message: 'The model ran out of output budget before acting; asking it to answer with the tool call only.' }); messages.push({ role: 'user', content: 'Your previous reply was cut off before any tool call. Reply with the tool call(s) only and minimal deliberation: send the complete assemble/set_drives/define_test batch now.' }); continue; }
-      messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.' }); continue;
-    }
-    let failedInReply: string | null = null;
-    for (const call of res.toolCalls) {
-      if (deadline.aborted) break;
-      let args: unknown = {};
-      try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
-      if (failedInReply) { // a batched reply (assemble → set_drives → define_test → run_test) stops at the first error; the rest would only compound it
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ skipped: true, reason: `${failedInReply} failed earlier in this reply, so this call was not run. Fix that error and resend the remaining calls.` }) });
+      if (res.finishReason === 'length') {
+        emit({ type: 'status', message: 'The model ran out of output budget. Asking for one complete next tool call.' });
+        let nextStep = 'Continue with the next assembly, drive, or test operation.';
+        if (savedAssembly) nextStep = 'Create one missing part needed by the requested change, apply one coherent edit, or define or run the test for the saved assembly.';
+        else if (awaitingFirstEdit) nextStep = rt.spec.plan ? nextPartOrAssembly : 'Start with a concise write_plan.';
+        messages.push({ role: 'user', content: `Your previous reply was cut off. Reply with one small, complete tool call for the next step. ${nextStep} Keep the requested dimensions, component counts, and test targets as you continue in later replies.` });
         continue;
       }
-      const result = await rt.call(call.function.name, args);
-      messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 5000) });
-      if (result && typeof result === 'object' && 'error' in (result as Record<string, unknown>)) failedInReply = call.function.name;
+      const nextTool = savedAssembly ? 'Reply with a tool call. Inspect or edit the saved assembly, then define and run the requested test.' : 'Reply with a tool call, not text: write_plan, then search/create parts, then one assemble batch, set_drives, define_test, run_test.';
+      messages.push({ role: 'user', content: rt.tests.length ? 'Reply with a tool call: continue revising, or call finalize_design.' : nextTool });
+      continue;
+    }
+    let failedSetup: string | undefined;
+    for (const call of res.toolCalls) {
+      if (deadline.aborted) break;
+      const name = call.function.name;
+      if (failedSetup && (setupTools.has(name) || dependentTools.has(name))) {
+        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({
+          skipped: true,
+          error: `Skipped ${name} because ${failedSetup} failed earlier in this reply. Fix that call before retrying the skipped steps.`,
+        }) });
+        continue;
+      }
+      let args: unknown = {};
+      try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
+      const result = await rt.call(name, args);
+      if (setupTools.has(name) && result && typeof result === 'object' && 'error' in result) failedSetup = name;
+      const serialized = JSON.stringify(result);
+      // Geometry must reach the model intact. Large compound parts can be read in smaller selections.
+      let reply = serialized.slice(0, 5000);
+      if (name === 'get_part') {
+        reply = serialized.length <= 65_536 ? serialized : JSON.stringify({
+          error: 'Part geometry exceeds the tool reply limit. Request one part at a time or narrow with piece_indices.',
+        });
+      } else if (name === 'run_test') {
+        // Preserve complete test evidence: cutting JSON can hide a failed target.
+        reply = serialized;
+      } else if (name === 'assemble' && serialized.length > 5000
+        && result && typeof result === 'object' && 'connectorPoses' in result) {
+        reply = JSON.stringify({
+          connectorPoses: result.connectorPoses,
+          notice: 'Assembly edits applied. The full assembly summary was omitted from this reply.',
+        });
+      }
+      messages.push({ role: 'tool', tool_call_id: call.id, content: reply });
       if (rt.finalized) break;
     }
     if (specialistRoundsLeft > 0) {

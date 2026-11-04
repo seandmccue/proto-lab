@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { catalog, searchCatalog, generatePart, buildWalker, DEFAULT_WALKER, ParamError, applyOps, emptyAssembly, getPart, mateTransform, transformPoint, summarize } from './index.ts';
+import { catalog, searchCatalog, generatePart, buildWalker, DEFAULT_WALKER, ParamError, AssemblyError, AssemblyOp, applyOps, emptyAssembly, getPart, mateTransform, transformPoint, summarize } from './index.ts';
 import { Assembly, billOfMaterials } from '@protolab/schema';
 
 test('catalog has 80+ valid parts across categories', () => {
@@ -16,9 +16,135 @@ test('search finds servos by query and category', () => {
   assert.ok(r.length >= 4 && r.every((p) => p.kind === 'servo_motor'));
 });
 
+test('gravity feed presets provide a free marble, clear railed path and deep receiver', () => {
+  const marble = getPart('wood-marble-24')!;
+  const chute = getPart('gravity-chute-160x54')!;
+  const receiver = getPart('catch-cup-80x35')!;
+  assert.deepEqual(marble.geometry[0].shape, { kind: 'sphere', radius: 0.012 });
+  assert.ok(chute.params.width > marble.dimensions_m[2]);
+  assert.ok(chute.params.railHeight >= marble.params.radius);
+  assert.deepEqual(chute.geometry.map(({ shape, collide }) => [shape.kind, collide]),
+    [['box', true], ['box', true], ['box', true]]);
+  const [floor, leftRail, rightRail] = chute.geometry;
+  assert.ok(floor.shape.kind === 'box' && leftRail.shape.kind === 'box' && rightRail.shape.kind === 'box');
+  assert.equal(floor.shape.size[0], chute.params.length);
+  assert.ok(Math.abs(rightRail.offset.position[2] - leftRail.offset.position[2] - rightRail.shape.size[2] - chute.params.width) < 1e-10);
+  assert.deepEqual(chute.connectors.map(({ id, position, axis }) => [id, position, axis]), [
+    ['mount', [0, -0.002, 0], [0, -1, 0]],
+    ['entry', [-0.08, 0.002, 0], [-1, 0, 0]],
+    ['exit', [0.08, 0.002, 0], [1, 0, 0]],
+  ]);
+  assert.ok(receiver.params.depth > marble.dimensions_m[1]);
+  assert.ok(receiver.geometry.every(({ collide }) => collide));
+  assert.ok(receiver.connectors.some(({ id }) => id === 'mount'));
+});
+
 test('generatePart rejects out-of-range params', () => {
   assert.throws(() => generatePart('beam', { length: 5 }), ParamError);
   assert.throws(() => generatePart('beam', { bogus: 1 }), ParamError);
+});
+
+test('drive discs, clevises, and bell cranks expose usable pivots in both catalog sizes', () => {
+  for (const id of ['eccentric-disc-40', 'eccentric-disc-70']) {
+    const part = getPart(id)!;
+    assert.ok(searchCatalog('eccentric', { category: 'cranks' }).some((result) => result.id === id));
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'pin')?.position, [part.params.throw, 0, part.params.thickness * 1.5]);
+  }
+  for (const id of ['clevis-12', 'clevis-20']) {
+    const part = getPart(id)!;
+    assert.ok(searchCatalog('clevis', { category: 'joints' }).some((result) => result.id === id));
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'pin')?.position, [0, part.params.rise, 0]);
+  }
+  for (const id of ['bell-crank-30x40', 'bell-crank-50x65']) {
+    const part = getPart(id)!;
+    assert.ok(searchCatalog('bell crank', { category: 'linkages' }).some((result) => result.id === id));
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'input')?.position.slice(0, 2), [part.params.input, 0]);
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'output')?.position.slice(0, 2), [0, part.params.output]);
+  }
+  assert.throws(() => generatePart('eccentric_disc', { radius: 0.02, throw: 0.03 }), ParamError);
+
+  const { assembly } = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'drive', part: 'eccentric-disc-40', position: [0, 0.1, 0], anchored: true },
+    { op: 'mount', id: 'link', part: 'link-40', onto: 'drive', connector: 'pin', via: 'pivot_a_back', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+  ], getPart);
+  assert.deepEqual(assembly.joints[0].axis, [0, 0, 1]);
+  const drivePin = getPart('eccentric-disc-40')!.connectors.find((connector) => connector.id === 'pin')!;
+  const linkPivot = getPart('link-40')!.connectors.find((connector) => connector.id === 'pivot_a_back')!;
+  const drivePoint = transformPoint(assembly.instances[0].transform, drivePin.position);
+  const linkPoint = transformPoint(assembly.instances[1].transform, linkPivot.position);
+  assert.ok(drivePoint.every((coordinate, axis) => Math.abs(coordinate - linkPoint[axis]) < 1e-9));
+});
+
+test('eccentric cam has a colliding dwell core and a raised contact lobe on the drive plane', () => {
+  for (const [id, lift] of [['eccentric-cam-48', 0.013], ['eccentric-cam-74', 0.019]] as const) {
+    const part = getPart(id)!;
+    const [core, lobe] = part.geometry;
+    for (const piece of [core, lobe]) {
+      assert.ok(piece.collide);
+      assert.equal(piece.shape.kind, 'cylinder');
+      assert.equal(piece.shape.axis, 'z');
+      assert.equal(piece.shape.height, part.params.thickness);
+    }
+    assert.ok(core.shape.kind === 'cylinder' && lobe.shape.kind === 'cylinder');
+    assert.deepEqual(core.offset.position, [0, 0, 0]);
+    assert.ok(Math.abs(lobe.offset.position[0] + lobe.shape.radius - core.shape.radius - lift) < 1e-9);
+    assert.deepEqual(part.connectors.find((connector) => connector.id === 'drive')?.axis, [0, 0, -1]);
+    assert.equal(part.connectors.find((connector) => connector.id === 'shaft')?.kind, 'fixed');
+  }
+  assert.throws(() => generatePart('eccentric_cam', { eccentricity: 0.004 }), ParamError, 'a hidden lobe cannot lift');
+  assert.throws(() => generatePart('eccentric_cam', { eccentricity: 0.075 }), ParamError, 'a detached lobe cannot turn with the core');
+});
+
+test('follower mounts upright in either matching guide with only the shoe making contact', () => {
+  for (const [followerId, guideId] of [['cam-follower-65', 'follower-guide-6'], ['cam-follower-98', 'follower-guide-9']]) {
+    const follower = getPart(followerId)!;
+    const guide = getPart(guideId)!;
+    const [shoe, stem] = follower.geometry;
+    assert.ok(shoe.collide && !stem.collide);
+    assert.ok(guide.geometry.every((piece) => !piece.collide));
+    const bushing = guide.geometry.find((piece) => piece.shape.kind === 'revolve')?.shape;
+    assert.ok(bushing?.kind === 'revolve');
+    assert.ok(Math.min(...bushing.profile.map(([radius]) => radius)) > Math.SQRT1_2 * follower.params.stemSize, 'bore clears the stem corners');
+    const { assembly } = applyOps(emptyAssembly(), [
+      { op: 'place', id: 'guide', part: guideId, position: [0, 0.16, 0], anchored: true },
+      { op: 'mount', id: 'follower', part: followerId, onto: 'guide', connector: 'guide', via: 'slide', joint: 'prismatic', spin_deg: 0, offset_m: 0 },
+    ], getPart);
+    const mounted = assembly.instances[1].transform;
+    const mount = follower.connectors.find((connector) => connector.id === 'mount')!;
+    assert.deepEqual(assembly.joints[0].axis, [0, 1, 0]);
+    assert.ok(mounted.position[1] < 0.16, 'shoe starts below the guide');
+    assert.ok(transformPoint(mounted, mount.position)[1] > 0.16, 'payload remains above the guide');
+  }
+});
+
+test('pillow blocks and adjustable linkage plates mount shafts and selectable passive pivots', () => {
+  const { assembly } = applyOps(emptyAssembly(), [
+    { op: 'place', id: 'frame', part: 'plate-120x80', position: [0, 0.02, 0], anchored: true },
+    { op: 'mount', id: 'bearing', part: 'pillow-block-8', onto: 'frame', connector: 'top', via: 'mount', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'axle', part: 'shaft-8x200', onto: 'bearing', connector: 'bore_front', via: 'end_a', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+    { op: 'place', id: 'lever', part: 'adjustable-link-60', position: [0.2, 0.1, 0], anchored: true },
+    { op: 'mount', id: 'near_link', part: 'link-40', onto: 'lever', connector: 'pin_4', via: 'pivot_a_back', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+    { op: 'mount', id: 'far_link', part: 'link-40', onto: 'lever', connector: 'pin_5', via: 'pivot_a_back', joint: 'revolute', spin_deg: 0, offset_m: 0 },
+  ], getPart);
+  const [baseJoint, shaftJoint, nearJoint, farJoint] = assembly.joints;
+  assert.equal(baseJoint.type, 'fixed');
+  assert.equal(shaftJoint.type, 'revolute');
+  assert.deepEqual(shaftJoint.axis, [0, 0, 1]);
+  assert.deepEqual(nearJoint.axis, [0, 0, 1]);
+  assert.deepEqual(farJoint.axis, [0, 0, 1]);
+  assert.ok(Math.abs(farJoint.anchor![0] - nearJoint.anchor![0] - 0.015) < 1e-9, 'selecting a new pin changes the lever arm');
+});
+
+test('contact-enabled mounts keep their passive joint', () => {
+  const assembly = applyOps(emptyAssembly(), [
+    AssemblyOp.parse({ op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true }),
+    AssemblyOp.parse({ op: 'mount', id: 'wheel', part: 'spoked-wheel-200', onto: 'tower',
+      connector: 'axle', via: 'hub', joint: 'revolute', contact: true }),
+  ], getPart).assembly;
+  assert.equal(assembly.instances.find(({ id }) => id === 'wheel')?.free, true);
+  assert.equal(assembly.joints.length, 1);
+  assert.equal(assembly.joints[0].type, 'revolute');
+  assert.equal(assembly.joints[0].motor, undefined);
 });
 
 test('mount places the child so connectors coincide and face each other', () => {
@@ -166,6 +292,58 @@ test('a batch that mounts onto an id it places later is reordered, not auto-plac
   assert.equal(r.assembly.joints.length, 1, 'the wheel stays joined to the tower the model placed');
   assert.ok(r.summary[0].startsWith('reordered: placed tower1'), r.summary[0]);
   assert.ok(!r.summary.some((x) => x.startsWith('auto-placed')), 'no guess when the batch places it itself');
+});
+
+test('late mounted parents are resolved in order and retain all eight child joints', () => {
+  const base = AssemblyOp.parse({ op: 'place', id: 'base', part: 'base-plate-300x200', position: [.03, .005, -.04], anchored: true });
+  const stand = AssemblyOp.parse({ op: 'mount', id: 'stand', part: 'tower-150', onto: 'base', connector: 'top', via: 'base' });
+  const hub = AssemblyOp.parse({ op: 'mount', id: 'hub', part: 'radial-hub-8x160', onto: 'stand', connector: 'top', via: 'mount' });
+  const shoulders = Array.from({ length: 8 }, (_, index) => AssemblyOp.parse({
+    op: 'mount', id: `sh${index}`, part: 'servo-ds3218', onto: 'hub', connector: `hinge_${index}`, via: 'mount',
+  }));
+  const expected = applyOps(emptyAssembly(), [base, stand, hub, ...shoulders], getPart).assembly;
+  for (const library of [undefined, catalog]) {
+    const result = applyOps(emptyAssembly(), [...shoulders, stand, base, hub], getPart, undefined, library);
+    assert.deepEqual(result.assembly, expected);
+    assert.equal(result.assembly.joints.filter((joint) => joint.a.instanceId === 'hub').length, 8);
+    assert.ok(!result.summary.some((entry) => entry.startsWith('auto-placed') || entry.startsWith('replaced')));
+  }
+});
+
+test('a circular forward mount fails atomically without guessing a library part', () => {
+  const input = emptyAssembly();
+  const before = structuredClone(input);
+  const cycle = [
+    { op: 'mount', id: 'left', part: 'beam-100', onto: 'right', connector: 'end_a', via: 'end_b' },
+    { op: 'mount', id: 'right', part: 'beam-100', onto: 'left', connector: 'end_a', via: 'end_b' },
+  ].map((op) => AssemblyOp.parse(op));
+  assert.throws(() => applyOps(input, cycle, getPart, undefined, catalog),
+    (error) => error instanceof AssemblyError && error.opIndex === 0 && /Circular mount dependency/.test(error.message));
+  assert.deepEqual(input, before);
+});
+
+test('a pattern-produced parent keeps its authored order before an explicit replacement', () => {
+  const ops = [
+    { op: 'place', id: 'stand', part: 'tower-150', position: [0, .075, 0], anchored: true },
+    { op: 'place', id: 'hub', part: 'radial-hub-8x160', position: [0, .2, 0] },
+    { op: 'pattern', kind: 'linear', instances: ['hub'], step: [.15, 0, 0] },
+    { op: 'mount', id: 'arm', part: 'servo-ds3218', onto: 'hub_1', connector: 'hinge_0', via: 'mount' },
+    { op: 'mount', id: 'hub_1', part: 'radial-hub-8x160', onto: 'stand', connector: 'top', via: 'mount' },
+  ].map((op) => AssemblyOp.parse(op));
+  const { assembly, summary } = applyOps(emptyAssembly(), ops, getPart, undefined, catalog);
+  assert.ok(!summary.some((entry) => entry.startsWith('reordered') || entry.startsWith('auto-placed')));
+  assert.equal(summary.filter((entry) => entry === 'replaced hub_1').length, 1);
+  assert.deepEqual(assembly.joints.map((joint) => joint.id), ['j_hub_1'], 'the intentional replacement removes the old arm joint');
+});
+
+test('a forward mount producer reports its original operation index on failure', () => {
+  const ops = [
+    { op: 'mount', id: 'arm', part: 'beam-100', onto: 'hub', connector: 'hinge_0', via: 'end_a' },
+    { op: 'place', id: 'stand', part: 'tower-150', position: [0, .075, 0], anchored: true },
+    { op: 'mount', id: 'hub', part: 'missing-hub', onto: 'stand', connector: 'top' },
+  ].map((op) => AssemblyOp.parse(op));
+  assert.throws(() => applyOps(emptyAssembly(), ops, getPart, undefined, catalog),
+    (error) => error instanceof AssemblyError && error.opIndex === 2 && /Unknown part "missing-hub"/.test(error.message));
 });
 
 test('an unplaced quadruped "body" is auto-placed as the mid-size quad chassis when the family ties on connectors', () => {

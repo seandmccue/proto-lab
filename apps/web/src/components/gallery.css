@@ -86,6 +86,31 @@
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
   gap: clamp(.875rem, 2vw, 1.25rem);
 }
+.invention-grid--showcase { grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+.invention-grid--showcase:has(> :nth-child(4)) {
+  --showcase-tracks: 2;
+  grid-template-columns: repeat(var(--showcase-tracks), minmax(0, 1fr));
+}
+/* Two tracks per card let incomplete rows start halfway across a column. */
+.invention-grid--showcase:has(> :nth-child(4)) > * { grid-column: span 2; }
+@media (width >= 37rem) {
+  .invention-grid--showcase:has(> :nth-child(4)) { --showcase-tracks: 4; }
+}
+@media (37rem <= width < 56.25rem) {
+  .invention-grid--showcase:has(> :nth-child(4)) > :last-child:nth-child(odd) { grid-column: 2 / span 2; }
+}
+@media (56.25rem <= width < 75rem) {
+  .invention-grid--showcase:has(> :nth-child(5)) { --showcase-tracks: 6; }
+  .invention-grid--showcase:has(> :nth-child(5):last-child) > :nth-child(4),
+  .invention-grid--showcase:has(> :nth-child(7):last-child) > :is(:nth-child(4), :nth-child(6)),
+  .invention-grid--showcase:has(> :nth-child(8):last-child) > :nth-child(7) { grid-column: 2 / span 2; }
+}
+@media (width >= 75rem) {
+  .invention-grid--showcase:has(> :nth-child(4)) { --showcase-tracks: 8; }
+  .invention-grid--showcase:has(> :is(:nth-child(5), :nth-child(6)):last-child) { --showcase-tracks: 6; }
+  .invention-grid--showcase:has(> :nth-child(5):last-child) > :nth-child(4),
+  .invention-grid--showcase:has(> :nth-child(7):last-child) > :nth-child(5) { grid-column: 2 / span 2; }
+}
 
 .invention-card {
   display: flex;
@@ -135,6 +160,8 @@
   position: absolute;
   inset: 0;
 }
+
+.invention-card__preview--showcase:has(> img) { background: #eee9fa; }
 
 .invention-card__placeholder {
   color: #795f9e;
@@ -212,6 +239,12 @@
   margin-block: .35rem 1rem;
   color: var(--muted, #5e5166);
   font-size: .875rem;
+}
+
+.invention-card__date {
+  margin-block: -.5rem .7rem;
+  color: var(--muted, #5e5166);
+  font-size: .75rem;
 }
 
 .invention-card__footer {

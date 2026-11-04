@@ -53,6 +53,75 @@ test('motion test: a motor spins a propeller on an anchored tower and reports re
   const r = await runTest(a, { env, test: { kind: 'motion', id: 'spin_1', duration_s: 4, measure: { joints: ['spin'], base: 'base', clearancePairs: [], noGroundContact: ['prop'] }, criteria: { minRevolutions: 2, torqueWithinRating: true } } });
   assert.ok(r.passed, r.failureReasons.join('; ') + JSON.stringify(r.metrics));
   assert.ok(r.metrics['spin.revolutions'] >= 2);
+
+  const swingTest = {
+    kind: 'motion' as const, id: 'swing', duration_s: 5,
+    measure: { joints: ['spin'], jointSwing: [{ joint: 'spin', minEachWay_rad: 0.4 }], clearancePairs: [], noGroundContact: [] },
+    criteria: { torqueWithinRating: true },
+  };
+  const swing = (offset: number) => runTest(a, { env, test: swingTest, controller: {
+    drives: [{ controlId: 'spin', mode: 'position', rampIn_s: 0.5, profile: { kind: 'sine', amplitude: 0.65, frequency_hz: 0.4, offset, phase: 0 } }],
+  } });
+  const centered = await swing(0);
+  assert.ok(centered.passed, centered.failureReasons.join(', '));
+  const oneSided = await swing(0.65);
+  assert.ok(oneSided.metrics['spin.amplitude_rad'] >= 0.8);
+  assert.ok(oneSided.failureReasons.some((reason) => reason.includes('target ±0.4 rad')));
+});
+
+test('Ferris motion checks every cabin against world upright over two revolutions', async () => {
+  const cabins = Array.from({ length: 8 }, (_, i) => `cab${i}`);
+  const wheel = (joint: 'revolute' | 'fixed') => {
+    const assembly = applyOps(emptyAssembly(), [
+      { op: 'place', id: 'tower', part: 'tower-500', position: [0, 0, 0], anchored: true },
+      { op: 'mount', id: 'wheel', part: 'spoked-wheel-400', onto: 'tower', connector: 'axle', via: 'hub', joint: 'revolute', spin_deg: 0, offset_m: 0.06, motor: { controlId: 'spin', stiffness: 0.5, damping: 0.2 } },
+      ...cabins.map((id, i) => ({ op: 'mount' as const, id, part: 'gondola-40', onto: 'wheel', connector: `rim_${i}`, via: 'hanger', joint, spin_deg: 0, offset_m: 0 })),
+    ], getPart).assembly;
+    return setDrives(assembly, [{ controlId: 'spin', mode: 'velocity', rampIn_s: 1, profile: { kind: 'constant', value: 1.5 } }]);
+  };
+  const spec = {
+    kind: 'motion' as const, id: 'upright-cabins', duration_s: 10,
+    measure: { joints: ['spin'], uprightInstances: cabins, clearancePairs: cabins.map((id): [string, string] => [id, 'tower']), noGroundContact: cabins },
+    criteria: { minRevolutions: 2, maxInstanceTilt_deg: 20, torqueWithinRating: true },
+  };
+  const free = await runTest(wheel('revolute'), { env, test: spec });
+  assert.ok(free.passed, free.failureReasons.join('; '));
+  assert.ok(free.metrics.maxInstanceTilt_deg < 20, JSON.stringify(free.metrics));
+  for (const id of cabins) assert.ok(Number.isFinite(free.metrics[`${id}.maxTilt_deg`]));
+  const fixed = await runTest(wheel('fixed'), { env, test: spec });
+  assert.ok(fixed.metrics['spin.revolutions'] >= 2);
+  assert.ok(fixed.metrics.maxInstanceTilt_deg > 170);
+  assert.ok(fixed.failureReasons.some((reason) => reason.includes('cab0 tilted')));
+  const missing = await runTest(wheel('revolute'), { env, test: { ...spec, measure: { ...spec.measure, uprightInstances: ['missingCabin'] } } });
+  assert.ok(missing.failureReasons.some((reason) => reason.includes('missingCabin')));
+});
+
+test('crane motion verifies load lift, retention and return separately from boom motion', async () => {
+  const crane = (joint: 'fixed' | 'free') => {
+    const assembly = applyOps(emptyAssembly(), [
+      { op: 'place', id: 'tower', part: 'tower-300', position: [0, 0, 0], anchored: true },
+      { op: 'mount', id: 'servo', part: 'servo-high-torque-35', onto: 'tower', connector: 'top', via: 'bottom', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+      { op: 'mount', id: 'boom', part: 'leg-bar-100', onto: 'servo', connector: 'horn', via: 'pivot', joint: 'revolute', spin_deg: 90, offset_m: 0, motor: { controlId: 'lift', stiffness: 20, damping: 0.7 } },
+      { op: 'mount', id: 'hook', part: 'beam-50', onto: 'boom', connector: 'tip', via: 'end_a', joint: 'fixed', spin_deg: 0, offset_m: 0 },
+      { op: 'mount', id: 'load', part: 'block-40', onto: 'hook', connector: 'bottom', via: 'top', joint, spin_deg: 0, offset_m: 0 },
+    ], getPart).assembly;
+    return setDrives(assembly, [{ controlId: 'lift', mode: 'position', rampIn_s: 0, profile: { kind: 'sine', offset: 0.4, amplitude: 0.4, phase: -Math.PI / 2, frequency_hz: 0.25 } }]);
+  };
+  const spec = {
+    kind: 'motion' as const, id: 'lift-and-lower', duration_s: 4.25,
+    measure: { joints: ['lift'], payload: { instance: 'load', holder: 'hook' }, clearancePairs: [], noGroundContact: ['load'] },
+    criteria: { minJointAmplitude_rad: 0.5, minPayloadLift_m: 0.06, maxPayloadSeparation_m: 0.04, maxPayloadReturnError_m: 0.025, torqueWithinRating: true },
+  };
+  const attached = await runTest(crane('fixed'), { env, test: spec });
+  assert.ok(attached.passed, attached.failureReasons.join('; ') + JSON.stringify(attached.metrics));
+  assert.ok(attached.metrics.payloadLift_m > 0.06);
+  assert.ok(attached.metrics.payloadSeparation_m > 0.02 && attached.metrics.payloadSeparation_m < 0.04);
+  const dropped = await runTest(crane('free'), { env, test: spec });
+  assert.ok(dropped.metrics['lift.amplitude_rad'] >= 0.5);
+  assert.ok(dropped.failureReasons.some((reason) => reason.includes('from the holder')));
+  assert.ok(dropped.failureReasons.some((reason) => reason.includes('Payload lifted')));
+  const missingHolder = await runTest(crane('fixed'), { env, test: { ...spec, measure: { ...spec.measure, payload: { instance: 'load' } } } });
+  assert.ok(missingHolder.failureReasons.some((reason) => reason.includes('needs a payload and holder')));
 });
 
 test('launch test: a free ball on a tray flung by a servo arm lands and reports distance', async () => {

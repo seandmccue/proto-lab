@@ -1,0 +1,31 @@
+{
+  "inventionId": "inv_633b4887ad7f4cdc",
+  "beforeId": "ver_2a2b7412fe6d4fa7",
+  "afterId": "ver_0ce0875e991d4d73",
+  "engine": "rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace",
+  "test": {
+    "kind": "walk",
+    "id": "scuttle",
+    "duration_s": 6,
+    "base": "body",
+    "minDistance_m": 0.25,
+    "maxTilt_deg": 10,
+    "direction": "z",
+    "signed": false
+  },
+  "baseline": {
+    "passed": false,
+    "maxTilt_deg": 14.28,
+    "distance_m": 0.0027
+  },
+  "stance": {
+    "passed": true,
+    "maxTilt_deg": 4.85,
+    "distance_m": 0.2849
+  },
+  "timing": {
+    "passed": false,
+    "maxTilt_deg": 10.31,
+    "distance_m": 0.0423
+  }
+}

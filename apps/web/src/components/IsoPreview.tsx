@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Assembly, Transform, Trace } from '@protolab/schema';
 import { ensureCCW, extrudePoint, shapeHalfExtents } from './shapeMath.ts';
+import { diagnosticColors, type DiagnosticTone } from './diagnosticColors.ts';
 
 /**
  * Dependency-free isometric SVG render of an assembly (painter's algorithm). Used for gallery cards so
@@ -32,18 +33,19 @@ function shade(hex: string, k: number): string {
 
 interface Face { depth: number; points: V[]; color: string; kind: 'poly' | 'circle'; r?: number }
 
-export function projectFaces(assembly: Assembly, frame?: Record<string, Transform>): Face[] {
+export function projectFaces(assembly: Assembly, frame?: Record<string, Transform>, diagnosticHighlights?: ReadonlyMap<string, DiagnosticTone>): Face[] {
   const partById = new Map(assembly.parts.map((p) => [p.id, p]));
   const faces: Face[] = [];
   for (const inst of assembly.instances) {
     const part = partById.get(inst.partId); if (!part) continue;
     const T = frame?.[inst.id] ?? inst.transform;
+    const diagnostic = diagnosticHighlights?.get(inst.id);
     for (const piece of part.geometry) {
       if (piece.role === 'fastener') continue;
       const q = mulQ(T.rotation, piece.offset.rotation);
       const c: V = [0, 0, 0]; const off = rot(T.rotation, piece.offset.position as V);
       c[0] = T.position[0] + off[0]; c[1] = T.position[1] + off[1]; c[2] = T.position[2] + off[2];
-      const color = piece.color ?? '#aaa';
+      const color = diagnostic ? diagnosticColors[diagnostic].surface : piece.color ?? '#aaa';
       const s = piece.shape;
       const toView = (local: V): V => { const wp = rot(q, local); return view([c[0] + wp[0], c[1] + wp[1], c[2] + wp[2]]); };
       // Push a lit, front-facing polygon; `normal` is the outward unit normal in piece-local space.
@@ -105,22 +107,43 @@ export function projectFaces(assembly: Assembly, frame?: Record<string, Transfor
   return faces.sort((a, b) => a.depth - b.depth);
 }
 
-export default function IsoPreview({ assembly, trace, playing, className }: { assembly: Assembly; trace?: Trace | null; playing?: boolean; className?: string }) {
+export default function IsoPreview({ assembly, trace, playing, className, blueprint = false, diagnosticHighlights, speed = 1, seekTo, onTime }: { assembly: Assembly; trace?: Trace | null; playing?: boolean; className?: string; blueprint?: boolean; diagnosticHighlights?: ReadonlyMap<string, DiagnosticTone>; speed?: number; seekTo?: number | null; onTime?: (time: number, duration: number) => void }) {
   const [frameIdx, setFrameIdx] = useState(0);
-  const raf = useRef(0);
+  const timeRef = useRef(0);
+  const onTimeRef = useRef(onTime);
+  const duration = trace?.frames.at(-1)?.t ?? 0;
+  const frameCount = trace?.frames.length ?? 0;
+  const frameStep = trace?.dt || 1;
+  const controlled = onTime !== undefined || seekTo != null;
+  useEffect(() => { onTimeRef.current = onTime; }, [onTime]);
+  useEffect(() => { timeRef.current = 0; setFrameIdx(0); onTimeRef.current?.(0, duration); }, [trace, duration]);
   useEffect(() => {
-    if (!playing || !trace?.frames.length) { setFrameIdx(0); return; }
-    let start = performance.now();
+    if (seekTo == null) return;
+    const next = Math.min(duration, Math.max(0, seekTo));
+    timeRef.current = next;
+    setFrameIdx(Math.min(frameCount - 1, Math.floor(next / frameStep)));
+    onTimeRef.current?.(next, duration);
+  }, [seekTo, duration, frameCount, frameStep]);
+  useEffect(() => {
+    if (!playing || !duration) {
+      if (!controlled) { timeRef.current = 0; setFrameIdx(0); }
+      return;
+    }
+    let previous = performance.now();
+    let raf = 0;
     const loop = (now: number) => {
-      const t = ((now - start) / 1000) % (trace.frames[trace.frames.length - 1].t || 1);
-      setFrameIdx(Math.min(trace.frames.length - 1, Math.floor(t / trace.dt)));
-      raf.current = requestAnimationFrame(loop);
+      const next = (timeRef.current + Math.max(0, now - previous) * speed / 1000) % duration;
+      previous = now;
+      timeRef.current = next;
+      setFrameIdx(Math.min(frameCount - 1, Math.floor(next / frameStep)));
+      onTimeRef.current?.(next, duration);
+      raf = requestAnimationFrame(loop);
     };
-    raf.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf.current);
-  }, [playing, trace]);
-  const frame = playing && trace?.frames[frameIdx] ? trace.frames[frameIdx].bodies : undefined;
-  const faces = useMemo(() => projectFaces(assembly, frame), [assembly, frame]);
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, duration, speed, frameCount, frameStep, controlled]);
+  const frame = playing || controlled ? trace?.frames[frameIdx]?.bodies : undefined;
+  const faces = useMemo(() => projectFaces(assembly, frame, diagnosticHighlights), [assembly, frame, diagnosticHighlights]);
   const bounds = useMemo(() => {
     const f = projectFaces(assembly);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -132,14 +155,14 @@ export default function IsoPreview({ assembly, trace, playing, className }: { as
   const shift = body ? view(body.position as V) : [0, 0, 0];
   const rest = assembly.instances.find((i) => i.id === 'body')?.transform;
   const restV = rest ? view(rest.position as V) : [0, 0, 0];
-  const dx = playing ? shift[0] - restV[0] : 0; // follow the body horizontally while walking
+  const dx = frame ? shift[0] - restV[0] : 0; // follow the body horizontally while walking
   const sc = 1000;
   return (
     <svg viewBox={`${(bounds.minX + dx) * sc} ${-(bounds.minY + bounds.h) * sc} ${bounds.w * sc} ${bounds.h * sc}`} className={className} aria-hidden preserveAspectRatio="xMidYMid meet">
-      <ellipse cx={(restV[0] + dx) * sc} cy={-(bounds.minY + bounds.h * 0.06) * sc} rx={bounds.w * sc * 0.3} ry={bounds.h * sc * 0.05} fill="#0f172a" opacity={0.08} />
+      <ellipse cx={(restV[0] + dx) * sc} cy={-(bounds.minY + bounds.h * 0.06) * sc} rx={bounds.w * sc * 0.3} ry={bounds.h * sc * 0.05} fill="#0f172a" opacity={blueprint ? 0 : 0.08} />
       {faces.map((f, i) => f.kind === 'circle'
-        ? <circle key={i} cx={f.points[0][0] * sc} cy={-f.points[0][1] * sc} r={(f.r ?? 0.005) * sc} fill={f.color} />
-        : <polygon key={i} points={f.points.map((p) => `${p[0] * sc},${-p[1] * sc}`).join(' ')} fill={f.color} stroke="rgba(15,23,42,0.25)" strokeWidth={0.4} />)}
+        ? <circle key={i} cx={f.points[0][0] * sc} cy={-f.points[0][1] * sc} r={(f.r ?? 0.005) * sc} fill={blueprint ? "#123955" : f.color} stroke={blueprint ? "#8ae4ff" : undefined} strokeWidth={blueprint ? 1 : undefined} vectorEffect={blueprint ? "non-scaling-stroke" : undefined} />
+        : <polygon key={i} points={f.points.map((p) => `${p[0] * sc},${-p[1] * sc}`).join(' ')} fill={blueprint ? (f.color === "#f8fafc" ? "#0b1f36" : "#123955") : f.color} stroke={blueprint ? "#8ae4ff" : "rgba(15,23,42,0.25)"} strokeWidth={blueprint ? 1 : 0.4} vectorEffect={blueprint ? "non-scaling-stroke" : undefined} />)}
     </svg>
   );
 }
