@@ -83,10 +83,10 @@
 
 .invention-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21.5rem), 1fr));   /* three to a row on a desktop page */
   gap: clamp(.875rem, 2vw, 1.25rem);
 }
-.invention-grid--showcase { grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+.invention-grid--showcase { grid-template-columns: repeat(auto-fit, minmax(min(100%, 21.5rem), 1fr)); }
 .invention-grid--showcase:has(> :nth-child(4)) {
   --showcase-tracks: 2;
   grid-template-columns: repeat(var(--showcase-tracks), minmax(0, 1fr));
@@ -106,10 +106,11 @@
   .invention-grid--showcase:has(> :nth-child(8):last-child) > :nth-child(7) { grid-column: 2 / span 2; }
 }
 @media (width >= 75rem) {
-  .invention-grid--showcase:has(> :nth-child(4)) { --showcase-tracks: 8; }
-  .invention-grid--showcase:has(> :is(:nth-child(5), :nth-child(6)):last-child) { --showcase-tracks: 6; }
+  /* Same three-per-row layout as the midsize range; incomplete last rows stay centered. */
+  .invention-grid--showcase:has(> :nth-child(5)) { --showcase-tracks: 6; }
   .invention-grid--showcase:has(> :nth-child(5):last-child) > :nth-child(4),
-  .invention-grid--showcase:has(> :nth-child(7):last-child) > :nth-child(5) { grid-column: 2 / span 2; }
+  .invention-grid--showcase:has(> :nth-child(7):last-child) > :is(:nth-child(4), :nth-child(6)),
+  .invention-grid--showcase:has(> :nth-child(8):last-child) > :nth-child(7) { grid-column: 2 / span 2; }
 }
 
 .invention-card {
