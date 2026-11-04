@@ -37,6 +37,8 @@ The pre-migration import remains at its separate R2 key. Archives contain privat
 session identifiers, so keep the bucket and backups private.
 
 The archive checkpoint uses a single writer and uploads the complete history for each checkpoint.
+Save requests arriving during an upload share the next capture; each caller waits for a snapshot
+taken after its request. Fast gzip compression is used unless the archive needs the compact fallback.
 Archives up to 90 MiB use one request; larger archives use authenticated 16 MiB multipart uploads,
 with a 512 MiB archive limit. R2 keeps the prior checkpoint available until the replacement completes.
 Restore verifies the downloaded size and, for new checkpoints, its SHA-256 checksum before replacing

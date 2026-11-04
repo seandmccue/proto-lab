@@ -17,11 +17,11 @@ const singleUploadBytes = 90 * 1024 * 1024;
 const maxArchiveBytes = 512 * 1024 * 1024;
 const partBytes = 16 * 1024 * 1024;
 
-export async function compressCheckpoint(rawArchive: string, archive: string, maxBytes = singleUploadBytes, preferredBytes = maxBytes): Promise<number> {
+export async function compressCheckpoint(rawArchive: string, archive: string, maxBytes = singleUploadBytes): Promise<number> {
   for (const level of [3, 6]) {
     await pipeline(createReadStream(rawArchive), createGzip({ level }), createWriteStream(archive, { mode: 0o600 }));
     const { size } = await stat(archive);
-    if (size <= maxBytes && (level === 6 || size <= preferredBytes)) return size;
+    if (size <= maxBytes) return size;
   }
   throw new Error('Checkpoint exceeds the Cloudflare upload budget.');
 }
@@ -116,7 +116,8 @@ export async function uploadCheckpointArchive(url: string, token: string, archiv
 }
 
 export class CloudCheckpoint {
-  private pending = Promise.resolve();
+  private saving = false;
+  private pending: { db: DatabaseSync; waiters: { resolve: () => void; reject: (error: unknown) => void }[] }[] = [];
 
   constructor(private url: string, private token: string, private dataDir: string) {}
 
@@ -178,11 +179,34 @@ export class CloudCheckpoint {
     }
   }
 
-  save(db: DatabaseSync) {
-    // One writer per production container. A failed upload leaves the previous R2 object intact.
-    const task = this.pending.then(() => this.upload(db));
-    this.pending = task.catch(() => {});
+  save(db: DatabaseSync): Promise<void> {
+    const task = new Promise<void>((resolve, reject) => {
+      const queued = this.pending.at(-1);
+      if (queued?.db === db) queued.waiters.push({ resolve, reject });
+      else this.pending.push({ db, waiters: [{ resolve, reject }] });
+    });
+    if (!this.saving) {
+      this.saving = true;
+      void this.flushPending();
+    }
     return task;
+  }
+
+  private async flushPending() {
+    try {
+      while (this.pending.length) {
+        // Detach before capture: requests arriving during this upload need a later snapshot.
+        // One queued capture covers all mutations requested while the preceding upload runs.
+        const batch = this.pending.shift()!;
+        try {
+          await this.upload(batch.db);
+          for (const waiter of batch.waiters) waiter.resolve();
+        } catch (error) {
+          for (const waiter of batch.waiters) waiter.reject(error);
+          // A failed batch must not poison the queue or reject callers awaiting the next capture.
+        }
+      }
+    } finally { this.saving = false; }
   }
 
   private async upload(db: DatabaseSync) {
@@ -197,7 +221,8 @@ export class CloudCheckpoint {
       });
       const rawArchive = join(temp, 'checkpoint.tar');
       await tar('tar', ['-cf', rawArchive, '-C', temp, databaseName, 'store']);
-      await compressCheckpoint(rawArchive, archive, maxArchiveBytes, singleUploadBytes);
+      // Multipart handles larger fast-compressed archives; use level 6 only if the full cap requires it.
+      await compressCheckpoint(rawArchive, archive, maxArchiveBytes);
       await uploadCheckpointArchive(this.url, this.token, archive);
     } finally {
       await rm(temp, { recursive: true, force: true });
