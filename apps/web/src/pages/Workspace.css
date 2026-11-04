@@ -171,6 +171,14 @@
   .workbench-comparison-panes { grid-template-columns: minmax(0, 1fr); }
   .workbench-comparison-canvas { height: 13rem; }
 }
+@media (22rem <= width < 37rem) {
+  .workbench-comparison { display: flex; flex-direction: column; }
+  .workbench-comparison .workbench-comparison-controls { order: 1; border-block: 1px solid var(--bench-line); }
+  .workbench-comparison-panes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workbench-comparison-pane header { padding: .5rem .55rem .2rem; font-size: .85rem; }
+  .workbench-comparison-metric { padding-inline: .55rem; }
+  .workbench-comparison-canvas { height: 11rem; }
+}
 .workbench-stage-fallback { display: flex; height: 100%; flex-direction: column; padding: 3.5rem 1rem 1rem; text-align: center; }
 .workbench-stage-fallback svg { flex: 1; min-height: 0; width: 100%; }
 .workbench-stage-fallback p { margin-top: .5rem; color: var(--bench-muted); font-size: .78rem; }

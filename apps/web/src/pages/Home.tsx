@@ -158,7 +158,7 @@ export default function Home() {
   const submit = (e: FormEvent) => { e.preventDefault(); if (prompt.trim().length >= 3) void start({ prompt: prompt.trim() }); };
 
   return (
-    <div className="min-h-full">
+    <div className="home-page min-h-full">
       <Header />
       <main className="home-shell">
         <section className="lab-hero" aria-labelledby="hero-title">

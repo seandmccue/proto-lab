@@ -205,4 +205,17 @@ body {
   .site-nav { flex-basis: 100%; }
   .site-nav a { padding-inline: .55rem; }
 }
+@media (max-width: 480px) {
+  .home-page .site-header { gap: .3rem; padding: .5rem .65rem; }
+  .home-page .site-nav { flex-basis: auto; gap: 0; }
+  .home-page .site-nav a { padding-inline: .35rem; }
+  .home-page .site-attribution { max-width: 10rem; }
+  .lab-hero { gap: .65rem; padding-top: .9rem; }
+  .lab-hero-links { column-gap: .6rem; }
+  .lab-hero-links a { font-size: .82rem; }
+  .lab-hero-proof { padding-inline: .55rem; }
+  .lab-art { display: flex; flex-direction: column; }
+  .lab-art :is(.lab-art-target, .lab-art-results, figcaption) { order: 1; }
+  .lab-art-stage { height: 10rem; }
+}
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
