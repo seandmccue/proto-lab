@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { totalMass, type Assembly, type Spec, type TestResult, type TestSpec } from '@protolab/schema';
 import { chat, type ChatResult, type ModelConfig } from './llm.ts';
+import type { SampledClearance } from '@protolab/simulator';
 
 export interface DesignReviewInput {
   brief: string;
@@ -8,6 +9,7 @@ export interface DesignReviewInput {
   spec: Spec;
   testDefinitions: TestSpec[];
   tests: TestResult[];
+  clearanceObservations?: (SampledClearance & { testIds: string[] })[];
 }
 
 const Verdict = z.object({
@@ -44,6 +46,8 @@ Review the actual geometry and transforms, not names. A part called a rimmed whe
 
 Read native test definitions AND their latest results together. Passing a weak rotation test does not prove every requested mechanism works. Required movements need appropriate measurable coverage with meaningful targets. Joint drives or commanded amplitudes do not prove achieved motion. For an extending piston/slider carried by a moving boom, world-space travel can be just boom motion: require measured rod travel relative to its cylinder/guide (linearTravel.relativeTo), or measured travel of the actual prismatic joint. Do not treat the whole assembly translating/rotating as relative piston stroke. A motorized revolute measurement is in radians; a prismatic one is metres. Missing requested payload transfer, independent stages, dwell, return, or relative motion is a proof gap when material to the brief. Native notes limit what a passing measurement proves. No trace is supplied: do not invent motion from frames you have not seen. Failed native checks remain failed regardless of your judgment.
 
+When supplied, clearanceObservations are independent material-overlap measurements across all physical fixed groups at the saved poses, including pairs omitted from authored tests. Each issue names both actual parts, the first observed time and penetration in metres. Parts in the same fixed group and actual direct joint mates were excluded. Treat these measurements as evidence, not guesses from names or drawings. An authored clearance pass does not overrule an observed overlap. Unintended penetration of a moving rim, rod or blade into a stationary support, roof or casing blocks approval and needs a geometry repair plus an appropriate regression test. Intended contact such as a loose payload resting inside its receiver or a contact-driven cam can be valid: assess that against the actual brief, joints and native evidence, and explain such contact in the verdict. Do not waive a structural collision as an unverified simulation limitation. These are sampled observations, not continuous collision verification.
+
 Accept appropriate prototype simplifications, parametric parts, approximate visual styling and declared rigid-body limitations. Do not demand CFD, thrust, fluid flow, heat, fatigue, manufacturing tolerances, production certification, unseen fasteners, or capabilities outside this simulator. Do not invent requirements, arbitrary extra tests, aesthetic preferences, or additional complexity. Request repair only for a specific material brief mismatch or missing/contradictory evidence for a requested capability. A faithful prototype whose measurable requested functions are supported should pass. Unsupported real-world claims must be qualified, not invented.
 
 Return ONLY one JSON object, no markdown or surrounding prose, exactly:
@@ -69,6 +73,12 @@ export async function reviewDesign(input: DesignReviewInput, model: ModelConfig,
     return blocked(model, 'Native test evidence is not ready for final review.',
       `Missing or failed native checks: ${[...new Set([...unproved.map(({ id }) => id), ...failed.map(({ testId }) => testId)])].join(', ').slice(0, 850) || 'no defined, completed simulation tests'}.`,
       'Complete the native checks on the current design before requesting independent review.');
+  }
+  if (input.clearanceObservations?.some((observation) => !observation.complete)) {
+    return blocked(model, 'Final clearance evidence is incomplete.',
+      input.clearanceObservations.filter((observation) => !observation.complete)
+        .map((observation) => `${observation.testIds.join(', ')}: ${observation.failureReason ?? 'incomplete sampled geometry check'}`).join('; ').slice(0, 1000),
+      'Repair invalid geometry or simplify unnecessarily expensive collision geometry without removing requested features, then retest. A partial audit cannot establish complete clearance.');
   }
 
   let context: string;
@@ -98,6 +108,7 @@ export async function reviewDesign(input: DesignReviewInput, model: ModelConfig,
       joints: input.assembly.joints,
       drives: input.assembly.controller.drives,
       testDefinitions: input.testDefinitions,
+      ...(input.clearanceObservations ? { clearanceObservations: input.clearanceObservations } : {}),
       tests: [...latestTests.values()].map(({ testId, kind, passed, metrics, failureReasons, notes, engine }) => ({
         testId, kind, passed, metrics, failureReasons, notes, engine,
       })),

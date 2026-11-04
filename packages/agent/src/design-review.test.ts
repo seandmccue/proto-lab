@@ -229,6 +229,37 @@ test('Responses transport supports a fresh tool-free review and usage passthroug
   });
 });
 
+test('independent overlap observations reach the reviewer even when authored native tests passed', async () => {
+  const input = design();
+  input.clearanceObservations = [{ testIds: ['wheel-turns#1'], pairsChecked: 4, samplesChecked: 181, complete: true,
+    issues: [{ firstId: 'left-wheel', secondId: 'right-tower', time_s: 0.3, penetration_m: 0.009 }] }];
+  const rejected = { passed: false, summary: 'The rim clips the opposite support.', issues: [{
+    message: 'The independent observation measures 9 mm penetration into the support despite the authored rotation pass.',
+    instanceIds: ['left-wheel', 'right-tower'], suggestion: 'Repair the support clearance and add a test for this pair.',
+  }] };
+  await withModel({ content: JSON.stringify(rejected) }, async (model, requests) => {
+    const before = structuredClone(input.tests);
+    const result = await reviewDesign(input, model);
+    assert.equal(result.passed, false);
+    assert.deepEqual(JSON.parse(requests[0].messages[1].content!).clearanceObservations, input.clearanceObservations);
+    assert.match(requests[0].messages[0].content!, /An authored clearance pass does not overrule an observed overlap/);
+    assert.match(requests[0].messages[0].content!, /Intended contact/);
+    assert.deepEqual(input.tests, before, 'review observations never rewrite native evidence');
+  });
+});
+
+test('an incomplete full-assembly observation cannot be approved by a model', async () => {
+  const input = design();
+  input.clearanceObservations = [{ testIds: ['wheel-turns#1'], pairsChecked: 4, samplesChecked: 10,
+    complete: false, failureReason: 'Geometry query budget reached', issues: [] }];
+  await withModel({ content: JSON.stringify(approved) }, async (model, requests) => {
+    const result = await reviewDesign(input, model);
+    assert.equal(result.passed, false);
+    assert.match(result.summary, /clearance evidence is incomplete/);
+    assert.equal(requests.length, 0);
+  });
+});
+
 test('review passes retry notifications through and propagates caller cancellation', async () => {
   await withModel({ status: 503 }, async (model, requests) => {
     const controller = new AbortController();

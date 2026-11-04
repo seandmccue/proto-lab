@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
+import { auditAssemblyClearance } from '@protolab/simulator';
 import { TestSpec, type Assembly, type Decision, type Spec, type TestResult, type ToolLogEntry, type VersionRecord } from '@protolab/schema';
 import { assistantMessage, chat, modelConfigFromEnv, specialistConfigFromEnv, smokeTest, prettyModelName, TransientModelError, DEFAULT_MODEL, DEFAULT_BASE_URL, type ChatMessage, type ModelConfig } from './llm.ts';
 import { baseSpec } from './spec.ts';
@@ -347,10 +349,26 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
         review = reviewCache.get(signature);
         const cached = !!review;
         if (!review) {
+          emit({ type: 'status', message: 'Checking recorded part clearances across the complete machine before Muse reviews the design.' });
+          const traces = new Map<string, { testIds: string[]; trace: TestResult['trace'] }>();
+          for (const test of latest) {
+            const fingerprint = createHash('sha256').update(JSON.stringify(test.trace)).digest('hex');
+            const existing = traces.get(fingerprint);
+            if (existing) existing.testIds.push(test.testId);
+            else traces.set(fingerprint, { testIds: [test.testId], trace: test.trace });
+          }
+          const clearanceObservations = [];
+          for (const { testIds, trace } of traces.values()) {
+            const observation = await auditAssemblyClearance(rt.assembly, trace);
+            clearanceObservations.push({ testIds, ...observation });
+          }
+          recordLog({ t: new Date().toISOString(), tool: 'review_clearance', args: { observations: clearanceObservations },
+            ok: clearanceObservations.every(({ complete }) => complete),
+            summary: `Observed ${clearanceObservations.reduce((count, observation) => count + observation.issues.length, 0)} overlapping part pairs across ${traces.size} distinct saved replays; Muse will assess intended contacts against the brief.` });
           emit({ type: 'status', message: `${prettyModelName(reviewer.model)} is reviewing the complete design against your brief and measured results.` });
           const reviewStarted = performance.now();
           try {
-            review = await reviewDesign(evidence, reviewer, { signal: deadline,
+            review = await reviewDesign({ ...evidence, clearanceObservations }, reviewer, { signal: deadline,
               onRetry: (retry) => emit({ type: 'status', message: `Muse design review is retrying in ${Math.round(retry.delayMs / 1000)} seconds.` }),
             });
           } finally {

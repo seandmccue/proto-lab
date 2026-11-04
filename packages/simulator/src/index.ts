@@ -90,6 +90,12 @@ export async function auditSampledClearance(assembly: Assembly, trace: Trace, pa
   return inspectSampledClearance(assembly, trace, rigidGroups(assembly), pairs);
 }
 
+/** Observe material overlap across fixed groups at the recorded poses for design review. */
+export async function auditAssemblyClearance(assembly: Assembly, trace: Trace) {
+  await initSimulator();
+  return inspectSampledClearance(assembly, trace, rigidGroups(assembly));
+}
+
 /** Flag custom parts whose collision geometry has disconnected regions at rest. */
 export async function auditCompoundGeometry(assembly: Assembly) {
   await initSimulator();

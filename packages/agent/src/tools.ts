@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Assembly, Plan, Spec, TestSpec, TestResult, ToolLogEntry, PartDefinition, GeometryPiece, Connector, Drive, PartCategory, billOfMaterials } from '@protolab/schema';
 import { searchCatalog, catalog, getPart, generatePart, generatorInfo, applyOps, emptyAssembly, setDrives, summarize, transformPoint, transformDir, AssemblyOp, AssemblyError, Euler, ParamError, shapeVolume, piecesBoundingRadius, piecesVerticalExtent, quatFromEuler, buildWalker, DEFAULT_WALKER, DEFAULT_DANCE, danceDrives, type WalkerParams } from '@protolab/parts';
 import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegrity, auditSampledClearance, auditSampledRotorClearance, motorizedPropellerControls, type AssemblyIntegrityIssue, type CompoundGeometryIssue } from '@protolab/simulator';
+import { measurePlanarOrbit, type PlanarOrbit } from '@protolab/simulator/planar-orbit';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
 
@@ -170,6 +171,70 @@ function connectorPosesFor(assembly: Assembly, instanceIds: string[] = []) {
   });
 }
 
+type OrbitBodies = TestResult['trace']['frames'][number]['bodies'];
+
+function assembledOrbitBodies(assembly: Assembly): OrbitBodies {
+  return Object.fromEntries(assembly.instances.map(({ id, transform }) => [id, transform]));
+}
+
+function missingOrbitBodies(orbit: PlanarOrbit, bodies: OrbitBodies): string[] {
+  const reference = typeof orbit.reference === 'string' ? [orbit.reference]
+    : orbit.reference ? [orbit.reference.from, orbit.reference.to] : [];
+  return [orbit.body, orbit.center, ...reference].filter((id) => !Object.hasOwn(bodies, id));
+}
+
+/** The native measurement includes the initial pose and rejects an undefined radial direction. */
+function orbitStart(orbit: PlanarOrbit, bodies: OrbitBodies) {
+  if (missingOrbitBodies(orbit, bodies).length) return null;
+  return measurePlanarOrbit({ dt: 1, frames: [
+    { t: 0, bodies, joints: {} }, { t: 1, bodies, joints: {} },
+  ] }, orbit);
+}
+
+function checkOrbitStarts(test: TestSpec, bodies: OrbitBodies, allowUnassembled: boolean) {
+  if (test.kind !== 'motion') return;
+  for (const orbit of test.measure.orbits ?? []) {
+    const missing = missingOrbitBodies(orbit, bodies);
+    if (missing.length && allowUnassembled) continue;
+    if (missing.length) throw new Error(`Orbit "${orbit.body}" has missing instances: ${[...new Set(missing)].join(', ')}. Assemble the body, center and reference before running the test. No simulation budget was spent.`);
+    if (!orbitStart(orbit, bodies)) throw new Error(`Orbit "${orbit.body}" about "${orbit.center}" has zero projected starting radius or an undefined reference direction in ${orbit.plane}. Orbit tests track instance origins, not body orientation. Use an off-axis marker fixed to the same rotating body and a nonzero reference direction; keep the original duration and motion targets. No simulation budget was spent.`);
+  }
+}
+
+function sameFixedGroup(assembly: Assembly, from: string, to: string): boolean {
+  if (!assembly.instances.some(({ id }) => id === from) || !assembly.instances.some(({ id }) => id === to)) return false;
+  const connected = new Set([from]);
+  for (const id of connected) {
+    if (id === to) return true;
+    for (const joint of assembly.joints) {
+      if (joint.type !== 'fixed') continue;
+      if (joint.a.instanceId === id) connected.add(joint.b.instanceId);
+      if (joint.b.instanceId === id) connected.add(joint.a.instanceId);
+    }
+  }
+  return false;
+}
+
+/** Repair only the observed point of a demonstrably undefined saved orbit, never its goal. */
+function orbitTrackingCorrection(previous: TestSpec, next: TestSpec, originalBodies: OrbitBodies | undefined, assembly: Assembly): string[] | null {
+  if (!originalBodies || previous.kind !== 'motion' || next.kind !== 'motion') return null;
+  const before = previous.measure.orbits, after = next.measure.orbits;
+  if (!before?.length || !after || before.length !== after.length) return null;
+  const restored = structuredClone(next);
+  const currentBodies = assembledOrbitBodies(assembly);
+  const changes: string[] = [];
+  for (let i = 0; i < before.length; i++) {
+    const oldOrbit = before[i], newOrbit = after[i];
+    if (oldOrbit.body === newOrbit.body) continue;
+    // Original poses prevent moving a previously valid tracker onto the axle to unlock its target.
+    if (missingOrbitBodies(oldOrbit, originalBodies).length || orbitStart(oldOrbit, originalBodies)
+      || !sameFixedGroup(assembly, oldOrbit.body, newOrbit.body) || !orbitStart(newOrbit, currentBodies)) return null;
+    restored.measure.orbits![i].body = oldOrbit.body;
+    changes.push(`${oldOrbit.body} → ${newOrbit.body}`);
+  }
+  return changes.length && isDeepStrictEqual(restored, previous) ? changes : null;
+}
+
 export class ToolRuntime {
   spec: Spec;
   customParts = new Map<string, PartDefinition>();
@@ -179,6 +244,8 @@ export class ToolRuntime {
   testSpecs = new Map<string, TestSpec>();
   private testEvidence = new Map<string, { spec: TestSpec; result: TestResult; geometry: string }>();
   private referenceTestSpecs = new Map<string, TestSpec>();
+  private referenceOrbitBodies: OrbitBodies;
+  private correctedTestSpecs = new Map<string, TestSpec>();
   private lastTestedAssembly: Assembly | null = null;
   private geometryChecks = new WeakMap<Assembly, Promise<CompoundGeometryIssue[]>>();
   private assemblyChecks = new WeakMap<Assembly, Promise<AssemblyIntegrityIssue[]>>();
@@ -193,6 +260,7 @@ export class ToolRuntime {
     for (const test of inheritedDefinitions) this.referenceTestSpecs.set(test.id, structuredClone(test));
     this.budget = budget;
     this.assembly = savedAssembly ? structuredClone(savedAssembly) : emptyAssembly();
+    this.referenceOrbitBodies = structuredClone(assembledOrbitBodies(this.assembly));
     for (const part of this.assembly.parts) {
       this.savedParts.set(part.id, part);
       if (part.source.kind === 'designed' || part.kind === 'designed' || part.id.startsWith('custom-')) this.customParts.set(part.id, part);
@@ -533,11 +601,26 @@ export class ToolRuntime {
             if (insufficient.length) throw new Error(`minRevolutions cannot be met by ${insufficient.map(({ controlId }) => controlId).join(', ')}: the commanded position range is smaller than the requested travel. Measure swinging joints with minJointAmplitude_rad or test the spinning joints separately.`);
           }
           const previous = this.testSpecs.get(a.test.id);
-          const measuredDefinition = this.testEvidence.get(a.test.id)?.result.trace.frames.length ? previous : this.referenceTestSpecs.get(a.test.id);
+          const evidence = this.testEvidence.get(a.test.id);
+          const correctedDefinition = this.correctedTestSpecs.get(a.test.id);
+          const measuredDefinition = evidence?.result.trace.frames.length ? evidence.spec : correctedDefinition ?? this.referenceTestSpecs.get(a.test.id);
+          let trackingCorrection: string[] | null = null;
           if (measuredDefinition) {
-            if (!isDeepStrictEqual(a.test, measuredDefinition)) throw new Error(`Keep the measured criteria and measured instances for "${a.test.id}" fixed when comparing revisions. Duration, targets, clearance pairs and ground checks are part of the saved definition. Rerun it unchanged; use a separate test ID for additional behavior. The original check must still pass.`);
+            if (!isDeepStrictEqual(a.test, measuredDefinition)) {
+              trackingCorrection = correctedDefinition && !evidence ? null : orbitTrackingCorrection(measuredDefinition, a.test,
+                evidence?.result.trace.frames[0]?.bodies ?? this.referenceOrbitBodies, this.assembly);
+              if (!trackingCorrection) throw new Error(`Keep the measured criteria and measured instances for "${a.test.id}" fixed when comparing revisions. Duration, targets, clearance pairs and ground checks are part of the saved definition. Rerun it unchanged; use a separate test ID for additional behavior. The original check must still pass. The only tracking correction allowed is replacing an originally undefined orbit body with an off-axis marker in the same fixed rigid group, with every other test field unchanged.`);
+            }
           }
+          checkOrbitStarts(a.test, assembledOrbitBodies(this.assembly), true);
           if (!previous || JSON.stringify(previous) !== JSON.stringify(a.test)) this.testSpecs.set(a.test.id, a.test);
+          if (trackingCorrection) {
+            this.testEvidence.delete(a.test.id);
+            this.correctedTestSpecs.set(a.test.id, structuredClone(a.test));
+            const message = `Corrected orbit measurement tracking for ${a.test.id}: ${trackingCorrection.join(', ')}. Same fixed rigid body; all targets unchanged. Previous evidence is invalid for this definition; rerun required.`;
+            log(true, message);
+            return { ok: true, test: a.test, trackingCorrection: message, requiresRetest: true };
+          }
           log(true, `Test ${a.test.id} (${a.test.kind}) defined`);
           return { ok: true, test: a.test };
         }
@@ -545,6 +628,7 @@ export class ToolRuntime {
           const a = RunTestArgs.parse(rawArgs); const spec = this.testSpecs.get(a.test_id);
           if (!spec) throw new Error(`Unknown test "${a.test_id}"; define it first. Defined: ${[...this.testSpecs.keys()].join(', ') || 'none'}`);
           if (!this.assembly.instances.length) throw new Error('No assembly yet');
+          checkOrbitStarts(spec, assembledOrbitBodies(this.assembly), false);
           if (this.testCount >= this.budget.maxTests) throw new Error(`Test budget (${this.budget.maxTests}) exhausted; call finalize_design with the best result so far.`);
           this.testCount++;
           const n = this.tests.filter((x) => x.testId.slice(0, x.testId.lastIndexOf('#')) === a.test_id).length + 1;
