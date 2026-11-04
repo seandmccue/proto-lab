@@ -56,6 +56,8 @@ test('one motion run must deliver both marbles to their own receivers', async ()
       assert.ok(result.metrics['endInFinalMargin_m.2'] < 0);
       assert.equal(result.failureReasons.length, 1);
       assert.match(result.failureReasons[0], /second_marble ended inside second_catcher/);
+      assert.match(result.failureReasons[0], /Final center in receiver-local XYZ \[150\.00, [^,]+, 0\.00\] mm/);
+      assert.match(result.failureReasons[0], /allowed bounds X \[-60\.00, 60\.00\], Y \[11\.00, 19\.00\], Z \[-54\.00, 54\.00\] mm/);
     }
   }
 });

@@ -34,6 +34,8 @@ test('passing through the receiver does not count as a final hold', () => {
   assert.ok(measured);
   assert.equal(measured.hold_s, 0);
   assert.ok(measured.finalMargin_m < 0);
+  assert.ok(Math.abs(measured.finalLocalPosition_m[0] - 0.05) < 1e-8);
+  assert.ok(Math.abs(measured.finalLocalPosition_m[1] - 0.02) < 1e-8);
 });
 
 test('a missing sample cannot establish a final hold', () => {

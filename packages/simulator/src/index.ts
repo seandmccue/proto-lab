@@ -451,7 +451,12 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
           metrics[holdKey] = +result.hold_s.toFixed(4);
           metrics[marginKey] = +result.finalMargin_m.toFixed(5);
           if (result.hold_s + 1e-8 < endIn.minHold_s) {
-            failureReasons.push(`${endIn.instance} ended inside ${endIn.receiver} for ${result.hold_s.toFixed(2)} s, target ${endIn.minHold_s} s`);
+            const center = endIn.centerOffset_m ?? [0, 0, 0];
+            const mm = (meters: number) => (meters * 1000).toFixed(2);
+            const position = result.finalLocalPosition_m.map(mm).join(', ');
+            const bounds = endIn.halfExtents_m.map((half, axis) =>
+              `${'XYZ'[axis]} [${mm(center[axis] - half)}, ${mm(center[axis] + half)}]`).join(', ');
+            failureReasons.push(`${endIn.instance} ended inside ${endIn.receiver} for ${result.hold_s.toFixed(2)} s, target ${endIn.minHold_s} s. Final center in receiver-local XYZ [${position}] mm, allowed bounds ${bounds} mm`);
           }
         }
       }
