@@ -28,6 +28,11 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export interface TestSummary { testId: string; kind: string; passed: boolean; metrics: Record<string, number>; failureReasons: string[]; notes?: string[] }
+/** Seeds retired from the product; hidden from lists even when an older API still serves them. */
+export const RETIRED_TITLES = new Set(['Bring My Muse to Life']);
+export const RETIRED_EXAMPLE_IDS = new Set(['muse']);
+export const isRetired = (item: { title: string }) => RETIRED_TITLES.has(item.title);
+
 export interface InventionPublic { latestWalk: TestSummary | null; latestDance: TestSummary | null; latestTest: TestSummary | null; id: string; title: string; description: string; prompt: string; visibility: 'private' | 'public'; status: string; currentVersionId: string | null; featured: boolean; isOwner: boolean; ownerLabel: string; sourceInventionId: string | null; parentVersionId: string | null; modelId: string | null; tests: TestSummary[]; previewUrl: string | null; createdAt: string; updatedAt: string }
 export interface VersionMeta { id: string; iteration: number; status: string; modelId: string; parentVersionId: string | null; createdAt: string; tests: TestSummary[]; spec: VersionRecord['spec'] }
 export interface InventionDetail { invention: InventionPublic; versions: VersionMeta[]; latestJob?: { id: string; status: string; step: string; versionId?: string | null; baselineVersionId?: string | null; changeRequest?: string | null }; source: { id: string; title: string; ownerLabel: string; versionId?: string | null; changeRequest?: string | null } | null }

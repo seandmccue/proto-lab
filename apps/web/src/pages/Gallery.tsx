@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import Header from '../components/Header.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
-import { api, type InventionPublic } from '../api.ts';
+import { api, isRetired, type InventionPublic } from '../api.ts';
 
 const filters = [
   { id: 'recent', label: 'Recent' },
@@ -42,9 +42,9 @@ function GalleryResults({ view, entry }: { view: GalleryView; entry: string }) {
         if (cancelled) return;
         const replace = cursor === 0;
         setItems((previous) => {
-          if (replace) return result.items;
+          if (replace) return result.items.filter((item) => !isRetired(item));
           const seen = new Set(previous.map((item) => item.id));
-          return [...previous, ...result.items.filter((item) => !seen.has(item.id))];
+          return [...previous, ...result.items.filter((item) => !seen.has(item.id) && !isRetired(item))];
         });
         loadedPages.current++;
         const next = result.nextCursor === cursor ? null : result.nextCursor ?? null;
