@@ -11,6 +11,15 @@ export interface LargeShowcase {
 // Add an entry after reviewing the exact saved Muse assembly and recorded tests.
 export const largeShowcases: readonly LargeShowcase[] = [
   {
+    inventionId: 'inv_68d1f230cc8a4fd1',
+    versionId: 'ver_7a88b2edc4fa4866',
+    testIds: ['liftDump#2', 'deepHold#6'],
+    baseline: { versionId: 'ver_49f6609375f34c0d', testId: 'liftDump#10' },
+    componentCount: 63,
+    detail: 'A 1.36 m stationary excavator lifts a loose marble 39.9 cm, then tips it into a blue bin for a two-second hold. Three powered joints move its long arm and toothed scoop.',
+    showStrokeGuidesInitially: false,
+  },
+  {
     inventionId: 'inv_a2b991c4bb614ee1',
     versionId: 'ver_cb8c608abe024f4c',
     testIds: ['skyline_show#3', 'skyline_extra_clear#3'],
