@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, type ServerResponse } from 'node:http';
 import { test } from 'node:test';
 import { assistantMessage, chat, modelConfigFromEnv, TransientModelError, type ChatMessage, type ModelConfig } from './llm.ts';
+import { parseResponses } from './responses.ts';
 
 test('Responses transport and reasoning effort require valid opt-in values', () => {
   assert.equal(modelConfigFromEnv({ MODEL_API_KEY: 'test' })?.transport, undefined);
@@ -173,6 +174,50 @@ test('changing credentials resets stored and encrypted continuation', async () =
       assert.equal(requests[1].input.some((item) => item.type === 'reasoning'), false);
       assert.ok(requests[1].input.some((item) => item.type === 'function_call' && item.call_id === 'call_1'));
       assert.deepEqual(requests[1].input.at(-1), { type: 'function_call_output', call_id: 'call_1', output: '{"n":13}' });
+    });
+  }
+});
+
+test('completed Responses reject unanswerable calls before returning any calls', () => {
+  const cfg = modelConfigFromEnv({ MODEL_API_KEY: 'test' })!;
+  const first = { type: 'function_call', status: 'completed', call_id: 'call_1', name: 'echo', arguments: '{"n":7}' };
+  const second = { ...first, call_id: 'call_2' };
+  const response = { id: 'resp_1', status: 'completed' };
+  const invalid = [
+    [{ ...second, status: 'incomplete' }, /call is incomplete/],
+    [{ ...second, call_id: '' }, /are missing/],
+    [{ ...second, name: undefined }, /are missing/],
+    [{ ...second, arguments: undefined }, /are missing/],
+    [{ ...second, arguments: '{' }, /arguments are not valid JSON/],
+    [{ ...second, arguments: '[]' }, /arguments must be a JSON object/],
+    [first, /duplicate call ID/],
+  ] as const;
+  for (const [item, reason] of invalid) {
+    assert.throws(() => parseResponses(cfg, { ...response, output: [first, item] }), reason);
+  }
+  const result = parseResponses(cfg, { ...response, output: [first, second] });
+  assert.deepEqual(result.toolCalls.map((call) => call.id), ['call_1', 'call_2']);
+});
+
+test('a rejected completed envelope cannot replace prior stored or encrypted context', async () => {
+  for (const transport of ['responses-stored', 'responses-encrypted'] as const) {
+    await withResponsesServer(async (config, requests) => {
+      const cfg = { ...config, transport };
+      const messages = history();
+      await toolTurn(cfg, messages);
+      await assert.rejects(() => chat(cfg, messages, tools, { toolChoice: 'auto' }), /invalid function call at output item 3: call is incomplete/);
+      await toolTurn(cfg, messages);
+      assert.deepEqual(requests[2], requests[1]);
+    }, (res, request) => {
+      if (request !== 2) return false;
+      res.end(JSON.stringify({
+        id: 'resp_rejected', status: 'completed', output: [
+          { type: 'reasoning', encrypted_content: 'opaque_rejected' },
+          { type: 'function_call', call_id: 'valid', name: 'echo', arguments: '{}' },
+          { type: 'function_call', call_id: 'incomplete', name: 'echo', status: 'incomplete', arguments: '{' },
+        ],
+      }));
+      return true;
     });
   }
 });

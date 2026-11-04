@@ -92,11 +92,28 @@ export function parseResponses(cfg: ModelConfig, json: ResponsesOutput): ChatRes
   if (json.status === 'failed') throw new Error(json.error?.message ?? 'Meta Responses generation failed');
   if (!Array.isArray(json.output)) throw new Error('Model returned no response output');
   const toolCalls: ToolCall[] = [];
+  const callIds = new Set<string>();
   const text: string[] = [];
-  for (const item of json.output) {
-    if (item.type === 'function_call' && (item.status === 'completed' || item.status === undefined) &&
-      typeof item.call_id === 'string' && typeof item.name === 'string' && typeof item.arguments === 'string') {
-      toolCalls.push({ id: item.call_id, type: 'function', function: { name: item.name, arguments: item.arguments } });
+  for (const [index, item] of json.output.entries()) {
+    if (!item || typeof item !== 'object' || typeof item.type !== 'string') {
+      throw new Error(`Meta Responses returned an invalid output item at position ${index + 1}`);
+    }
+    if (item.type === 'function_call') {
+      const invalidCall = (reason: string) => new Error(`Meta Responses returned an invalid function call at output item ${index + 1}: ${reason}`);
+      if (item.status !== 'completed' && item.status !== undefined) {
+        if (json.status === 'completed') throw invalidCall('call is incomplete');
+        continue;
+      }
+      const { call_id: id, name, arguments: args } = item;
+      if (typeof id !== 'string' || !id.trim() || typeof name !== 'string' || !name.trim() || typeof args !== 'string') {
+        throw invalidCall('call ID, name, or arguments are missing');
+      }
+      if (callIds.has(id)) throw invalidCall('duplicate call ID');
+      let parsed: unknown;
+      try { parsed = JSON.parse(args); } catch { throw invalidCall('arguments are not valid JSON'); }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalidCall('arguments must be a JSON object');
+      callIds.add(id);
+      toolCalls.push({ id, type: 'function', function: { name, arguments: args } });
     }
     if (item.type === 'message' && item.role === 'assistant' && Array.isArray(item.content)) {
       for (const block of item.content) {
