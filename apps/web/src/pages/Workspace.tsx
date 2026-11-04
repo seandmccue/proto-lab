@@ -268,6 +268,16 @@ export default function Workspace() {
         { ...revision, label: 'After revision' },
       ];
     }
+    if (replayLink && detail?.invention.id === 'inv_437c3b45e27d4138') {
+      const initial = versions.find(({ iteration }) => iteration === 1);
+      const baseline = initial?.tests.find((test) => !test.passed && test.metrics.groundContactViolation === 1);
+      const revision = [...versions].reverse().flatMap((version) => version.tests.map((test) => ({ version, test })))
+        .find(({ test }) => test.passed && test.metrics.endInHold_s >= 0.75);
+      if (initial && baseline && revision) return [
+        { version: initial, test: baseline, label: 'Before revision' },
+        { ...revision, label: 'After revision' },
+      ];
+    }
     if (replayLink && detail?.invention.id === 'inv_ba7b3c7716564397') {
       const initial = versions.find((version) => version.id === 'ver_3989ed3cf2374987');
       const baseline = initial?.tests.find((test) => test.kind === 'motion' && test.testId === 'lotus_cycle#1');
