@@ -286,9 +286,9 @@ hr { border-color: var(--line); }
 .lab-art-results button strong { color: var(--on-panel-strong); font-size: 1.08rem; font-variant-numeric: tabular-nums; }
 .lab-art-results button:last-child strong { color: var(--pass); }
 .lab-art-link { justify-self: start; color: var(--ink); font-size: .8rem; font-weight: 700; }
-.lab-art-foot { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
-.lab-art-dots { display: flex; gap: .35rem; }
-.lab-art-dots button { width: .5rem; height: .5rem; border-radius: 50%; background: var(--line-strong); transition: background .2s, transform .2s; }
+.lab-art-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
+.lab-art-dots { display: flex; flex-wrap: wrap; gap: .35rem; max-width: 100%; }
+.lab-art-dots button { flex: none; width: .5rem; height: .5rem; border-radius: 50%; background: var(--line-strong); transition: background .2s, transform .2s; }
 .lab-art-dots button:hover { background: var(--muted); }
 .lab-art-dots button[aria-selected='true'] { background: var(--accent); transform: scale(1.25); }
 .lab-art-maker { margin-left: .6rem; color: var(--muted); font-size: .72rem; }
