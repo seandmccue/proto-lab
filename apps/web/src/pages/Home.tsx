@@ -187,7 +187,6 @@ export default function Home() {
       <main className="home-shell">
         <section className="lab-hero" aria-labelledby="hero-title">
           <div className="lab-hero-copy">
-            <p className="lab-label lab-kicker"><span aria-hidden="true">✦</span> AI prototyping studio</p>
             <h1 id="hero-title">Turn an idea into a <em>3D prototype.</em></h1>
             <p className="lab-intro">Describe a mechanism. Meta Muse assembles it from parts, tests how it moves, and revises it from the results.</p>
             <form onSubmit={submit} className="lab-form">
