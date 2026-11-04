@@ -96,8 +96,9 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     if (!job) return c.json({ error: 'Not found' }, 404);
     const inv = getInvention(job.invention_id);
     if (!inv || !canSee(inv, session(c.req))) return c.json({ error: 'Not found' }, 404);
-    const checkpoint = runner.waitForCheckpoint(id);
-    if (checkpoint) {
+    while (job.status === 'done' || job.status === 'error') {
+      const checkpoint = runner.waitForCheckpoint(id);
+      if (!checkpoint) break;
       try { await checkpoint; } catch { return c.json({ error: 'Build storage is temporarily unavailable' }, 503); }
       job = select.get(id) as JobRow | undefined;
       if (!job) return c.json({ error: 'Not found' }, 404);
@@ -187,7 +188,8 @@ export function buildApp({ db, store, runner, modelStatus }: AppDeps) {
     const body = RemixBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: 'changeRequest required' }, 400);
     const active = db.prepare("SELECT 1 FROM jobs WHERE invention_id=? AND status IN ('queued','running') LIMIT 1").get(inv.id);
-    if (active) return c.json({ error: 'A build is already in progress for this invention' }, 409);
+    const latest = db.prepare('SELECT id FROM jobs WHERE invention_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(inv.id) as { id: string } | undefined;
+    if (active || latest && runner.isAwaitingCheckpoint(latest.id)) return c.json({ error: 'A build is already in progress for this invention' }, 409);
     if (!canQueue()) return c.json({ error: 'Build capacity is full. Try again in a minute.' }, 429, { 'Retry-After': '60' });
     const r = startDerived(sid, inv, sanitize(body.data.changeRequest), 'follow-up', body.data.versionId);
     return 'error' in r ? c.json(r, 409) : c.json(r, 201);
