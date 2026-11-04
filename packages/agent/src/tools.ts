@@ -7,6 +7,7 @@ import { runTest, auditCompoundGeometry, auditPartGeometry, auditAssemblyIntegri
 import { measurePlanarOrbit, type PlanarOrbit } from '@protolab/simulator/planar-orbit';
 import type { ToolDef } from './llm.ts';
 import { failedReceiverPaths } from './test-feedback.ts';
+import { motionDiagnostics, boundMotionObservations, type MotionDiagnostics } from './motion-diagnostics.ts';
 
 function disconnectedGeometryMessage(issue: CompoundGeometryIssue): string {
   const groups = issue.pieceGroups.map((indices) => `[${indices.join(', ')}]`).join(' | ');
@@ -251,6 +252,7 @@ export class ToolRuntime {
   private geometryChecks = new WeakMap<Assembly, Promise<CompoundGeometryIssue[]>>();
   private assemblyChecks = new WeakMap<Assembly, Promise<AssemblyIntegrityIssue[]>>();
   private clearanceObservations = new WeakMap<Assembly, Map<string, Promise<SampledClearance>>>();
+  private recordedMotionDiagnostics = new WeakMap<TestResult, MotionDiagnostics | undefined>();
   validationFailures = 0;
   testCount = 0; sweeps = 0; calls = 0;
   finalized: { summary: string; status: 'passed' | 'failed'; unverified?: string[] } | null = null;
@@ -269,6 +271,21 @@ export class ToolRuntime {
     }
   }
   resolve = (id: string) => this.customParts.get(id) ?? this.savedParts.get(id) ?? getPart(id);
+
+  /** Keep each trace paired with its actual drive program, even after set_drives. */
+  motionObservations(tests: TestResult[]) {
+    let notApplicableTestCount = 0, unavailableTestCount = 0;
+    const reports = tests.flatMap((test) => {
+      const observation = this.recordedMotionDiagnostics.get(test);
+      if (!observation) {
+        if (this.recordedMotionDiagnostics.has(test) && test.trace.frames.length) notApplicableTestCount++;
+        else unavailableTestCount++;
+      }
+      return observation ? [structuredClone(observation)] : [];
+    });
+    return boundMotionObservations({ diagnosticOnly: true, requestedTestCount: tests.length,
+      notApplicableTestCount, unavailableTestCount, omittedTestCount: 0, omittedTestIds: [], omittedTestIdCount: 0, reports })!;
+  }
 
   /** Reuse the same recorded-pose diagnostic across a test suite and its final review. */
   clearanceObservation(assembly: Assembly, trace: TestResult['trace']): Promise<SampledClearance> {
@@ -656,6 +673,8 @@ export class ToolRuntime {
           const testId = `${a.test_id}#${n}`;
           this.events.onTestStart?.(testId, spec.kind);
           const result = await this.runCheckedTest({ ...spec, id: testId });
+          const motion = motionDiagnostics(this.assembly, spec, result);
+          this.recordedMotionDiagnostics.set(result, motion);
           this.tests.push(result);
           this.testEvidence.set(a.test_id, { spec, result, geometry: this.geometrySignature() });
           this.lastTestedAssembly = this.assembly;
@@ -669,6 +688,7 @@ export class ToolRuntime {
           return { testId: result.testId, kind: result.kind, passed: result.passed, metrics: result.metrics, failureReasons: result.failureReasons, notes: result.notes,
             assemblyClearance: { diagnosticOnly: true, ...assemblyClearance },
             ...(payloadPaths.length ? { payloadPaths } : {}),
+            ...(motion ? { motionDiagnostics: motion } : {}),
           };
         }
         case 'sweep_drive': {

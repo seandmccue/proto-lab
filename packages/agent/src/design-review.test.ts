@@ -6,6 +6,7 @@ import { getPart } from '@protolab/parts';
 import { baseSpec } from './spec.ts';
 import { reviewDesign, type DesignReviewInput } from './design-review.ts';
 import type { ChatMessage, ModelConfig } from './llm.ts';
+import { motionDiagnostics } from './motion-diagnostics.ts';
 
 const approved = { passed: true, summary: 'Both rimmed wheels meet the requested rotation target.', issues: [] };
 const usage = { prompt_tokens: 4321, completion_tokens: 180, completion_tokens_details: { reasoning_tokens: 90 } };
@@ -68,6 +69,38 @@ function design(rim = true): DesignReviewInput {
   };
   return { brief, assembly, spec, testDefinitions: [testDefinition], tests: [result] };
 }
+
+test('review diagnostics fit remaining context space without replacing native evidence or relabelling old drive programs', async () => {
+  const input = design();
+  const capturedAssembly = structuredClone(input.assembly);
+  capturedAssembly.controller.drives = capturedAssembly.controller.drives.map((drive) => ({ ...drive, mode: 'position', profile: { kind: 'constant', value: 0.2 } }));
+  const report = motionDiagnostics(capturedAssembly, input.testDefinitions[0], input.tests[0])!;
+  const reports = Array.from({ length: 14 }, (_, i) => ({ ...structuredClone(report), testId: `position_${i}#1`,
+    positionJoints: Array.from({ length: 8 }, () => structuredClone(report.positionJoints[0])) }));
+  const observations = { diagnosticOnly: true as const, requestedTestCount: 14, notApplicableTestCount: 0, unavailableTestCount: 0,
+    omittedTestCount: 0, omittedTestIds: [], omittedTestIdCount: 0, reports };
+  await withModel({ content: JSON.stringify(approved) }, async (model, requests) => {
+    assert.equal((await reviewDesign(input, model)).passed, true);
+    const original = JSON.parse(requests[0].messages[1].content!);
+    input.motionObservations = observations;
+    assert.equal((await reviewDesign(input, model)).passed, true);
+    const expanded = JSON.parse(requests[1].messages[1].content!);
+    assert.equal(expanded.motionObservations.reports[0].positionJoints[0].drive.mode, 'position');
+    assert.equal(expanded.drives[0].mode, 'velocity', 'saved targets stay paired with their original test controller');
+    assert.ok(Buffer.byteLength(JSON.stringify(expanded.motionObservations)) <= 24_000);
+    input.brief += ' '.repeat(240_000 - Buffer.byteLength(requests[0].messages[1].content!) - 600);
+    assert.equal((await reviewDesign(input, model)).passed, true, 'advisory data cannot overflow otherwise valid complete native context');
+    const compact = JSON.parse(requests[2].messages[1].content!);
+    assert.ok(Buffer.byteLength(requests[2].messages[1].content!) <= 240_000);
+    assert.equal(compact.motionObservations.reports.length, 0);
+    assert.equal(compact.motionObservations.omittedTestCount, 14);
+    assert.deepEqual(compact.parts, original.parts);
+    assert.deepEqual(compact.tests, original.tests);
+    assert.deepEqual(compact.testDefinitions, original.testDefinitions);
+    assert.equal(reports.length, 14);
+    assert.ok(!requests[2].messages[1].content!.includes('trace_must_not_be_sent'));
+  });
+});
 
 test('independent review retains a rimless custom twin-wheel failure and sends actual complete placed geometry', async () => {
   const input = design(false);

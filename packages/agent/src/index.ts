@@ -225,7 +225,7 @@ Rules of thumb:
 - For fan or turbine stages, prefer create_part with kind propeller: it provides 2–8 pitched blades on a connected hub. Its params are radius, blades, chord and pitch; color belongs at the top level of create_part. Mount several stages fixed along one driven shaft for a simple cutaway demonstrator; keep the stationary casing and vanes visibly supported with room for the rotating blades.
 - Coordinates: metres, +Y up, ground at y = 0. Place one anchored base for fixed machines (anchored:true) or a chassis for free-standing machines (feet/wheels must touch y = 0). A walker needs legs mounted so feet sit under the hips and a gait profile (swing on hips, lift on knees, swingDuty ≤ 0.25 for a crawl with 4 legs, 0.5 tripod with 6).
 - Mount semantics: {op:"mount", id, part, onto, connector, via, joint}: the child's "via" connector is placed on the parent's "connector", facing it; revolute joints turn about that axis; spin_deg rotates the child about the axis before any motion; offset_m adds clearance. Joint coordinates are 0 at the assembled pose.
-- Motors: servos (position drives, rad) for oscillation and holding; gearmotors (velocity drives, rad/s) for continuous rotation; linear actuators / pistons (position drives, m). Keep demand under the rating (metrics report it; saturation is applied physically). A test fails on torque only when a motor sits at its rating ≥ 3 % of the run or demand exceeds 1.5× rating; brief peaks a few percent over are tolerated and noted.
+- Motors: servos (position drives, rad) for oscillation and holding; gearmotors (velocity drives, rad/s) for continuous rotation; linear actuators / pistons (position drives, m). Keep demand under the rating (metrics report it; saturation is applied physically). A test fails on torque only when a motor sits at its rating ≥ 3 % of the run or demand exceeds 1.5× rating; brief peaks a few percent over are tolerated and noted. Read run_test.motionDiagnostics for signed command versus achieved position, early settling and loaded tracking: low peak demand or zero saturation does not prove the mechanism reached its commanded pose. For a failed payload lift, inspect payload and holder-reference vertical deltas and holder-local movement even when a receiver hold passed; early sag or slipping can precede the commanded lift. These sampled diagnostics explain behavior, never waive original targets or create extra pass/fail criteria. Retest repairs with the original checks.
 - Test criteria must leave room for the mechanism as built: a legged machine measured at 4–5° tilt in the recipe will show 6–8° with a shell or claws on top, so use maxTilt_deg 10–12 and a distance target the measured configuration beats by a margin (0.3 m when the recipe walks 0.39 m); do not set a 6° limit and then spend nine tests chasing it.
 - Tests must be meaningful for the invention: a Ferris wheel should check every cabin with uprightInstances/maxInstanceTilt_deg as well as wheel revolutions and clearance; a crane should check the load with measure.payload plus minPayloadLift_m and maxPayloadSeparation_m, and maxPayloadReturnError_m if it should lower back to its starting height. A rocking machine should use measure.jointSwing to check both sides of its rest position. A wing must reach its stroke amplitude and rate with the body stable, a catapult must land the projectile near the target, a gripper must hold its payload after the support is removed, and a walker must travel the distance upright.
 - Honesty: if a requested behaviour cannot be verified (flight, aerodynamic lift, airflow, fluid motion), build the closest honest mechanical prototype, verify what can be measured (stroke, rate, clearance, torque), and list the rest under "unverified". Never pretend.
@@ -348,8 +348,15 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
         const evidence = {
           brief: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt,
           assembly: rt.assembly, spec: rt.spec, testDefinitions: [...rt.testSpecs.values()], tests: latest,
+          motionObservations: rt.motionObservations(latest),
         };
-        const signature = JSON.stringify({ ...evidence, tests: latest.map(({ trace: _trace, testId, ...test }) => ({ ...test, testId: testId.replace(/#\d+$/, '') })) });
+        const signature = JSON.stringify({ ...evidence,
+          motionObservations: { ...evidence.motionObservations,
+            omittedTestIds: evidence.motionObservations.omittedTestIds.map((testId) => testId.replace(/#\d+$/, '')),
+            reports: evidence.motionObservations.reports.map(({ testId, ...observation }) => ({ ...observation, testId: testId.replace(/#\d+$/, '') })),
+          },
+          tests: latest.map(({ trace: _trace, testId, ...test }) => ({ ...test, testId: testId.replace(/#\d+$/, '') })),
+        });
         review = reviewCache.get(signature);
         const cached = !!review;
         if (!review) {
