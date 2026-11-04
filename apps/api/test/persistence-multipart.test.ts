@@ -5,9 +5,10 @@ import { mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { test } from 'node:test';
+import { createGunzip, createGzip } from 'node:zlib';
 import { openDb } from '../src/db.ts';
 import { CloudCheckpoint, uploadCheckpointArchive } from '../src/persistence.ts';
 import { ObjectStore } from '../src/store.ts';
@@ -16,6 +17,14 @@ const MiB = 1024 * 1024;
 const digest = async (path: string) => {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+};
+
+const recompressedDigest = async (path: string, level: number) => {
+  const hash = createHash('sha256');
+  await pipeline(createReadStream(path), createGunzip(), createGzip({ level }), new Writable({
+    write(chunk, _encoding, callback) { hash.update(chunk); callback(); },
+  }));
   return hash.digest('hex');
 };
 
@@ -124,6 +133,10 @@ test('multipart streams a real archive above 90 MiB, restores every byte, and pr
     await new CloudCheckpoint(url, token, data).save(db);
     assert.ok(current && current.size > 90 * MiB, 'exercise real multipart, not a reduced test threshold');
     const first = current;
+    const fastHash = await recompressedDigest(first.path, 3);
+    const compactHash = await recompressedDigest(first.path, 6);
+    assert.notEqual(fastHash, compactHash, 'fixture distinguishes the fast and compact compression paths');
+    assert.equal(first.sha256, fastHash, 'multipart accepts fast gzip without recompressing an archive above 90 MiB');
     assert.deepEqual(completedPartSizes[0].slice(0, -1), [16 * MiB, 16 * MiB, 16 * MiB, 16 * MiB, 16 * MiB]);
     assert.equal(completedPartSizes[0].at(-1), first.size - 80 * MiB);
 
