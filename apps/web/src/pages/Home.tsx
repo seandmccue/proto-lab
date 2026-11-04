@@ -4,17 +4,12 @@ import Header, { useModelInfo } from '../components/Header.tsx';
 import { recordedTestSpec } from '../components/BuildProgress.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import PartInventory from '../components/PartInventory.tsx';
+import { HowItWorksSection } from './HowItWorks.tsx';
 import Viewer from '../components/Viewer.tsx';
 import { api, fmt, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
 import type { TestSpec, VersionRecord } from '@protolab/schema';
 import { largeShowcases } from '../../../large-showcases.mts';
 
-const steps = [
-  { title: 'Describe your idea', detail: 'Tell Muse what you want to build and what it should do. Give it a target, like a crab that scuttles at least 25 cm.' },
-  { title: 'Watch Muse assemble it', detail: 'Muse selects parts, connects them in 3D, and sets up the motors and joints that make the prototype move.' },
-  { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
-  { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
-];
 const crabId = 'inv_633b4887ad7f4cdc';
 const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
@@ -203,10 +198,6 @@ export default function Home() {
               <p id="invention-scope">Tell Muse what to build and how it should move.</p>
             </form>
             {error && <p className="mt-2 text-sm text-fail" role="alert">{error}</p>}
-            <div className="lab-hero-links">
-              <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
-              <a href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>
-            </div>
             {examples.length > 0 && <div className="lab-examples">
               <span className="lab-label">Try a brief</span>
               <div className="lab-chips">
@@ -217,6 +208,10 @@ export default function Home() {
                 ))}
               </div>
             </div>}
+            <div className="lab-hero-links">
+              <Link to={replayUrl} className="lab-hero-proof">{hero ? 'Watch Muse fix the crab' : 'Explore AI-built prototypes'} <span aria-hidden="true">{hero ? '▶' : '↗'}</span></Link>
+              <a href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>
+            </div>
           </div>
           <figure className="lab-art">
             <div className="lab-art-heading">
@@ -322,24 +317,8 @@ export default function Home() {
         <Section title="Prototype gallery" items={featuredPrototypes} previewCount={6} blurb="Explore featured builds, inspect their parts, and replay their physics tests." browse={{ to: '/gallery?view=featured', label: 'All featured inventions' }} />
         <Section title="Recent" items={recentPrototypes} previewCount={6} empty="Nothing published yet. Build something and publish it." browse={{ to: '/gallery', label: 'All published inventions' }} />
         {(!spotlightId || otherRemixes.length > 0) && <Section title="Remixes" items={otherRemixes} empty="Open any invention and click Remix to create the first one." browse={{ to: '/gallery?view=remixes', label: 'All remixes' }} />}
-        <section id="how-it-works" className="lab-section lab-how" aria-labelledby="lab-how-title">
-          <div className="lab-section-heading">
-            <div>
-              <span className="lab-label">From idea to prototype</span>
-              <h2 id="lab-how-title">How ProtoLab works</h2>
-              <p>A prompt becomes a 3D assembly you can inspect, simulate, and improve.</p>
-            </div>
-            <a href="#parts" className="btn-secondary">Explore the parts <span aria-hidden="true">↓</span></a>
-          </div>
-          <ol className="lab-how-steps">
-            {steps.map((step, index) => (
-              <li key={step.title}>
-                <span className="lab-label lab-how-number">0{index + 1}</span>
-                <h3>{step.title}</h3>
-                <p>{step.detail}</p>
-              </li>
-            ))}
-          </ol>
+        <HowItWorksSection />
+        <section className="lab-section" aria-label="Inside a saved simulation">
           {beforeDistance !== undefined && afterDistance !== undefined && (
             <div className="lab-test-example">
               <div>
