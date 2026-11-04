@@ -12,7 +12,7 @@ import TriplexTimingEvidence from '../components/TriplexTimingEvidence.tsx';
 import OrbitReplayEvidence, { curatedOrreryId } from '../components/OrbitReplayEvidence.tsx';
 import TrayTiltEvidence from '../components/TrayTiltEvidence.tsx';
 import LotusReplayEvidence from '../components/LotusReplayEvidence.tsx';
-import IndexedMotionEvidence from '../components/IndexedMotionEvidence.tsx';
+import IndexedMotionEvidence, { carouselBaselineVersionId } from '../components/IndexedMotionEvidence.tsx';
 import type { DiagnosticTone } from '../components/diagnosticColors.ts';
 import AssemblyTree from '../components/AssemblyTree.tsx';
 import ActivityPanel, { Metrics, SpecPanel } from '../components/ActivityPanel.tsx';
@@ -258,6 +258,16 @@ export default function Workspace() {
     const before = ownBaseline ?? sourceVersion;
     const after = revisionResultId === undefined ? versions[versions.length - 1] : versions.find((v) => v.id === revisionResultId);
     const saved = replayStory(versions);
+    if (replayLink && detail?.invention.id === 'inv_b99f505fab294915') {
+      const initial = versions.find((version) => version.id === carouselBaselineVersionId);
+      const baseline = initial?.tests.find((test) => test.testId === 'geneva_10s#1' && !test.passed);
+      const revision = [...versions].reverse().flatMap((version) => version.tests.map((test) => ({ version, test })))
+        .find(({ test }) => test.passed && test.metrics.indexedConsecutiveSteps >= 2);
+      if (initial && baseline && revision) return [
+        { version: initial, test: baseline, label: 'Before revision' },
+        { ...revision, label: 'After revision' },
+      ];
+    }
     if (replayLink && detail?.invention.id === 'inv_ba7b3c7716564397') {
       const initial = versions.find((version) => version.id === 'ver_3989ed3cf2374987');
       const baseline = initial?.tests.find((test) => test.kind === 'motion' && test.testId === 'lotus_cycle#1');
@@ -462,7 +472,9 @@ export default function Workspace() {
   const separateChecks = !!story[1] && !sameTestName(story[0].test, story[1].test);
   const sharedTravel = story[0]?.test.kind === 'motion' && story[1]?.test.kind === 'motion' &&
     Object.keys(story[0].test.metrics).some((metric) => /\.travel_[xyz]_m$/.test(metric) && metric in story[1].test.metrics);
-  const canCompare = !running && !!story[1] && (!separateChecks || sharedTravel) && story[0].version.id !== story[1].version.id;
+  const carouselPair = inv?.id === 'inv_b99f505fab294915' && story[0]?.version.id === carouselBaselineVersionId &&
+    !!story[1]?.test.passed && story[1].test.metrics.indexedConsecutiveSteps >= 2;
+  const canCompare = !running && !!story[1] && (!separateChecks || sharedTravel || carouselPair) && story[0].version.id !== story[1].version.id;
   const sideBySide = comparisonOpen && canCompare;
   const stageRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -729,7 +741,7 @@ export default function Workspace() {
           {!showLive && version && test && <OrbitReplayEvidence definition={testDefinition} inventionId={version.inventionId} time={time.t} test={test} />}
           {!showLive && version && test && <TrayTiltEvidence version={version} time={time.t} test={test} />}
           {!showLive && version && test && <LotusReplayEvidence version={version} time={time.t} test={test} />}
-          {!showLive && test && <IndexedMotionEvidence time={time.t} test={test} definition={testDefinition} />}
+          {!showLive && test && <IndexedMotionEvidence versionId={version?.id} time={time.t} test={test} definition={testDefinition} />}
           {(!stageMode || !story.length) && <IterationRibbon versions={detail?.versions ?? []} currentId={versionId} onPick={(next) => { if (running) setViewMode('tested'); setVersionId(next); }} />}
           {storyControls}
           {running && <SimulationStatus events={events} running replay={replayStatus} />}

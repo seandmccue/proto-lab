@@ -157,7 +157,7 @@ export default function ReplayComparison({ before, after, reducedMotion, baselin
           definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
         <TrayTiltEvidence version={version} iteration={version.iteration} time={time} test={test} />
         <LotusReplayEvidence version={version} iteration={version.iteration} time={time} test={test} />
-        <IndexedMotionEvidence iteration={version.iteration} time={time} test={test}
+        <IndexedMotionEvidence versionId={version.id} iteration={version.iteration} time={time} test={test}
           definition={index === 0 ? definition : recordedTestSpec(test.testId, [version])} />
       </article>)}
     </div>

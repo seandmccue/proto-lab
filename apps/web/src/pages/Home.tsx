@@ -5,7 +5,7 @@ import { recordedTestSpec } from '../components/BuildProgress.tsx';
 import GalleryCard from '../components/GalleryCard.tsx';
 import PartInventory from '../components/PartInventory.tsx';
 import Viewer from '../components/Viewer.tsx';
-import { api, fmt, type Example, type InventionPublic, type TestSummary } from '../api.ts';
+import { api, fmt, type Example, type InventionDetail, type InventionPublic, type TestSummary } from '../api.ts';
 import type { TestSpec, VersionRecord } from '@protolab/schema';
 
 const steps = [
@@ -14,11 +14,13 @@ const steps = [
   { title: 'Run a physics test', detail: 'ProtoLab simulates the motion and measures the result against your goal. Replay the test to see where it passed or failed.' },
   { title: 'See what changes', detail: 'Muse can revise the assembly or motor settings and test again. Compare saved versions to see what improved.' },
 ];
+const crabId = 'inv_633b4887ad7f4cdc';
 const drawingReferenceId = 'inv_drawing_automaton';
 const drawingReferenceVersionId = 'ver_drawing_automaton_1';
 const drawingRemixId = 'inv_76b7fae5bdf941c9';
 const gimbalRepairId = 'inv_d3f76fcc393b49d6';
 const lotusId = 'inv_ba7b3c7716564397';
+const genevaRepairId = 'inv_b99f505fab294915';
 const referenceIds = [drawingReferenceId, 'inv_triplex_pump', 'inv_twin_drawbridge', 'inv_scissor_lift', 'inv_cam_semaphore', 'inv_two_axis_gimbal', 'inv_geneva_indexer'];
 
 function penPathSize(test: TestSummary | null | undefined) {
@@ -40,6 +42,7 @@ export default function Home() {
   const [mine, setMine] = useState<InventionPublic[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [crab, setCrab] = useState<InventionDetail | null>(null);
   const [heroVersion, setHeroVersion] = useState<VersionRecord | null>(null);
   const [before, setBefore] = useState<{ version: VersionRecord; test: TestSummary } | null>(null);
   const [earlierHeroDefinition, setEarlierHeroDefinition] = useState<TestSpec>();
@@ -48,7 +51,9 @@ export default function Home() {
   const [orrery, setOrrery] = useState<InventionPublic | null>(null);
   const [drawingRemix, setDrawingRemix] = useState<InventionPublic | null>(null);
   const [drawingBaseline, setDrawingBaseline] = useState<VersionRecord | null>(null);
-  const hero = featured.find((item) => /^mechanical crab$/i.test(item.title) && item.status === 'passed' && item.latestWalk?.passed);
+  const savedCrab = crab?.invention;
+  const hero = savedCrab?.visibility === 'public' && savedCrab.status === 'passed' && savedCrab.latestWalk?.passed ? savedCrab : undefined;
+  const heroHistory = crab?.versions;
   const heroId = hero?.id;
   const heroVersionId = hero?.currentVersionId;
   const heroTestId = hero?.latestWalk?.testId;
@@ -66,16 +71,19 @@ export default function Home() {
   const lotusStroke = lotus?.latestTest?.metrics.synchronizedMinTravel_m ?? NaN;
   const lotusSpread = lotus?.latestTest?.metrics.synchronizedMaxSpread_m ?? NaN;
   const showLotus = lotus && Number.isFinite(lotusStroke) && Number.isFinite(lotusSpread);
+  const genevaRepair = featured.find((item) => item.id === genevaRepairId && item.latestTest?.passed
+    && (item.latestTest.metrics.indexedConsecutiveSteps ?? 0) >= 2);
   const featuredPrototypes = featured.filter((item) => !referenceIds.includes(item.id) && item.id !== spotlightId && item.id !== gimbalRepair?.id && item.id !== (showLotus ? lotus.id : undefined));
   const recentPrototypes = recent.filter((item) => item.id !== spotlightId);
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
   useEffect(() => {
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
-    api.gallery('featured', 16).then((r) => setFeatured(r.items)).catch(() => {});
+    api.gallery('featured', 24).then((r) => setFeatured(r.items)).catch(() => {});
     api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
     api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
+    api.invention(crabId).then(setCrab).catch(() => {});
     api.invention('inv_adc081059ea44ab9').then(({ invention }) => {
       if (invention.visibility === 'public' && invention.status === 'passed') setOrrery(invention);
     }).catch(() => {});
@@ -107,15 +115,14 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [heroId, heroVersionId]);
   useEffect(() => {
-    if (!heroId || !heroTestId) return;
+    if (!heroId || !heroTestId || !heroHistory) return;
     let cancelled = false;
     const testName = (id: string) => id.replace(/#\d+$/, '');
     void (async () => {
-      const { versions } = await api.invention(heroId);
-      const latestIndex = versions.findIndex((version) => version.id === heroVersionId);
+      const latestIndex = heroHistory.findIndex((version) => version.id === heroVersionId);
       let foundBefore = false;
       let definition: TestSpec | undefined;
-      for (const version of versions.slice(0, Math.max(latestIndex, 0)).reverse()) {
+      for (const version of heroHistory.slice(0, Math.max(latestIndex, 0)).reverse()) {
         const test = !foundBefore && version.tests.find((result) => !result.passed && testName(result.testId) === testName(heroTestId));
         if (!test && definition) continue;
         const detail = await api.version(heroId, version.id, Boolean(test));
@@ -130,7 +137,7 @@ export default function Home() {
       }
     })().catch(() => {});
     return () => { cancelled = true; };
-  }, [heroId, heroTestId, heroVersionId]);
+  }, [heroHistory, heroId, heroTestId, heroVersionId]);
 
   const heroTest = heroVersion?.tests.find((test) => test.testId === heroTestId);
   const heroDefinition = heroTestId ? recordedTestSpec(heroTestId, [heroVersion]) ?? earlierHeroDefinition : undefined;
@@ -209,7 +216,7 @@ export default function Home() {
             ))}
           </div>
         </div>}
-        {(references.length > 0 || spotlightId || orrery || gimbalRepair || showLotus) && (
+        {(references.length > 0 || spotlightId || orrery || gimbalRepair || showLotus || genevaRepair) && (
           <section className="lab-section" aria-labelledby="motion-gallery-title">
             <div className="lab-section-heading">
               <div>
@@ -217,7 +224,10 @@ export default function Home() {
                 <h2 id="motion-gallery-title">See mechanisms in motion</h2>
                 <p>Replay reference builds to see how motors and passive joints move together. Open a test to inspect the measurements.</p>
               </div>
-              {orrery && <Link to={`/i/${orrery.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the Moon’s orbit <span aria-hidden="true">↗</span></Link>}
+              {(orrery || genevaRepair) && <div className="flex flex-wrap gap-2">
+                {orrery && <Link to={`/i/${orrery.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the Moon’s orbit <span aria-hidden="true">↗</span></Link>}
+                {genevaRepair && <Link to={`/i/${genevaRepair.id}?replay=1&compare=1`} className="btn-secondary">See Muse fix the jewel carousel <span aria-hidden="true">↗</span></Link>}
+              </div>}
             </div>
             {spotlightId && (
               <article className="lab-test-example mb-4">
