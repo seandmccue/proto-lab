@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { createBrowserRouter, RouterProvider, useParams } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import './index.css';
 import Home from './pages/Home.tsx';
 import Workspace from './pages/Workspace.tsx';
@@ -8,7 +8,18 @@ import Gallery from './pages/Gallery.tsx';
 import HowItWorks from './pages/HowItWorks.tsx';
 import NotFound from './pages/NotFound.tsx';
 
-function WorkspaceRoute() { const { id } = useParams(); return <Workspace key={id} />; }
+function WorkspaceRoute() {
+  const { id } = useParams();
+  const { hash } = useLocation();
+  const navigationType = useNavigationType();
+
+  useLayoutEffect(() => {
+    // A card near the bottom of the gallery can carry its scroll into a workbench.
+    if (navigationType === 'PUSH' && !hash) window.scrollTo(0, 0);
+  }, [id, hash, navigationType]);
+
+  return <Workspace key={id} />;
+}
 
 const router = createBrowserRouter([
   { path: '/', element: <Home />, errorElement: <NotFound /> },
