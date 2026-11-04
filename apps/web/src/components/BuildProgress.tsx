@@ -110,10 +110,13 @@ export function keyMetric(t: { metrics: Record<string, number> } | null | undefi
   if (m.payloadLift_m !== undefined) return `${fmt.cm(m.payloadLift_m)} lift`;
   if (m.maxInstanceTilt_deg !== undefined) return `${fmt.deg(m.maxInstanceTilt_deg)} peak part tilt`;
   if (m.payloadDrop_m !== undefined) return `drop ${fmt.m2(m.payloadDrop_m)}`;
+  if (m.synchronizedMinTravel_m !== undefined) return `${(m.synchronizedMinTravel_m * 1000).toFixed(1)} mm shortest stroke`;
   const rev = Object.entries(m).find(([k]) => k.endsWith('revolutions'));
   if (rev && rev[1] >= 0.5) return `${rev[1].toFixed(1)} rev`; // a rotor's "swing" is thousands of degrees; revolutions is the number
   const amp = Object.entries(m).find(([k]) => k.endsWith('amplitude_rad'));
   if (amp && amp[1] * 180 / Math.PI <= 360) return `${((amp[1] * 180) / Math.PI).toFixed(0)}° swing`;
+  const stroke = Object.entries(m).find(([k]) => k.endsWith('.amplitude_m'));
+  if (stroke) return `${(stroke[1] * 1000).toFixed(1)} mm stroke`;
   if (rev) return `${rev[1].toFixed(1)} rev`;
   if (m.maxTilt_deg !== undefined) return `tilt ${fmt.deg(m.maxTilt_deg)}`;
   return '';
@@ -161,6 +164,11 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
         const label = joint.replace(/[_-]+/g, ' ');
         items.push({ label: `${label} swing`, value: `${degrees(low)} to ${degrees(high)}`, target: `Reach ±${degrees(minEachWay_rad)}` });
       }
+    }
+    const sync = definition.measure.synchronizedTravel;
+    if (sync) {
+      add('Shortest synchronized stroke', metrics.synchronizedMinTravel_m, (value) => `${(value * 1000).toFixed(1)} mm`, sync.minTravel_m, true);
+      add('Peak motion spread', metrics.synchronizedMaxSpread_m, (value) => `${(value * 1000).toFixed(2)} mm`, sync.maxSpread_m);
     }
     for (const { instance, axis, minTravel_m } of definition.measure.linearTravel ?? []) {
       const name = instance.replace(/[_-]+/g, ' ');
