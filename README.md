@@ -1,206 +1,207 @@
 # ProtoLab
 
-AI-powered invention studio. Describe an invention, watch an engineering agent assemble it from
-real catalog parts, test it in a rigid-body physics simulator, revise it from the measured results,
-explore it in 3D, publish it, and remix it.
+**Generative AI prototyping for mechanical engineering, powered by Meta Muse.**
 
-Featured examples: a walking Muse robot, a mechanical butterfly, a miniature Ferris wheel, a pizza
-catapult and a sideways-scuttling crab (three failed tests, a Muse Wonder diagnosis, then 0.32 m at 4.7°
-tilt), all built live by Muse from the same component library and assembly operations.
+Describe a mechanism in plain English. ProtoLab turns the brief into a connected 3D assembly,
+runs physics tests, and lets Muse revise the design using measured results. Engineers, robotics
+teams, makers, and students can explore mechanisms and compare alternatives before building hardware.
 
-Live: **https://protolab.sean-abc.workers.dev** (Meta Muse via the Meta Model API, builds run on the
-server; `npm run preflight -- --api <url> --web <url>` checks it the way a judge would).
+**[Try the live app](https://protolab.sean-abc.workers.dev)** ·
+**[Watch Muse repair the crab](https://protolab.sean-abc.workers.dev/i/inv_633b4887ad7f4cdc?replay=1&compare=1)** ·
+**[Explore the gallery](https://protolab.sean-abc.workers.dev/gallery)**
 
-One-page pitch for judges: [docs/pitch.md](docs/pitch.md). Demo walkthrough: [docs/demo-script.md](docs/demo-script.md). Submission text: [docs/submission.md](docs/submission.md).
+Built for the Meta Global AI Developer Hackathon.
 
-## Quick start
+[![ProtoLab homepage showing a simulated Ferris wheel and the prompt-to-prototype interface](docs/images/protolab-homepage.png)](https://protolab.sean-abc.workers.dev)
+
+## Try it
+
+Start with a prompt that describes both the mechanism and a measurable goal:
+
+> Build a tabletop windmill with four bright sails on a grounded tower, using up to 12 parts.
+> One motor turns the sails. Measure at least two turns in eight seconds and check that the
+> sails clear the tower and floor.
+
+Select **Build live** to watch parts being selected, the assembly taking shape, and successive
+simulation results. Open a completed prototype to replay its tests, inspect its parts, compare
+revisions, or request a change. Publish a build to share it; gallery visitors can create a remix.
+
+These public examples contain saved assemblies and recorded simulation traces:
+
+| Prototype | What to inspect |
+| --- | --- |
+| [Mechanical crab repair](https://protolab.sean-abc.workers.dev/i/inv_633b4887ad7f4cdc?replay=1&compare=1) | Failed and passing revisions under the same distance and tilt targets. |
+| [ATLAS · six-cylinder machine](https://protolab.sean-abc.workers.dev/i/inv_616e8b95ede04b8d?replay=1&version=ver_52c54f258ec24abf) | 56 components; one motor drives six passive pistons and two flywheels. |
+| [SKYLINE · grand Ferris wheel](https://protolab.sean-abc.workers.dev/i/inv_a2b991c4bb614ee1?replay=1&version=ver_cb8c608abe024f4c) | 60 components; eight hanging cabins remain upright as the wheel turns. |
+| [OCTO · eight-arm camera sculpture](https://protolab.sean-abc.workers.dev/i/inv_5b8d9bc9fa68496b?replay=1&version=ver_d6b56c3fa6a34853) | 54 components; eight articulated arms move through 24 powered joints. |
+| [Gravity Clock](https://protolab.sean-abc.workers.dev/i/inv_a1f1665e649b41c2?replay=1) | Inspect the pendulum, hands, and weight in a mechanical clock prototype. |
+
+## How it works
+
+1. **Plan.** Muse identifies the requested features, moving subassemblies, and measurable success criteria.
+2. **Select or design parts.** Search 157 catalog presets, generate a parametric part, or create custom
+   geometry from primitives, extruded profiles, and revolved profiles.
+3. **Assemble.** Validated JSON tool calls place parts, mate connectors, create joints, and configure
+   actuator drives. The browser shows the parts inventory and a live blueprint/3D assembly.
+4. **Test.** Rapier runs fixed-step rigid-body simulations and records motion, clearance, stability,
+   payload behavior, and motor demand against the declared targets.
+5. **Revise.** Muse receives failure explanations and affected part IDs, changes the geometry or drives,
+   and tests again. Saved versions retain their test definitions and results.
+6. **Review and explore.** Native checks and a separate model review gate a passing finalization.
+   The workbench exposes the evidence, revision history, explanations, and recorded replays.
+
+### Meta Muse's role
+
+- **Muse Spark 1.3** leads planning, part design, assembly, test definition, and revision through the Meta Model API.
+- **Muse Wonder 1.0** is the default engineering specialist after repeated simulation or assembly-validation
+  failures. It diagnoses and attempts a repair before handing control back to Spark. The default threshold is three failures.
+- **A separate final design review**, using Wonder by default, checks the original brief against the placed
+  geometry and native test evidence. Review findings return to the build loop as repair requirements.
+
+Rapier produces the physics measurements; Muse interprets them and chooses design changes.
+The UI and saved version records identify the model used. Model errors and specialist handoffs are visible.
+API keys remain on the server.
+
+### A repair you can inspect
+
+The crab's original target was **at least 25 cm of sideways travel in six seconds, with no more than 10° of tilt**.
+
+| Saved revision | Model | Sideways travel | Peak tilt | Result |
+| --- | --- | ---: | ---: | --- |
+| v3 | Muse Spark 1.3 | 0.27 cm | 14.28° | Failed |
+| v4 | Muse Wonder 1.0 | 31.73 cm | 4.72° | Passed |
+
+Muse revised the leg stance and gait, then ran the same requirements again.
+[Compare both recorded runs in 3D](https://protolab.sean-abc.workers.dev/i/inv_633b4887ad7f4cdc?replay=1&compare=1).
+These measurements describe the saved revisions; new builds are tested independently.
+
+## Simulation scope and provenance
+
+The simulator supports fixed, revolute, prismatic, and spring joints; anchored and free bodies;
+position and velocity drives; and tests for walking, joint motion, rotation, launching, gripping,
+clearance, payload retention, and mechanism timing. It uses a 1/240-second physics step and records
+30 Hz replays. Assembly checks detect unsupported or detached parts, invalid attachments, and
+geometry overlaps. Motor demand is checked against the configured part ratings. Sampled clearance
+checks examine recorded poses; they do not establish continuous collision-free motion.
+
+A passing result means the prototype met its recorded simulation checks. Aerodynamics, combustion,
+fluids, deformation, fatigue, manufacturability, and physical safety require separate validation.
+The Gravity Clock demonstrates mechanical motion; its tests do not establish timekeeping accuracy.
+Fabrication and 3D-print export are not implemented.
+
+The gallery includes **saved Muse builds and eight deterministic reference mechanisms**, such as
+linkage, pump, lift, and indexing examples. Reference mechanisms are labeled `planner` / `deterministic-planner`
+and have real simulation traces. Model provenance distinguishes them from Muse-generated designs.
+Imported external meshes are decorative until engineering data is supplied; licenses and attribution
+are documented in [third-party parts](docs/third-party-parts.md).
+
+## Run locally
+
+Use **Node.js 22.18+** and npm. The scripts use Node's [built-in TypeScript support](https://nodejs.org/en/blog/release/v22.18.0)
+and `node:sqlite`. A Meta Model API key with access to the configured models enables generative builds.
 
 ```bash
-npm install
-cp .env.example .env     # add MODEL_API_KEY from dev.meta.ai to use Meta Muse
-npm run dev              # API on http://localhost:8787, web on http://localhost:5173
+git clone https://github.com/seandmccue/proto-lab.git
+cd proto-lab
+npm ci
+cp .env.example .env
+# Set MODEL_API_KEY in .env, then:
+npm run dev
 ```
 
-On first boot the API seeds four featured gallery items (Muse walker, butterfly, Ferris wheel, pizza
-catapult) by running the real agent through the Meta Model API; each takes a few minutes, and the
-workbench shows the assembly taking shape while it runs. Nothing in the gallery is canned: every card
-opens the actual assembly and simulation trace.
+Open [localhost:5173](http://localhost:5173). The API runs on [localhost:8787](http://localhost:8787).
+On a fresh database, startup queues three example builds (butterfly, Ferris wheel, and catapult)
+and creates the eight reference mechanisms. With a model key configured, startup and example builds make API calls.
 
-## What is real
+Without a key, the UI identifies the deterministic planner. This mode demonstrates a limited
+legged-walker workflow; use Muse for arbitrary mechanical briefs.
 
-- **Components** come from a 100-part library built by 36 parametric generators (frames, plates,
-  beams, rods, brackets, enclosures, curved panels, gears with real teeth, shafts, bearings, wheels,
-  spoked wheels, pulleys, flywheels, hinges, sliders, linkages, cranks, pistons, servos, gearmotors,
-  springs, actuators, shaped left/right wings, winged bodies with built-in flap hinges, propellers,
-  gripper fingers, gondolas, tracks, payloads, trays),
-  plus two CC0 scanned parts from Wikimedia Commons with attribution. Each has mass, dimensions,
-  material, connectors (position, axis, kind) and limits.
-- **Autonomous part generation:** the model can create parametric parts with custom parameters, or
-  design a part from primitives, 2D profiles extruded along an axis, and revolved profiles. The
-  geometry engine validates ranges, computes mass from material density, and builds convex-hull
-  colliders. The model never emits code, only validated JSON. See [docs/geometry-engine.md](docs/geometry-engine.md)
-  for the CadQuery investigation.
-- **Assembly** is a versioned JSON manifest built by generic operations: place, mount at a connector
-  (the child is posed so connectors coincide), connect, mirror/polar/linear patterns, remove, move.
-  There is no builder per invention. The walking robot is built from the same operations.
-- **Simulation** is Rapier (WASM) at a fixed 1/240 s step with anchored bases, free projectiles and
-  payloads, revolute/prismatic/spring joints, position and velocity drives, motor saturation at the
-  catalog rating, and collision events for clearance and ground contact. Tests: motion (amplitude,
-  rate, revolutions, tilt, drift, clearance, upright parts, payload lift and retention), walk, launch,
-  grip. Runs are deterministic.
-- **The agent's procedure** is the ten-step plan: understand → features and motions → sub-assemblies
-  (write_plan) → search the library → design missing parts → assemble and set drives → define
-  measurable tests → simulate → analyse failures and revise → finalize with the behaviours the
-  physics cannot verify listed as "unverified". Every version records which model made each decision.
-- **Automatic assembly review:** `validate_assembly` checks grounded supports, detached parts and
-  rigid joints across empty space. The same review gates simulation, drive sweeps and a passing
-  finalization. Muse receives affected instance IDs, measured gaps and connector poses, and repairs
-  the assembly in the same job; structural rejections do not spend the simulation-test budget.
-  Motion tests also observe elevated members of grounded mechanisms for unexpected floor contact
-  without changing collision masks or authored targets. Loose payloads and intended floor supports
-  remain allowed. Motor-driven propeller groups also receive an automatic material-clearance review
-  against physical parts outside their fixed group at the saved 30 Hz replay poses, including
-  separate stands and omitted test pairs.
-  Intersections report both parts, penetration and time; incomplete audits fail closed. This is
-  sampled geometry verification, not continuous collision detection or airflow simulation.
-  Saved definitions cannot silently lose measured targets, and geometry edits require
-  retesting earlier checks. Passing finalization requires a quantified motion target for every
-  motor-driven propeller group; torque and clearance alone do not verify rotation.
-  Archived replays are preserved; new tests use the current checks.
-- **Watching a build** is part of the product: before the first assembly the workbench shows the
-  stage stepper (plan → parts → assemble → test → revise), the current step with a reasoning timer,
-  and a parts bin where every part Muse finds or designs slides in as a thumbnail; the first assembly
-  drops in one part at a time; after that a build strip, pass/fail toasts for each test and an
-  iteration ribbon (v1 ✗ 0.12 m → v2 ✓ 0.47 m) keep the one-to-three-minute wait legible.
-- **Comparing revisions:** request a change from a saved version. Owners can continue the original
-  invention, and gallery visitors can start their own remix. The workbench keeps the baseline and
-  pairs comparable measurements with the changed parts and the recorded revision.
-- **Not simulated:** aerodynamics, fluids, deformation, fatigue, manufacturability. A butterfly's
-  wings flap with measured stroke and rate; nobody claims it flies.
+### Model and job settings
 
-`npm run preflight` checks the running stack the way a judge would see it: model live, featured builds
-passed, gallery and web serving.
+Set these in the repository-root `.env` for local development:
 
-Production: `npm run build` then `npm start` serves the built web app and the API from one process on
-port 8787 (the Dockerfile does the same; `WEB_DIST` overrides the bundle path).
-
-## Model configuration (Meta Model API)
-
-ProtoLab's engineering agent runs on Meta's Muse models through the
-[Meta Model API](https://dev.meta.ai/docs/overview): OpenAI-compatible chat completions with
-tool calling at `https://api.meta.ai/v1`. Set in `.env` (server-side only; the key never reaches
-the browser):
-
-```
+```dotenv
 MODEL_API_BASE=https://api.meta.ai/v1
-MODEL_ID=muse-spark-1.3          # or muse-spark-1.1, muse-wonder-1.0, ...
-MODEL_API_KEY=<key from dev.meta.ai>
+MODEL_API_KEY=your_meta_api_key
+MODEL_ID=muse-spark-1.3
+MODEL_SPECIALIST_ID=muse-wonder-1.0
+MODEL_SPECIALIST_AFTER=3
+AGENT_TIME_BUDGET_S=1200
 ```
 
-At startup the API runs a live tool-call smoke test and logs the result. The header badge and
-every version record show the exact model id, and the activity log opens with a line naming the
-model. If the model returns an error, the job reports it verbatim; ProtoLab never substitutes
-another model silently. Only when no key is configured does the deterministic planner run, and
-the UI labels it as such. Note: the Meta Model API accepts only `tool_choice: "auto"`.
+An empty `MODEL_SPECIALIST_ID` disables the separate specialist. Builds are bounded by time,
+model-round, tool-call, and simulation-test budgets. Completed versions remain available if a job
+stops; changed assemblies without current test evidence are labeled **Not tested**.
+Build duration varies with the prompt, repairs, queue load, and model latency.
 
-## Two Muse models collaborating
+| Setting | Local default | Checked-in Cloudflare deployment default |
+| --- | --- | --- |
+| Model transport | Chat Completions | `responses-encrypted` |
+| Spark Responses reasoning effort | Unset | `low` |
+| Wonder Responses reasoning effort | Unset | `high` |
+| Concurrent / queued builds | 3 / 12 | 2 / 6 |
 
-Muse Spark 1.3 is the inventor. If three walk tests in a row fail, ProtoLab says "This design
-needs a little more engineering. Bringing in Muse Wonder to help." Muse Wonder 1.0 reads the same
-transcript, diagnoses the mechanical problem, applies one targeted change and runs a test, then
-Spark resumes. The handoff is shown in the activity log and every version records which model made
-its decision. Configure with `MODEL_SPECIALIST_ID` (empty disables) and `MODEL_SPECIALIST_AFTER`.
-The build deadline (`AGENT_TIME_BUDGET_S`, default 20 min) cancels pending model calls and retry delays.
-Completed simulation traces remain available when a build stops before Muse finishes its review.
-Changed, unfinished assemblies are saved as **Not tested** on handled errors and time/round limits;
-they can be resumed without treating older test results as evidence for the new edit.
-New builds run up to `JOB_CONCURRENCY` at a time and accept up to `JOB_MAX_QUEUED` waiting builds.
+`MODEL_TRANSPORT=responses-encrypted` enables encrypted Responses continuation locally;
+`MODEL_TRANSPORT=chat` selects Chat Completions. `MODEL_RESPONSES_REASONING_EFFORT`,
+`MODEL_SPECIALIST_TRANSPORT`, and `MODEL_SPECIALIST_REASONING_EFFORT` configure the corresponding
+model settings. `JOB_CONCURRENCY` and `JOB_MAX_QUEUED` control local job capacity.
+See [the model configuration code](packages/agent/src/llm.ts) and [Cloudflare worker](deploy/cloudflare/worker.js)
+for the full configuration and deployment overrides.
 
-### Build performance experiments
+### Saved creations
 
-The default transport remains Chat Completions. For a local API experiment, set
-`MODEL_TRANSPORT=responses-encrypted` and `MODEL_RESPONSES_REASONING_EFFORT=medium` before starting
-the server. The Responses adapter carries encrypted reasoning between consecutive calls to the same
-model, keeps it out of saved transcripts, and resets that continuation at a model/credential handoff.
-`responses-stored` is also available; it uses provider response IDs and falls back to visible history
-on an explicit expired-ID error. Unset `MODEL_TRANSPORT` to return to the default. These settings are
-not currently forwarded by the Cloudflare production container.
+`DATA_DIR` stores SQLite metadata and the `store/` directory containing manifests, traces, and previews.
+Use an **absolute `DATA_DIR`** when switching launch commands: the default `./data` resolves to
+`apps/api/data` under `npm run dev`, but to repository-root `data` under `npm start`.
+Keep the database and object store together when backing up or moving creations.
 
-One controlled turbine pair reached a passing simulation in 51.87 s with the default settings and
-44.25 s with encrypted Responses at medium effort (total 53.53 s versus 46.19 s). Both passed the same
-six-second, two-turn, ground-clearance and motor-rating checks. Responses used more input tokens and
-more model rounds. This is one run per configuration and changes both transport and effort; it does
-not establish a general speedup. A harder sorter repair reached nine simulations in nine minutes,
-but all deliveries failed. The production default has therefore not changed.
+Ownership uses an anonymous browser session. Private builds and owner-only edits depend on that
+session; public links can be viewed and remixed from another browser.
 
-The shared tool loop reduces avoidable calls through batched part inspection, connector poses
-returned with assembly edits, and ordered assembly/drive/test batches. A rejected setup skips the
-dependent calls in that reply. Failed receiver checks also return a few actual payload positions,
-including the fastest observed fall, to help locate missed transfers without another simulation.
-
-## Generalization benchmark
-
-`node packages/agent/src/bench.ts --general` runs ten inventions through the same engine: butterfly,
-Ferris wheel, Muse walker, pizza catapult, crab, grabbing claw, windmill, drawbridge, crane and a novel
-garden gadget. Latest full pass on the current engine: **10 of 10, median 96 s, 0 API errors, no
-specialist escalation, nine of ten first-try** (windmill 16 s, butterfly 38 s, Ferris wheel 48 s, walker
-81 s at 0.51 m, crane 87 s, catapult 96 s, crab 115 s at 0.39 m, drawbridge 122 s, garden gadget 128 s,
-claw 183 s). A second full pass (v11) went 10 of 10 at median 102 s, and two more on the integration branch that carries the deployed UI (v12, v13) went 10 of 10 at medians of 61 s and 56 s with no specialist consults. Across thirteen passes that is 122 of 130 runs, every miss traced to a measurable cause and
-written into a recipe or an engine rule with a locking test (a direction-only
-walk test, two Wonder 503s now handled by a visible fallback, a missing hexapod recipe, a drawbridge that
-researched a linkage until its time budget ran out); details and per-run tables in
-[docs/benchmark-general.md](docs/benchmark-general.md).
-With the component index in the prompt the fast prompts finish in under 100 s (windmill 54 s, Ferris
-wheel 74 s, butterfly 92 s); the rest run 3–10 min, dominated by Meta Model API round-trips.
-
-## Reliability benchmark
-
-`node packages/agent/src/bench.ts --repeats 4 --concurrency 4` runs five prompts four times each
-through the real models and writes `bench-results/summary.md`. Latest run on the universal engine (see
-[docs/benchmark.md](docs/benchmark.md)): 20 runs, **20 of 20 passed**, 0 API errors, median 81 s,
-40 % of runs made a revision citing a measured result, 40 % failed a walk test and later passed one,
-15 % escalated to Muse Wonder (the pass before: 18 of 20 at 167 s, both misses traced and fixed with
-a measured speed note and a never-re-run-a-passed-test rule). The run before the empty-assistant-message fix is kept in
-[docs/benchmark-run1-before-fix.md](docs/benchmark-run1-before-fix.md) for honesty.
-
-## Layout
-
-```
-apps/web            React + Vite + React Three Fiber + Tailwind
-apps/api            Hono on Node, node:sqlite metadata, local object store (R2 stand-in), job runner
-packages/schema     zod schemas: parts, connectors, instances, joints, controllers, specs, tests, versions
-packages/parts      parametric generators, curated catalog, legged-walker family builder
-packages/simulator  deterministic Rapier harness: walk + dance tests, metrics, 30 Hz trace
-packages/agent      model tool-call loop, validated tool runtime, deterministic planner, revision loop
-```
-
-## Scripts
+## Development and verification
 
 ```bash
-npm run dev          # both servers
-npm run typecheck    # all workspaces
-npm test             # schema/parts/simulator/agent tests (node --test)
-node packages/agent/src/cli.ts "Build a six-legged walking robot and make it dance."
+npm run typecheck
+npm test
+npm run build
+npm start                  # production web app and API on port 8787
 ```
 
-## API
+Check a running deployment without starting a new build:
 
-`POST /api/inventions` · `GET /api/jobs/:id` · `GET /api/inventions/:id` ·
-`GET /api/inventions/:id/versions/:vid[?trace=0]` · `POST /api/inventions/:id/remix` ·
-`POST /api/inventions/:id/follow-up` · `POST /api/inventions/:id/publish` ·
-`POST /api/inventions/:id/preview` · `GET /api/gallery?sort=recent|featured|remixes` ·
-`GET /api/parts` · `POST /api/reports` · `GET /api/model`
+```bash
+npm run preflight -- --api https://protolab.sean-abc.workers.dev --web https://protolab.sean-abc.workers.dev
+```
 
-Ownership is an anonymous session id (`x-session-id`); publishing and follow-ups require it.
-Remix and follow-up accept an optional `versionId` for the saved starting point. New job
-responses include timing from request to plan, assembly and first test, plus cumulative model
-time and API-reported token totals when available.
-Rate limits, idempotency keys, input sanitisation and size limits are in place for the POC.
+The preflight checks the live model status, featured gallery, examples, and web app. Add `--judge`
+for the curated replay and demo checks. A planner-only local setup or a gallery still building its
+initial examples will not satisfy all live-demo checks.
 
-## Deploying to Cloudflare
+The [general benchmark notes](docs/benchmark-general.md) and [walker benchmark notes](docs/benchmark.md)
+record historical experiments and failure analyses. They describe specific engine snapshots;
+results and timings should not be treated as guarantees for new prompts or later releases.
 
-ProtoLab runs as a single Cloudflare Container behind a Worker. Node runs the existing SQLite,
-object store, Rapier, and worker-thread jobs. A private R2 bucket holds a compressed SQLite and
-object-store checkpoint. Every successful mutation and recorded build version is checkpointed.
-The container restores that archive and checks SQLite integrity before serving. The R2 import copy
-is kept separately for recovery. See the [deployment and restore instructions](deploy/cloudflare/README.md).
+## Repository layout
+
+| Directory | Responsibility |
+| --- | --- |
+| `apps/web` | React, Vite, React Three Fiber, and Tailwind; homepage, live build, workbench, gallery, and remix flows. |
+| `apps/api` | Hono on Node; SQLite, stored artifacts, API routes, worker-thread jobs, and checkpoints. |
+| `packages/schema` | Validated definitions for parts, assemblies, controllers, tests, and versions. |
+| `packages/parts` | Catalog presets, parametric geometry, connectors, and assembly operations. |
+| `packages/simulator` | Rapier physics, measurements, structural and clearance checks, and replay traces. |
+| `packages/agent` | Meta model clients, tool execution, design/repair loop, and independent review. |
+| `deploy/cloudflare` | Worker routing, container settings, and private R2 checkpoint handling. |
+
+## Cloudflare deployment
+
+A Cloudflare Worker routes requests to a single container running the API, simulator, and built web app.
+A private R2 checkpoint preserves SQLite metadata, assemblies, simulation traces, and previews across
+container restarts. Restore verifies the checkpoint before serving; successful persisted mutations
+wait for a durable checkpoint. Storage or model errors remain visible to the user.
+
+Follow the [deployment and restore guide](deploy/cloudflare/README.md) to configure the container,
+private R2 bucket, secrets, backup, and recovery. Keep API keys and checkpoint credentials outside Git.
+
+Further documentation: [architecture](docs/architecture.md) · [geometry engine](docs/geometry-engine.md) ·
+[third-party asset attribution](docs/third-party-parts.md).
