@@ -5,6 +5,7 @@ import { baseSpec } from './spec.ts';
 import { ToolRuntime, TOOL_DEFS } from './tools.ts';
 import { runPlanner } from './planner.ts';
 import { catalog } from '@protolab/parts';
+import { reviewDesign, type DesignReview } from './design-review.ts';
 
 /** One line per library part so the model can mount directly instead of spending rounds on search_catalog / get_part. */
 function catalogIndex(): string {
@@ -38,6 +39,8 @@ export type AgentEvent =
 export interface AgentInput {
   prompt: string; inventionId: string; parent?: VersionRecord | null; changeRequest?: string;
   maxIterations?: number; startIteration?: number; model?: ModelConfig | null; specialist?: { model: ModelConfig; after: number } | null;
+  /** Defaults to the specialist (or primary Muse); null isolates deterministic/mock callers. */
+  reviewModel?: ModelConfig | null;
   newVersionId: () => string;
 }
 export interface AgentOutput { versions: VersionRecord[]; status: 'passed' | 'failed' | 'error'; summary: string; modelId: string; spec: Spec }
@@ -74,6 +77,15 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   type PendingVersion = { assembly: Assembly; decision: Decision; log: ToolLogEntry[] };
   let pending: PendingVersion | null = null;
   let currentLog: ToolLogEntry[] = [];
+  const recordLog = (entry: ToolLogEntry) => { currentLog.push(entry); emit({ type: 'tool', entry }); };
+  const flushFinalLog = () => {
+    const last = versions.at(-1);
+    if (!last || !currentLog.length) return;
+    last.toolLog.push(...currentLog);
+    last.spec = rt.spec;
+    currentLog = [];
+    emit({ type: 'version', version: last });
+  };
   let parentId: string | null = input.parent?.id ?? null;
   const inheritedDefinitions = savedTestDefinitions(input.parent);
   const snapshotTestDefinitions = () => {
@@ -109,7 +121,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
     return true;
   };
   const rt = new ToolRuntime(spec, {
-    onLog: (entry) => { currentLog.push(entry); emit({ type: 'tool', entry }); },
+    onLog: recordLog,
     onPlan: (s) => { spec = s; emit({ type: 'spec', spec: s }); },
     onAssembly: (assembly, rationale, basedOn) => {
       const testedThisIteration = versions.length > 0 && versions[versions.length - 1].iteration === iteration;
@@ -156,13 +168,14 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
       }
       recordVersion(pending, [result], result.passed ? 'passed' : 'failed', spec);
     },
-  }, { maxTests: maxIterations + 2, maxToolCalls: 24 + maxIterations * 8 }, savedParent?.assembly, inheritedDefinitions);
+  }, { maxTests: maxIterations + 2, maxToolCalls: 38 + maxIterations * 12 }, savedParent?.assembly, inheritedDefinitions);
 
   try {
-    if (model) await runModelLoop(model, specialist, rt, input, savedParent, emit, maxIterations, (id) => { activeModelId = id; });
+    if (model) await runModelLoop(model, specialist, rt, input, savedParent, emit, maxIterations, (id) => { activeModelId = id; }, recordLog);
     else await runPlanner(rt, spec, { parent: input.parent ?? null, changeRequest: input.changeRequest, maxIterations });
   } catch (e) {
     const checkpoint = checkpointUntested('error', rt.spec);
+    flushFinalLog();
     const message = (e as Error).message + (checkpoint ? ` ${untestedNote}` : '');
     emit({ type: 'error', message });
     return { versions, status: 'error', summary: message, modelId, spec: rt.spec };
@@ -172,6 +185,7 @@ export async function runAgent(input: AgentInput, emit: (e: AgentEvent) => void)
   const summary = (rt.finalized?.summary ?? (status === 'passed' ? 'Design passed its tests.' : 'Prototype did not pass its tests. The design is inspectable; try a change request.')) + (checkpoint ? ` ${untestedNote}` : '');
   // Keep the most recent recorded spec's unverified list in sync with the final statement.
   if (!checkpoint && versions.length) versions[versions.length - 1].spec = rt.spec;
+  flushFinalLog();
   emit({ type: 'done', status, summary, modelId });
   return { versions, status, summary, modelId, spec: rt.spec };
 }
@@ -199,6 +213,9 @@ Rules of thumb:
 - The runtime also watches elevated parts in grounded mechanisms for unexpected ground contact, even when the authored motion test omitted them. Keep every original target and measured instance unchanged during a repair. Geometry changes require rerunning earlier tests on the new assembly; controller-only changes may preserve earlier behavior demonstrations. A pass must reflect the current geometry. Automatic integrity checks supplement the requested behavior, so still test all requested rotor stages, appropriate moving-to-stationary clearances and rated loads.
 - For motor-driven propeller groups, every test also checks blade material against physical parts outside that rotor's fixed group at the recorded 30 Hz poses, including separate stands and pairs omitted from the authored test. Rotor-clearance failures name both parts, penetration depth and time. Inspect these parts, use the blade sweep dimensions, then move or reshape the stationary casing, vanes or brackets with real support and rerun the unchanged test. Keep requested stages and vanes; do not evade this check by relabeling a rotor, marking a connected part free/decor, disabling collisions, removing test targets or reducing the motion. Sampled clearance is not continuous collision verification or airflow simulation.
 - Copy every quantified motion target from the original brief into a test, including its duration and minimum revolutions/rate/amplitude. For example, "at least four turns in twelve seconds" needs duration_s:12 and minRevolutions:4, with every requested driven rotor control measured. Finalization requires a positive motion target for each motor-driven propeller group; incidental rotation during a torque/clearance-only test is insufficient. If an earlier test omitted the target, preserve that measured definition and add a separate named motion test using the original brief's requirement, then run both on the final geometry.
+- Measure a piston or slider stroke with linearTravel.relativeTo set to its housing or guide; the axis is then local to that reference. World travel alone can be a falling or moving frame. Fixed-mounted parts cannot produce relative stroke. For passive wheels, measure off-axis markers with orbits; a motor input alone does not verify every mechanically coupled output. Preserve original tests and add a separately named test for missing coverage.
+- Declare clearancePairs for moving subassemblies against neighboring rims, roofs, casing, supports and other parts that must stay clear. The runtime checks physical members of both fixed groups at the original recorded poses, independently of the joint contact settings. Actual direct joint mates are excluded; separate attached roofs or supports are still checked. Intentional contact mechanisms and payload transfer need appropriate pairs, not a blanket no-contact claim.
+- Before a passed finalization, an independent Muse reviewer checks the original brief against placed geometry and measured targets. Build the requested recognizable features, useful connected parts and dimensions; labels, filler parts or a rewritten plan do not replace missing features. Read any review issues, repair the design and rerun affected original tests. Honest simulation limitations are welcome; do not silently drop a requested capability.
 - For fan or turbine stages, prefer create_part with kind propeller: it provides 2–8 pitched blades on a connected hub. Its params are radius, blades, chord and pitch; color belongs at the top level of create_part. Mount several stages fixed along one driven shaft for a simple cutaway demonstrator; keep the stationary casing and vanes visibly supported with room for the rotating blades.
 - Coordinates: metres, +Y up, ground at y = 0. Place one anchored base for fixed machines (anchored:true) or a chassis for free-standing machines (feet/wheels must touch y = 0). A walker needs legs mounted so feet sit under the hips and a gait profile (swing on hips, lift on knees, swingDuty ≤ 0.25 for a crawl with 4 legs, 0.5 tripod with 6).
 - Mount semantics: {op:"mount", id, part, onto, connector, via, joint}: the child's "via" connector is placed on the parent's "connector", facing it; revolute joints turn about that axis; spin_deg rotates the child about the axis before any motion; offset_m adds clearance. Joint coordinates are 0 at the assembled pose.
@@ -237,7 +254,7 @@ const setupTools = new Set(['write_plan', 'create_part', 'design_part', 'assembl
 const dependentTools = new Set(['run_test', 'sweep_drive', 'finalize_design']);
 const nextPartOrAssembly = 'If a part essential to the requested size, shape, or motion is missing, use create_part or design_part next. Use the returned ID in a later mount. If the required parts are ready, assemble a coherent requested subassembly with its support and moving parts.';
 
-async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, savedParent: VersionRecord | null, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void): Promise<void> {
+async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig; after: number } | null, rt: ToolRuntime, input: AgentInput, savedParent: VersionRecord | null, emit: (e: AgentEvent) => void, maxIterations: number, setActive: (id: string) => void, recordLog: (entry: ToolLogEntry) => void): Promise<void> {
   const savedAssembly = savedParent ? rt.assembly : null;
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(savedParent) },
@@ -248,6 +265,8 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
   const timeBudgetMs = Math.max(60, Number(process.env.AGENT_TIME_BUDGET_S) || 1200) * 1000;
   const deadline = AbortSignal.timeout(timeBudgetMs);
   const started = performance.now();
+  const reviewer = input.reviewModel === undefined ? specialist?.model ?? model : input.reviewModel;
+  const reviewCache = new Map<string, DesignReview>();
   let researchNudged = false;
   let consults = 0, specialistRoundsLeft = 0, failsAtLastConsult = 0;
   const fails = () => { let n = 0; for (const t of [...rt.tests].reverse()) { if (t.passed) break; n++; } return Math.max(n, rt.validationFailures); };
@@ -317,7 +336,34 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
       }
       let args: unknown = {};
       try { args = call.function.arguments ? JSON.parse(call.function.arguments) : {}; } catch { args = { error: 'invalid JSON arguments' }; }
-      const result = await rt.call(name, args);
+      let review: DesignReview | undefined;
+      if (reviewer && name === 'finalize_design' && (args as { status?: string })?.status === 'passed' && !rt.pendingChecks().length) {
+        const latest = [...new Map(rt.tests.map((test) => [test.testId.replace(/#\d+$/, ''), test])).values()];
+        const evidence = {
+          brief: input.changeRequest ? `${input.prompt}\n\nChange request: ${input.changeRequest}` : input.prompt,
+          assembly: rt.assembly, spec: rt.spec, testDefinitions: [...rt.testSpecs.values()], tests: latest,
+        };
+        const signature = JSON.stringify({ ...evidence, tests: latest.map(({ trace: _trace, testId, ...test }) => ({ ...test, testId: testId.replace(/#\d+$/, '') })) });
+        review = reviewCache.get(signature);
+        const cached = !!review;
+        if (!review) {
+          emit({ type: 'status', message: `${prettyModelName(reviewer.model)} is reviewing the complete design against your brief and measured results.` });
+          const reviewStarted = performance.now();
+          try {
+            review = await reviewDesign(evidence, reviewer, { signal: deadline,
+              onRetry: (retry) => emit({ type: 'status', message: `Muse design review is retrying in ${Math.round(retry.delayMs / 1000)} seconds.` }),
+            });
+          } finally {
+            emit({ type: 'model_timing', ms: Math.round(performance.now() - reviewStarted), inputTokens: review?.usage?.prompt_tokens, outputTokens: review?.usage?.completion_tokens });
+          }
+          if (!review.retryable) reviewCache.set(signature, review);
+        }
+        recordLog({ t: new Date().toISOString(), tool: 'review_design', args: { ...review, cached }, ok: review.passed, summary: review.summary });
+        emit({ type: 'status', message: review.passed ? 'Muse design review passed: the requested features and measured behavior are supported.' : `Muse found more work before completion: ${review.issues.map(({ message }) => message).join(' ').slice(0, 500)}` });
+      }
+      const result = review && !review.passed
+        ? { error: 'Independent design review did not pass. Repair the listed gaps, preserve original targets, and rerun affected tests before finalizing.', designReview: review }
+        : await rt.call(name, args);
       if (result && typeof result === 'object' && 'error' in result && (setupTools.has(name) || 'assemblyChecks' in result)) {
         failedSetup = name;
         if ('assemblyChecks' in result) emit({ type: 'status', message: 'Assembly check found unsupported or disconnected parts. Muse is being asked to repair them before simulation.' });
@@ -330,7 +376,7 @@ async function runModelLoop(model: ModelConfig, specialist: { model: ModelConfig
           error: 'Part geometry exceeds the tool reply limit. Request one part at a time or narrow with piece_indices.',
         });
       } else if (name === 'run_test' || name === 'sweep_drive' || name === 'validate_assembly' || name === 'inspect_assembly'
-        || (result && typeof result === 'object' && 'assemblyChecks' in result)) {
+        || (result && typeof result === 'object' && ('assemblyChecks' in result || 'designReview' in result))) {
         // Preserve complete test evidence: cutting JSON can hide a failed target.
         reply = serialized;
       } else if (name === 'assemble' && serialized.length > 5000

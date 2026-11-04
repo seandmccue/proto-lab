@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { receiverChecks, type Spec, type TestSpec, type VersionRecord } from '@protolab/schema';
+import { linearTravelMetricKey, receiverChecks, type Spec, type TestSpec, type VersionRecord } from '@protolab/schema';
 import { STAGES, stageOf, useElapsed } from './ActivityPanel.tsx';
 import PartsBin, { pickedParts } from './PartsBin.tsx';
 import { fmt, type JobEvent, type TestSummary, type VersionMeta } from '../api.ts';
@@ -132,6 +132,8 @@ function latestPhysicsEvent(events: JobEvent[]) {
 export function recordedTestSpec(testId: string, versions: (VersionRecord | null)[]): TestSpec | undefined {
   const id = testId.replace(/#\d+$/, '');
   for (const version of versions) {
+    const saved = version?.testDefinitions?.find((definition) => definition.id === id);
+    if (saved) return saved;
     const entry = version?.toolLog.slice().reverse().find((log) =>
       log.ok && log.tool === 'define_test' && (log.args as { test?: TestSpec } | null)?.test?.id === id);
     if (entry) return (entry.args as { test: TestSpec }).test;
@@ -178,9 +180,11 @@ function testEvidence(metrics: TestSummary['metrics'], definition?: TestSpec) {
       add('Shortest synchronized stroke', metrics.synchronizedMinTravel_m, (value) => `${(value * 1000).toFixed(1)} mm`, sync.minTravel_m, true);
       add('Peak motion spread', metrics.synchronizedMaxSpread_m, (value) => `${(value * 1000).toFixed(2)} mm`, sync.maxSpread_m);
     }
-    for (const { instance, axis, minTravel_m } of definition.measure.linearTravel ?? []) {
+    for (const check of definition.measure.linearTravel ?? []) {
+      const { instance, axis, relativeTo, minTravel_m } = check;
       const name = instance.replace(/[_-]+/g, ' ');
-      add(`${name[0].toUpperCase()}${name.slice(1)} travel`, metrics[`${instance}.travel_${axis}_m`], distance, minTravel_m, true);
+      const reference = relativeTo ? ` relative to ${relativeTo.replace(/[_-]+/g, ' ')} (local ${axis.toUpperCase()})` : '';
+      add(`${name[0].toUpperCase()}${name.slice(1)} travel${reference}`, metrics[linearTravelMetricKey(check)], distance, minTravel_m, true);
     }
   }
   const rotation = Object.entries(metrics).find(([name, value]) => name.endsWith('.revolutions') && value >= .5);

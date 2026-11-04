@@ -1,4 +1,4 @@
-import { receiverChecks } from '@protolab/schema';
+import { linearTravelMetricKey, receiverChecks } from '@protolab/schema';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { measureFollowerTiming } from './follower-timing.ts';
 import { measurePlanarOrbit } from './planar-orbit.ts';
@@ -7,12 +7,14 @@ import { measureEndIn } from './end-in.ts';
 import { auditFixedGeometry, auditStandalonePart, colliderAt, isPhysicalPiece } from './compound-geometry.ts';
 import { inspectAssemblyIntegrity } from './assembly-integrity.ts';
 import { inspectMotorizedPropellers, inspectSampledRotorClearance } from './sampled-rotor-clearance.ts';
+import { inspectSampledClearance } from './sampled-clearance.ts';
 import type { Assembly, Instance, Joint, PartDefinition, TestResult, TestSpec, Trace, Transform, Vec3, Quat, Drive, DriveProfile, Controller } from '@protolab/schema';
 import { compose, invert, quatConj, quatMul, rotate, tiltDeg, transformPoint, sub, len, shapeVolume, norm, dot } from '@protolab/parts';
 
 export type { CompoundGeometryIssue } from './compound-geometry.ts';
 export type { AssemblyIntegrityIssue } from './assembly-integrity.ts';
 export type { SampledRotorClearance, SampledRotorClearanceIssue } from './sampled-rotor-clearance.ts';
+export type { SampledClearance, SampledClearanceIssue } from './sampled-clearance.ts';
 
 export const ENGINE = 'rapier3d-compat 0.14.0, fixed 1/240 s step, 30 Hz trace';
 const DT = 1 / 240;
@@ -80,6 +82,12 @@ export function motorizedPropellerControls(assembly: Assembly): string[] {
 export async function auditSampledRotorClearance(assembly: Assembly, trace: Trace) {
   await initSimulator();
   return inspectSampledRotorClearance(assembly, trace, rigidGroups(assembly));
+}
+
+/** Inspect authored clearance pairs at the original recorded poses. */
+export async function auditSampledClearance(assembly: Assembly, trace: Trace, pairs: readonly (readonly [string, string])[]) {
+  await initSimulator();
+  return inspectSampledClearance(assembly, trace, rigidGroups(assembly), pairs);
 }
 
 /** Flag custom parts whose collision geometry has disconnected regions at rest. */
@@ -214,7 +222,10 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const motionMeasure = test.kind === 'motion' ? test.measure : undefined;
   const uprightTilt = new Map((motionMeasure?.uprightInstances ?? []).map((id) => [id, 0]));
   const linearTravel = (motionMeasure?.linearTravel ?? []).map((target) => ({
-    ...target, coordinate: target.axis === 'x' ? 0 : target.axis === 'y' ? 1 : 2, min: Infinity, max: -Infinity,
+    ...target, coordinate: target.axis === 'x' ? 0 : target.axis === 'y' ? 1 : 2,
+    fixedTogether: target.relativeTo !== undefined && bodyOf.has(target.instance)
+      && bodyOf.get(target.instance) === bodyOf.get(target.relativeTo),
+    min: Infinity, max: -Infinity,
   }));
   const synchronizedTravel = motionMeasure?.synchronizedTravel;
   const liftPayload = motionMeasure?.payload;
@@ -236,7 +247,11 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
     if (baseThreshold && !baseRb) failureReasons.push('A base threshold needs a base instance');
     if (tiltThreshold && !uprightTilt.size) failureReasons.push('An instance tilt threshold needs uprightInstances');
     for (const id of uprightTilt.keys()) if (!instById.has(id)) failureReasons.push(`Upright instance "${id}" not found`);
-    for (const { instance } of linearTravel) if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
+    for (const { instance, relativeTo } of linearTravel) {
+      if (!instById.has(instance)) failureReasons.push(`Travel instance "${instance}" not found`);
+      if (relativeTo !== undefined && !instById.has(relativeTo)) failureReasons.push(`Travel reference "${relativeTo}" not found`);
+      if (relativeTo === instance) failureReasons.push(`Travel instance "${instance}" must differ from its reference`);
+    }
     if (synchronizedTravel) {
       const { instances } = synchronizedTravel;
       if (new Set(instances).size !== instances.length) failureReasons.push('Synchronized travel needs different instances');
@@ -317,7 +332,14 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
   const trackMotionInstances = () => {
     for (const [id, maxTilt] of uprightTilt) uprightTilt.set(id, Math.max(maxTilt, tiltDeg(instancePose(id).rotation)));
     for (const travel of linearTravel) {
-      const position = instancePose(travel.instance).position[travel.coordinate];
+      // Two poses in the same rigid group have exactly zero relative travel.
+      if (travel.fixedTogether) continue;
+      let positionInFrame = instancePose(travel.instance).position;
+      if (travel.relativeTo !== undefined) {
+        const reference = instancePose(travel.relativeTo);
+        positionInFrame = rotate(quatConj(reference.rotation), sub(positionInFrame, reference.position));
+      }
+      const position = positionInFrame[travel.coordinate];
       travel.min = Math.min(travel.min, position);
       travel.max = Math.max(travel.max, position);
     }
@@ -448,10 +470,17 @@ export async function runTest(assembly: Assembly, opts: RunOptions): Promise<Tes
       if (baseRb && c.maxBaseTilt_deg !== undefined && maxTilt > c.maxBaseTilt_deg) failureReasons.push(`Base tilt ${metrics.maxTilt_deg}° exceeds ${c.maxBaseTilt_deg}°`);
       if (baseRb && c.maxBaseDrift_m !== undefined && metrics.baseDisplacement_m > c.maxBaseDrift_m) failureReasons.push(`Base drifted ${metrics.baseDisplacement_m} m > ${c.maxBaseDrift_m} m`);
       if (baseRb && fell) failureReasons.push(`Base fell over at t=${fellAt} s`);
-      for (const { instance, axis, minTravel_m, min, max } of linearTravel) {
-        const travel = max - min;
-        metrics[`${instance}.travel_${axis}_m`] = +travel.toFixed(4);
-        if (travel < minTravel_m) failureReasons.push(`${instance} travelled ${travel.toFixed(3)} m along ${axis}, target ${minTravel_m} m`);
+      for (const check of linearTravel) {
+        const { instance, axis, relativeTo, minTravel_m, fixedTogether, min, max } = check;
+        const travel = fixedTogether ? 0 : max - min;
+        metrics[linearTravelMetricKey(check)] = +travel.toFixed(4);
+        if (travel < minTravel_m) {
+          const direction = relativeTo === undefined ? axis : `${relativeTo}'s local ${axis}`;
+          const failure = `${instance} travelled ${travel.toFixed(3)} m along ${direction}, target ${minTravel_m} m`;
+          failureReasons.push(fixedTogether
+            ? `${failure}. ${instance} is fixed to ${relativeTo}. Choose the moving part or add a joint that lets it move.`
+            : failure);
+        }
       }
       if (synchronizedTravel) {
         const minTravel = Math.min(...syncTracks.map(({ min, max }) => max - min));

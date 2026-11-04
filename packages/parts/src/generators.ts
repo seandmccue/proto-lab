@@ -668,6 +668,70 @@ export const GENERATORS: Record<string, GeneratorInfo & { generate: Gen }> = {
       const g: GeometryPiece[] = [piece({ kind: 'cylinder', radius: p.chord * 0.6, height: p.chord * 0.5, axis: 'z' }, [0, 0, 0], COLORS.steel), piece({ kind: 'cylinder', radius: p.chord * 0.3, height: standoff, axis: 'z' }, [0, 0, -p.chord * 0.25 - standoff / 2], COLORS.steel)]; const prof = profiles.wing(p.radius, p.chord, 'blade');
       for (let i = 0; i < n; i++) { const a = (2 * Math.PI * i) / n; const rot = quatFromAxisAngle([0, 0, 1], a); const pitch = quatFromAxisAngle([Math.cos(a), Math.sin(a), 0], p.pitch); g.push(piece({ kind: 'extrude', profile: prof, depth: 0.002, axis: 'z' }, [Math.cos(a) * p.chord * 0.3, Math.sin(a) * p.chord * 0.3, 0], COLORS.pla, 'blade', (() => { const q1 = rot; const [x, y, z, w] = pitch; const [ax, ay, az, aw] = q1; return [aw * x + ax * w + ay * z - az * y, aw * y - ax * z + ay * w + az * x, aw * z + ax * y - ay * x + az * w, aw * w - ax * x - ay * y - az * z] as [number, number, number, number]; })())); }
       return finish({ id, kind: 'propeller', name: `${n}-blade rotor Ø${mm(p.radius * 2)} mm`, category: 'propellers', description: 'PLA rotor with pitched blades. Aerodynamic thrust is NOT simulated; only rotation and clearance.', params: p, mass_kg: 0.01 + n * p.radius * p.chord * 0.002 * DENSITY.pla, dimensions_m: [p.radius * 2, p.radius * 2, p.chord], material: 'PLA', geometry: g, connectors: [fx('shaft', [0, 0, -p.chord * 0.25 - standoff], [0, 0, -1], 'revolute', 'hub boss; mount onto a motor shaft / axle (the boss stands the blades off the mount)'), fx('front', [0, 0, p.chord * 0.25], [0, 0, 1])], cost_usd: 4 }); } },
+  toothed_scoop: {
+    kind: 'toothed_scoop', name: 'Toothed excavator scoop', category: 'grippers',
+    description: 'Hollow excavator/loader bucket, open toward +X and +Y; Z is width. Rear hinge axis passes through the origin about Z. Mount via hinge on a boom pin; actuator is a separate curl-link pivot. cutting_edge and tooth_*_tip locate the working edge.',
+    params: {
+      width: { min: 0.04, max: 0.4, default: 0.25, unit: 'm', description: 'Outside width across Z' },
+      depth: { min: 0.035, max: 0.4, default: 0.2, unit: 'm', description: 'Floor length along +X before the teeth' },
+      height: { min: 0.03, max: 0.3, default: 0.14, unit: 'm', description: 'Hinge-axis height above the bottom' },
+      thickness: { min: 0.001, max: 0.012, default: 0.004, unit: 'm', description: 'Wall and floor thickness' },
+      teeth: { min: 2, max: 8, default: 5, unit: '', description: 'Number of tapered cutting teeth (integer)' },
+    },
+    generate: (p, id) => {
+      const { width, depth, height, thickness, teeth } = p;
+      if (!Number.isInteger(teeth)) throw new ParamError('Scoop tooth count must be an integer.');
+      if (thickness > Math.min(width / 12, depth / 12, height / 10)) {
+        throw new ParamError('Scoop walls must be at most 1/12 of width and depth, and 1/10 of height, to leave an open cavity.');
+      }
+      const hingeRadius = Math.max(2 * thickness, Math.min(height * 0.12, width * 0.08));
+      const hingeSpan = width * 0.65;
+      const backTop = -hingeRadius * 0.75;
+      const linkRadius = hingeRadius * 0.8;
+      const linkX = -hingeRadius * 2, linkY = -height * 0.4;
+      const webStart = linkX + linkRadius * 0.75;
+      const toothReach = depth * 0.3;
+      const toothPitch = (width - 2 * thickness) / teeth;
+      const cheek: Profile = [[0, -height], [depth, -height], [depth, -height + 2 * thickness],
+        [depth * 0.65, -height * 0.35], [thickness, backTop], [0, backTop]];
+      const barrel = (outer: number, span: number): Shape => ({
+        kind: 'revolve', axis: 'z', segments: 24,
+        profile: [[outer * 0.45, -span / 2], [outer, -span / 2], [outer, span / 2], [outer * 0.45, span / 2]],
+      });
+      const geometry = [
+        piece({ kind: 'box', size: [depth, thickness, width] }, [depth / 2, -height + thickness / 2, 0], COLORS.orange),
+        piece({ kind: 'box', size: [thickness, height + backTop, width] }, [thickness / 2, (-height + backTop) / 2, 0], COLORS.orange),
+        ...[-1, 1].map((side) => piece({ kind: 'extrude', profile: cheek, depth: thickness, axis: 'z' }, [0, 0, side * (width - thickness) / 2], COLORS.orange)),
+        piece(barrel(hingeRadius, hingeSpan), [0, 0, 0], COLORS.aluminium),
+        piece({ kind: 'box', size: [thickness - webStart, linkRadius * 0.9, 2 * thickness] }, [(webStart + thickness) / 2, linkY, 0], COLORS.orange),
+        piece(barrel(linkRadius, 4 * thickness), [linkX, linkY, 0], COLORS.aluminium),
+        piece({ kind: 'box', size: [2 * thickness, 2 * thickness, width] }, [depth - thickness, -height + thickness, 0], COLORS.titanium, 'contact'),
+      ];
+      const connectors: Connector[] = [
+        fx('hinge', [0, 0, -hingeSpan / 2], [0, 0, -1], 'revolute', 'Rear bucket hinge; +X is the open mouth, floor lies below the pivot'),
+        fx('hinge_front', [0, 0, hingeSpan / 2], [0, 0, 1], 'revolute', 'Opposite end of the same rear hinge'),
+        fx('actuator', [linkX, linkY, 2 * thickness], [0, 0, 1], 'revolute', 'Curl linkage pin; attach a separate passive link or actuator'),
+        fx('actuator_back', [linkX, linkY, -2 * thickness], [0, 0, -1], 'revolute', 'Opposite face of the curl linkage pin'),
+        fx('mount', [0, -height * 0.6, 0], [-1, 0, 0], 'fixed', 'Rear surface for a rigid tool mount instead of the hinge'),
+        fx('cutting_edge', [depth, -height + thickness, 0], [1, 0, 0], 'fixed', 'Centre of the physical cutting lip, behind the tooth tips'),
+      ];
+      for (let tooth = 0; tooth < teeth; tooth++) {
+        const z = -(width - 2 * thickness) / 2 + (tooth + 0.5) * toothPitch;
+        geometry.push(piece({ kind: 'extrude', axis: 'z', depth: toothPitch * 0.6,
+          profile: [[depth - 3 * thickness, -height], [depth + toothReach, -height],
+            [depth + toothReach, -height + thickness * 0.35], [depth - 3 * thickness, -height + thickness * 1.8]],
+        }, [0, 0, z], COLORS.titanium, 'contact'));
+        connectors.push(fx(`tooth_${tooth}_tip`, [depth + toothReach, -height + thickness * 0.175, z], [1, 0, 0], 'fixed', 'Point on the cutting tooth; use for measured scoop travel'));
+      }
+      return finish({
+        id, kind: 'toothed_scoop', name: `Toothed scoop ${mm(width)}×${mm(depth)} mm`, category: 'grippers',
+        description: `Open aluminium excavator/loader shovel bucket with ${teeth} teeth, sloped cheeks, bored rear hinge and separate curl-link pivot. No roof or front wall fills the cavity.`,
+        params: p, mass_kg: vol(geometry) * DENSITY.aluminium,
+        dimensions_m: [depth + toothReach - linkX + linkRadius, height + hingeRadius, width],
+        material: 'aluminium', geometry, connectors, cost_usd: 8 + width * depth * 350,
+      });
+    },
+  },
   gripper_finger: { kind: 'gripper_finger', name: 'Gripper finger', category: 'grippers', description: 'Curved claw finger with rubber pad; "root" revolute about Z at the top; finger hangs down −Y and curls toward +X.', params: { length: { min: 0.015, max: 0.3, default: 0.06, unit: 'm', description: 'Length' }, width: { min: 0.004, max: 0.04, default: 0.012, unit: 'm', description: 'Width' }, thickness: { min: 0.002, max: 0.02, default: 0.006, unit: 'm', description: 'Thickness (Z)' } },
     generate: (p, id) => { const g = [piece({ kind: 'extrude', profile: profiles.claw(p.length, p.width, 0.35), depth: p.thickness, axis: 'z' }, [0, 0, 0], COLORS.titanium), piece({ kind: 'box', size: [p.width * 0.6, p.length * 0.25, p.thickness * 1.1] }, [0.35 * p.length * 0.7 + p.width * 0.25, -p.length * 0.8, 0], COLORS.rubber, 'contact')]; return finish({ id, kind: 'gripper_finger', name: `Gripper finger ${mm(p.length)} mm`, category: 'grippers', description: 'Aluminium claw finger with rubber pad.', params: p, mass_kg: vol(g) * DENSITY.aluminium * 0.8, dimensions_m: [p.width + 0.35 * p.length, p.length, p.thickness], material: 'aluminium, rubber pad', geometry: g, connectors: [fx('root', [0, 0, -p.thickness / 2], [0, 0, -1], 'revolute', 'pivot; mount onto a servo horn (curls toward +X when rotated)'), fx('root_front', [0, 0, p.thickness / 2], [0, 0, 1], 'revolute')], cost_usd: 2 }); } },
   gondola: { kind: 'gondola', name: 'Gondola cabin', category: 'misc', description: 'Hanging cabin for a Ferris wheel: "hanger" revolute about Z at the top (so it stays level under gravity).', params: { width: { min: 0.01, max: 0.3, default: 0.04, unit: 'm', description: 'Cabin width' }, height: { min: 0.01, max: 0.3, default: 0.04, unit: 'm', description: 'Cabin height' } },

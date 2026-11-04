@@ -64,6 +64,8 @@ const PRESETS: Preset[] = [
   { id: 'body-butterfly-80', kind: 'insect_body', params: { length: 0.08, radius: 0.008, wingPairs: 1, torque: 0.3 } }, { id: 'body-dragonfly-100', kind: 'insect_body', params: { length: 0.1, radius: 0.006, wingPairs: 2, torque: 0.2 } }, { id: 'body-bird-160', kind: 'insect_body', params: { length: 0.16, radius: 0.02, wingPairs: 1, torque: 0.8 } }, { id: 'sail-blade-300', kind: 'wing', params: { span: 0.3, chord: 0.08, thickness: 0.003, style: 3 } },
   { id: 'propeller-3x200', kind: 'propeller', params: { radius: 0.1, blades: 3, chord: 0.02, pitch: 0.3 } }, { id: 'rotor-4x400', kind: 'propeller', params: { radius: 0.2, blades: 4, chord: 0.04, pitch: 0.25 } }, { id: 'windmill-4x600', kind: 'propeller', params: { radius: 0.3, blades: 4, chord: 0.08, pitch: 0.4 } },
   { id: 'gripper-finger-50', kind: 'gripper_finger', params: { length: 0.05, width: 0.012, thickness: 0.006 } }, { id: 'gripper-finger-90', kind: 'gripper_finger', params: { length: 0.09, width: 0.015, thickness: 0.008 } },
+  { id: 'toothed-scoop-160', kind: 'toothed_scoop', params: { width: 0.16, depth: 0.14, height: 0.09, thickness: 0.003, teeth: 4 } },
+  { id: 'toothed-scoop-250', kind: 'toothed_scoop', params: { width: 0.25, depth: 0.2, height: 0.14, thickness: 0.004, teeth: 5 } },
   { id: 'gondola-40', kind: 'gondola', params: { width: 0.04, height: 0.04 } }, { id: 'gondola-70', kind: 'gondola', params: { width: 0.07, height: 0.06 } },
   { id: 'foot-pad-8', kind: 'foot_pad', params: { radius: 0.008 } }, { id: 'foot-pad-12', kind: 'foot_pad', params: { radius: 0.012 } }, { id: 'foot-pad-16', kind: 'foot_pad', params: { radius: 0.016 } },
   { id: 'track-150', kind: 'track_module', params: { length: 0.15, height: 0.04, width: 0.03 } },

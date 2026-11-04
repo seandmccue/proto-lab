@@ -22,6 +22,13 @@ export function Metrics({ metrics, kind }: { metrics: Record<string, number>; ki
     if (k === 'peakHipTorque_Nm' && metrics.hipServoRating_Nm) { rows.push(['Hip torque', `${fmt.nm(v)} / ${fmt.nm(metrics.hipServoRating_Nm)}`]); continue; }
     if (k === 'peakKneeTorque_Nm' && metrics.kneeServoRating_Nm) { rows.push(['Knee torque', `${fmt.nm(v)} / ${fmt.nm(metrics.kneeServoRating_Nm)}`]); continue; }
     if (k.endsWith('.rating')) continue;
+    const relativeTravel = /^(.+?)\.relativeTo\.(.+)\.travel_([xyz])_m$/.exec(k);
+    if (relativeTravel) {
+      const [, instance, reference, axis] = relativeTravel;
+      const label = `${instance} travel relative to ${reference}`.replace(/[_-]+/g, ' ');
+      rows.push([`${label} (local ${axis.toUpperCase()})`, `${(v * 1000).toFixed(1)} mm`]);
+      continue;
+    }
     if (k.includes('.')) {
       const [j, m] = k.split('.');
       if (m.startsWith('peakTorque') || m.startsWith('peakForce')) { const rating = metrics[`${j}.rating`]; const unit = m.startsWith('peakTorque') ? 'N·m' : 'N'; rows.push([`${j} ${m.startsWith('peakTorque') ? 'torque' : 'force'}`, rating ? `${v.toFixed(3)} / ${rating} ${unit}` : `${v.toFixed(3)} ${unit}`]); continue; }
