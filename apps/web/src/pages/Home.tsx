@@ -89,8 +89,23 @@ export default function Home() {
   const otherRemixes = remixes.filter((item) => item.id !== spotlightId).slice(0, 4);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadFeatured() {
+      const items = new Map<string, InventionPublic>();
+      let cursor = 0;
+      try {
+        while (!cancelled) {
+          const page = await api.gallery('featured', 24, cursor);
+          for (const item of page.items) items.set(item.id, item);
+          if (page.nextCursor === null || page.nextCursor <= cursor) break;
+          cursor = page.nextCursor;
+        }
+      } finally {
+        if (!cancelled) setFeatured([...items.values()]);
+      }
+    }
     api.examples().then((r) => setExamples(r.examples)).catch(() => {});
-    api.gallery('featured', 24).then((r) => setFeatured(r.items)).catch(() => {});
+    void loadFeatured().catch(() => {});
     api.gallery('recent', 24).then((r) => setRecent(r.items.filter((i) => !i.featured))).catch(() => {});
     api.gallery('remixes', 5).then((r) => setRemixes(r.items)).catch(() => {});
     api.mine().then((r) => setMine(r.items)).catch(() => {});
@@ -98,6 +113,7 @@ export default function Home() {
     api.invention('inv_adc081059ea44ab9').then(({ invention }) => {
       if (invention.visibility === 'public' && invention.status === 'passed') setOrrery(invention);
     }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {

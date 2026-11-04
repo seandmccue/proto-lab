@@ -49,10 +49,29 @@ const checks: [string, () => Promise<string>][] = [
     return model.label;
   }],
   ['Featured gallery', async () => {
-    const { items } = await get<{ items: { status: string; title: string }[] }>('/api/gallery?sort=featured&limit=24');
+    const items: { id: string; status: string; title: string }[] = [];
+    const ids = new Set<string>();
+    let cursor: number | null = 0;
+    do {
+      const page: { items: typeof items; nextCursor: number | null } = await get(`/api/gallery?sort=featured&limit=24&cursor=${cursor}`);
+      for (const item of page.items) {
+        if (ids.has(item.id)) throw new Error(`Duplicate featured gallery entry: ${item.id}`);
+        ids.add(item.id);
+        items.push(item);
+      }
+      if (page.nextCursor !== null && (!Number.isInteger(page.nextCursor) || page.nextCursor <= cursor)) {
+        throw new Error('Featured gallery cursor did not advance');
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== null);
     if (items.length < 4) throw new Error(`Expected at least 4 featured inventions, found ${items.length}`);
     const failures = items.filter((item) => item.status !== 'passed');
     if (failures.length) throw new Error(`Featured builds without a pass: ${failures.map(({ title }) => title).join(', ')}`);
+    if (judge) {
+      const required = ['inv_633b4887ad7f4cdc', 'inv_a1f1665e649b41c2', ...largeShowcases.map((entry) => entry.inventionId)];
+      const missing = required.filter((id) => !ids.has(id));
+      if (missing.length) throw new Error(`Curated builds missing from the featured gallery: ${missing.join(', ')}`);
+    }
     return `${items.length} passing builds`;
   }],
   ['Examples', async () => {
